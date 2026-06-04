@@ -23,3 +23,6 @@ captures/
 /dist/
 *.apk
 *.aab
+
+# Local publishing drafts
+docs/WECHAT_UPDATE_*.md
