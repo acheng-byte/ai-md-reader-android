@@ -25,4 +25,5 @@ captures/
 *.aab
 
 # Local publishing drafts
-docs/WECHAT_UPDATE_*.md
+docs/WECHAT*.md
+docs/assets/wechat-cover*.png
