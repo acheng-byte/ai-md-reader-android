@@ -27,3 +27,13 @@ captures/
 # Local publishing drafts
 docs/WECHAT*.md
 docs/assets/wechat-cover*.png
+
+# Local-only handoff / Codex relay notes (NEVER published to GitHub)
+/local/
+
+# iOS — Xcode 工程由 ios/project.yml 通过 `xcodegen generate` 生成
+ios/MDReader.xcodeproj/
+ios/build/
+ios/DerivedData/
+**/xcuserdata/
+*.xcarchive
