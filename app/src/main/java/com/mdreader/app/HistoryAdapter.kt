@@ -7,58 +7,71 @@ import android.view.ViewGroup
 import androidx.recyclerview.widget.RecyclerView
 import com.mdreader.app.databinding.HistoryItemBinding
 
-/** 历史记录列表适配器。可用性由外部异步检测后回填；不可用条目加删除线并显示「已删除」。 */
+/**
+ * 历史记录列表适配器。可访问状态由外部异步检测后回填：
+ * - 已删除（DELETED）：物理文件不存在 -> 加删除线 + 红色「已删除」
+ * - 授权过期（EXPIRED）：文件可能还在但无访问权限（如微信临时授权失效）-> 橙色「授权过期」
+ * 已收藏的条目名称前加 ★。
+ */
 class HistoryAdapter(
     private val items: List<History.Entry>,
+    private val favorites: Set<String>,
     private val onClick: (History.Entry) -> Unit
 ) : RecyclerView.Adapter<HistoryAdapter.VH>() {
 
-    // uri -> 是否可访问；缺省（未检测）按可用处理
-    private val availability = HashMap<String, Boolean>()
+    private val statuses = HashMap<String, DocStatus>()
 
-    fun setAvailability(map: Map<String, Boolean>) {
-        availability.clear()
-        availability.putAll(map)
+    fun setStatuses(map: Map<String, DocStatus>) {
+        statuses.clear()
+        statuses.putAll(map)
         notifyDataSetChanged()
     }
 
-    fun isUnavailable(uri: String): Boolean = availability[uri] == false
+    fun statusOf(uri: String): DocStatus = statuses[uri] ?: DocStatus.AVAILABLE
 
     class VH(val binding: HistoryItemBinding) : RecyclerView.ViewHolder(binding.root)
 
-    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
-        val b = HistoryItemBinding.inflate(LayoutInflater.from(parent.context), parent, false)
-        return VH(b)
-    }
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH =
+        VH(HistoryItemBinding.inflate(LayoutInflater.from(parent.context), parent, false))
 
     override fun getItemCount(): Int = items.size
 
     override fun onBindViewHolder(holder: VH, position: Int) {
         val e = items[position]
         val ctx = holder.binding.root.context
-        val unavailable = isUnavailable(e.uri)
+        val status = statusOf(e.uri)
+        val starred = e.uri in favorites
 
-        holder.binding.itemName.text = e.name
+        holder.binding.itemName.text = if (starred) "★ " + e.name else e.name
+        val strike = status == DocStatus.DELETED
         holder.binding.itemName.paintFlags =
-            if (unavailable) holder.binding.itemName.paintFlags or Paint.STRIKE_THRU_TEXT_FLAG
+            if (strike) holder.binding.itemName.paintFlags or Paint.STRIKE_THRU_TEXT_FLAG
             else holder.binding.itemName.paintFlags and Paint.STRIKE_THRU_TEXT_FLAG.inv()
 
         val rel = DateUtils.getRelativeTimeSpanString(
             e.time, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS
         )
-        if (unavailable) {
-            holder.binding.itemSub.text = ctx.getString(R.string.history_deleted) + " · " + rel
-            holder.binding.itemSub.setTextColor(COLOR_DELETED)
-        } else {
-            holder.binding.itemSub.text = rel
-            holder.binding.itemSub.setTextColor(COLOR_NORMAL)
+        when (status) {
+            DocStatus.AVAILABLE -> {
+                holder.binding.itemSub.text = rel
+                holder.binding.itemSub.setTextColor(COLOR_NORMAL)
+            }
+            DocStatus.EXPIRED -> {
+                holder.binding.itemSub.text = ctx.getString(R.string.history_expired) + " · " + rel
+                holder.binding.itemSub.setTextColor(COLOR_EXPIRED)
+            }
+            DocStatus.DELETED -> {
+                holder.binding.itemSub.text = ctx.getString(R.string.history_deleted) + " · " + rel
+                holder.binding.itemSub.setTextColor(COLOR_DELETED)
+            }
         }
 
         holder.binding.root.setOnClickListener { onClick(e) }
     }
 
     companion object {
-        private const val COLOR_DELETED = 0xFFD32F2F.toInt()
-        private const val COLOR_NORMAL = 0xFF8A8F98.toInt()
+        private const val COLOR_DELETED = 0xFFD32F2F.toInt()  // 红
+        private const val COLOR_EXPIRED = 0xFFE8833A.toInt()  // 橙
+        private const val COLOR_NORMAL = 0xFF8A8F98.toInt()   // 灰
     }
 }

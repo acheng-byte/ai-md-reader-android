@@ -29,4 +29,21 @@
     <string name="history_deleted">已删除</string>
     <string name="history_unavailable">该文档已被删除或无法访问</string>
     <string name="history_cleared">已清空打开历史</string>
+
+    <string name="history_expired">授权过期</string>
+    <string name="toast_expired">打开授权已过期，请重新从来源（如微信）打开</string>
+    <string name="toast_deleted">原文件已被删除，无法打开</string>
+    <string name="opened_from_fav">原文件已不可用，已从收藏夹打开</string>
+
+    <string name="only_md">请选择 Markdown 文件（.md / .markdown）</string>
+
+    <string name="action_favorite">收藏</string>
+    <string name="action_unfavorite">取消收藏</string>
+    <string name="action_favorites">收藏夹</string>
+    <string name="favorites_title">收藏夹</string>
+    <string name="favorites_empty">收藏夹还是空的</string>
+    <string name="fav_need_doc">请先打开一个文档再收藏</string>
+    <string name="fav_added">已收藏，并复制到收藏夹</string>
+    <string name="fav_removed">已取消收藏</string>
+    <string name="fav_failed">收藏失败</string>
 </resources>

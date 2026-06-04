@@ -40,6 +40,7 @@
         try { var b = bridge(); if (b && b.getMarkdown) source = b.getMarkdown() || ''; } catch (e) { source = ''; }
 
         previewEl.innerHTML = md.render(source);
+        addCopyButtons();
 
         codeBlockEl.removeAttribute('data-highlighted');
         codeBlockEl.className = 'language-markdown';
@@ -53,6 +54,40 @@
         recompute();
 
         window.scrollTo(0, 0);
+    }
+
+    // 为预览中的每个代码块加“复制”按钮
+    function addCopyButtons() {
+        var pres = previewEl.querySelectorAll('pre');
+        for (var i = 0; i < pres.length; i++) {
+            (function (pre) {
+                var codeEl = pre.querySelector('code');
+                var text = codeEl ? codeEl.textContent : pre.textContent; // 加按钮前取，避免把按钮文字算进去
+                var btn = document.createElement('button');
+                btn.className = 'copy-btn';
+                btn.type = 'button';
+                btn.textContent = '复制';
+                btn.setAttribute('aria-label', '复制代码');
+                btn.onclick = function (ev) {
+                    ev.stopPropagation();
+                    copyText(text);
+                    btn.textContent = '已复制';
+                    btn.classList.add('copied');
+                    setTimeout(function () {
+                        btn.textContent = '复制';
+                        btn.classList.remove('copied');
+                    }, 1400);
+                };
+                pre.appendChild(btn);
+            })(pres[i]);
+        }
+    }
+
+    function copyText(text) {
+        try {
+            if (window.Android && window.Android.copyText) { window.Android.copyText(text); return; }
+        } catch (e) { /* fallthrough */ }
+        try { if (navigator.clipboard) navigator.clipboard.writeText(text); } catch (e) { /* ignore */ }
     }
 
     function indexHeadings() {
@@ -173,6 +208,27 @@
     function toggleToc() { if (tocOverlay.classList.contains('open')) closeToc(); else openToc(); }
     tocOverlay.onclick = function (ev) { if (ev.target === tocOverlay) closeToc(); };
 
+    // 点击屏幕中央区域（非链接/标题/按钮）调出显示设置（电子书阅读器常见手势）
+    function setupCenterTap() {
+        document.addEventListener('click', function (ev) {
+            if (tocOverlay.classList.contains('open')) return;
+            var t = ev.target;
+            while (t && t !== document.body) {
+                var tag = t.tagName;
+                if (tag === 'A' || tag === 'BUTTON') return;
+                if (t.classList && t.classList.contains('md-h')) return;
+                t = t.parentNode;
+            }
+            var w = window.innerWidth, h = window.innerHeight;
+            if (ev.clientX > w * 0.25 && ev.clientX < w * 0.75 &&
+                ev.clientY > h * 0.28 && ev.clientY < h * 0.72) {
+                try {
+                    if (window.Android && window.Android.onCenterTap) window.Android.onCenterTap();
+                } catch (e) { /* ignore */ }
+            }
+        }, false);
+    }
+
     /* ---------- 设置 / 模式 ---------- */
     function applySettings(s) {
         if (!s) return;
@@ -219,5 +275,6 @@
         }
     } catch (e) { /* 使用默认样式 */ }
 
+    setupCenterTap();
     render();
 })();

@@ -1,5 +1,7 @@
 package com.mdreader.app
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -14,13 +16,15 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.IntentCompat
-import androidx.webkit.WebViewAssetLoader
 import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.webkit.WebViewAssetLoader
 import androidx.webkit.WebViewClientCompat
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.mdreader.app.databinding.ActivityMainBinding
+import com.mdreader.app.databinding.SheetFavoritesBinding
 import com.mdreader.app.databinding.SheetHistoryBinding
 import com.mdreader.app.databinding.SheetSettingsBinding
+import java.io.File
 import kotlin.math.roundToInt
 
 class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
@@ -28,23 +32,30 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
     private lateinit var binding: ActivityMainBinding
     private lateinit var prefs: Prefs
     private lateinit var history: History
+    private lateinit var favorites: Favorites
     private lateinit var webView: WebView
 
     @Volatile private var currentMarkdown: String = ""
     @Volatile private var currentMode: String = Prefs.DEFAULT_MODE
     private var currentTitle: String = ""
+    private var currentUri: String? = null   // 当前文档身份 URI（欢迎页为 null）
     private var pageReady: Boolean = false
 
-    // 系统文件选择器（SAF），无需任何存储权限
+    // 系统文件选择器（SAF），无需任何存储权限；选择后校验仅允许 .md / .markdown
     private val openPicker =
         registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
             if (uri != null) {
-                runCatching {
-                    contentResolver.takePersistableUriPermission(
-                        uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
-                    )
+                val name = FileUtils.displayName(this, uri)
+                if (!isMarkdownAllowed(name)) {
+                    Toast.makeText(this, R.string.only_md, Toast.LENGTH_LONG).show()
+                } else {
+                    runCatching {
+                        contentResolver.takePersistableUriPermission(
+                            uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
+                        )
+                    }
+                    loadDocument(uri)
                 }
-                loadDocument(uri)
             }
         }
 
@@ -52,6 +63,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         super.onCreate(savedInstanceState)
         prefs = Prefs(this)
         history = History(this)
+        favorites = Favorites(this)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         setSupportActionBar(binding.toolbar)
@@ -88,7 +100,6 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
 
             override fun onPageFinished(view: WebView, url: String) {
                 pageReady = true
-                // 页面就绪后统一套用一次内容/模式/样式，确保与定时无关地呈现正确状态
                 renderCurrent()
             }
 
@@ -96,8 +107,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                 view: WebView, request: WebResourceRequest
             ): Boolean {
                 val url = request.url
-                if (url.host == ASSET_HOST) return false // 站内资源放行
-                // 外部链接交给系统（浏览器/对应应用）打开
+                if (url.host == ASSET_HOST) return false
                 return runCatching {
                     startActivity(Intent(Intent.ACTION_VIEW, url))
                     true
@@ -128,7 +138,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             else -> null
         }
         return if (uri != null) {
-            // 尽力持久化读权限，便于之后从历史记录重新打开（仅当来源授权可持久化时生效）
+            // 尽力持久化读权限，便于之后从历史重新打开（仅当来源授权可持久化时生效）
             runCatching {
                 contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
@@ -137,20 +147,33 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         } else false
     }
 
-    private fun loadDocument(uri: Uri) {
+    /**
+     * @param readUri 实际读取内容的 URI（收藏夹打开时为本地副本）
+     * @param displayNameOverride 标题覆盖（收藏/历史已知名称时传入）
+     * @param identityUri 文档身份（用于历史/收藏去重；收藏夹打开时为原始 URI）
+     */
+    private fun loadDocument(
+        readUri: Uri,
+        displayNameOverride: String? = null,
+        identityUri: String = readUri.toString()
+    ) {
         Thread {
             val result = runCatching {
-                val name = FileUtils.displayName(this, uri) ?: getString(R.string.app_name)
-                val text = FileUtils.readText(this, uri)
+                val name = displayNameOverride
+                    ?: FileUtils.displayName(this, readUri)
+                    ?: getString(R.string.app_name)
+                val text = FileUtils.readText(this, readUri)
                 name to text
             }
             runOnUiThread {
                 result.onSuccess { (name, text) ->
                     currentMarkdown = text
                     currentTitle = name
+                    currentUri = identityUri
                     supportActionBar?.title = name
-                    history.add(uri.toString(), name, System.currentTimeMillis())
+                    history.add(identityUri, name, System.currentTimeMillis())
                     renderCurrent()
+                    invalidateOptionsMenu()   // 刷新收藏星标状态
                 }.onFailure { e ->
                     Toast.makeText(
                         this, getString(R.string.open_failed, e.message ?: ""), Toast.LENGTH_LONG
@@ -160,7 +183,6 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         }.start()
     }
 
-    /** 把当前内容/模式/样式推给已就绪的页面；未就绪时由 onPageFinished 统一处理。 */
     private fun renderCurrent() {
         if (!pageReady) return
         js("window.appRender && window.appRender()")
@@ -180,6 +202,12 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
     private fun bgColor(): Int =
         if (prefs.isDark(this)) 0xFF0D1117.toInt() else 0xFFFFFFFF.toInt()
 
+    private fun isMarkdownAllowed(name: String?): Boolean {
+        if (name == null) return true // 无法获知名称时不拦截
+        val n = name.lowercase()
+        return n.endsWith(".md") || n.endsWith(".markdown")
+    }
+
     // ---- 菜单 ----
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
@@ -197,6 +225,11 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                 item.setIcon(R.drawable.ic_preview)
             }
         }
+        menu.findItem(R.id.action_favorite)?.let { item ->
+            val fav = currentUri?.let { favorites.isFavorite(it) } == true
+            item.setIcon(if (fav) R.drawable.ic_star else R.drawable.ic_star_border)
+            item.setTitle(if (fav) R.string.action_unfavorite else R.string.action_favorite)
+        }
         return super.onPrepareOptionsMenu(menu)
     }
 
@@ -213,8 +246,12 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             toggleMode()
             true
         }
-        R.id.action_settings -> {
-            showSettings()
+        R.id.action_favorite -> {
+            toggleFavorite()
+            true
+        }
+        R.id.action_favorites -> {
+            showFavorites()
             true
         }
         R.id.action_history -> {
@@ -229,6 +266,55 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         prefs.viewMode = currentMode
         js("window.appSetMode && window.appSetMode('$currentMode')")
         invalidateOptionsMenu()
+    }
+
+    // ---- 收藏 ----
+
+    private fun toggleFavorite() {
+        val id = currentUri
+        if (id == null) {
+            Toast.makeText(this, R.string.fav_need_doc, Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (favorites.isFavorite(id)) {
+            favorites.remove(id)
+            Toast.makeText(this, R.string.fav_removed, Toast.LENGTH_SHORT).show()
+        } else {
+            val ok = favorites.add(id, currentTitle, currentMarkdown.toByteArray(Charsets.UTF_8)) != null
+            Toast.makeText(this, if (ok) R.string.fav_added else R.string.fav_failed, Toast.LENGTH_SHORT).show()
+        }
+        invalidateOptionsMenu()
+    }
+
+    private fun showFavorites() {
+        val sheet = SheetFavoritesBinding.inflate(layoutInflater)
+        val favs = favorites.all().toMutableList()
+        val dialog = BottomSheetDialog(this)
+        dialog.setContentView(sheet.root)
+
+        fun refreshEmpty() {
+            val empty = favs.isEmpty()
+            sheet.favEmpty.visibility = if (empty) View.VISIBLE else View.GONE
+            sheet.favList.visibility = if (empty) View.GONE else View.VISIBLE
+        }
+        refreshEmpty()
+
+        val adapter = FavoritesAdapter(
+            favs,
+            onOpen = { fav ->
+                dialog.dismiss()
+                loadDocument(Uri.fromFile(favorites.fileOf(fav)), fav.name, fav.uri)
+            },
+            onRemove = { fav ->
+                favorites.remove(fav.uri)
+                if (currentUri == fav.uri) invalidateOptionsMenu()
+                Toast.makeText(this, R.string.fav_removed, Toast.LENGTH_SHORT).show()
+                refreshEmpty()
+            }
+        )
+        sheet.favList.layoutManager = LinearLayoutManager(this)
+        sheet.favList.adapter = adapter
+        dialog.show()
     }
 
     // ---- 显示设置底部面板 ----
@@ -312,22 +398,18 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         } else {
             sheet.historyEmpty.visibility = View.GONE
             sheet.historyList.visibility = View.VISIBLE
+            val favSet = favorites.all().map { it.uri }.toHashSet()
             lateinit var adapter: HistoryAdapter
-            adapter = HistoryAdapter(entries) { entry ->
-                if (adapter.isUnavailable(entry.uri)) {
-                    Toast.makeText(this, R.string.history_unavailable, Toast.LENGTH_SHORT).show()
-                } else {
-                    dialog.dismiss()
-                    loadDocument(Uri.parse(entry.uri))
-                }
+            adapter = HistoryAdapter(entries, favSet) { entry ->
+                onHistoryEntryClicked(entry, adapter.statusOf(entry.uri), dialog)
             }
             sheet.historyList.layoutManager = LinearLayoutManager(this)
             sheet.historyList.adapter = adapter
-            // 后台检测每条记录是否仍可访问（被删除 / 权限丢失 -> 标注「已删除」）
+            // 后台逐条检测状态（可用 / 授权过期 / 已删除）
             Thread {
-                val map = HashMap<String, Boolean>(entries.size)
-                entries.forEach { map[it.uri] = isAccessible(Uri.parse(it.uri)) }
-                runOnUiThread { adapter.setAvailability(map) }
+                val map = HashMap<String, DocStatus>(entries.size)
+                entries.forEach { map[it.uri] = statusOf(it.uri) }
+                runOnUiThread { adapter.setStatuses(map) }
             }.start()
         }
 
@@ -340,17 +422,46 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         dialog.show()
     }
 
-    private fun isAccessible(uri: Uri): Boolean = try {
-        when (uri.scheme) {
-            "file" -> uri.path?.let { java.io.File(it).exists() } ?: false
-            else -> contentResolver.openInputStream(uri)?.use { true } ?: false
+    private fun onHistoryEntryClicked(entry: History.Entry, status: DocStatus, dialog: BottomSheetDialog) {
+        if (status == DocStatus.AVAILABLE) {
+            dialog.dismiss()
+            loadDocument(Uri.parse(entry.uri), entry.name, entry.uri)
+            return
         }
-    } catch (e: Exception) {
-        false
+        // 不可用：若已收藏，则从收藏夹的本地副本打开；否则按状态友好提示
+        val fav = favorites.find(entry.uri)
+        if (fav != null) {
+            dialog.dismiss()
+            Toast.makeText(this, R.string.opened_from_fav, Toast.LENGTH_SHORT).show()
+            loadDocument(Uri.fromFile(favorites.fileOf(fav)), fav.name, fav.uri)
+        } else {
+            val msg = if (status == DocStatus.EXPIRED) R.string.toast_expired else R.string.toast_deleted
+            Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    /** 区分 已删除（物理文件不存在）与 授权过期（无访问权限，如微信临时授权失效）。 */
+    private fun statusOf(uriStr: String): DocStatus {
+        val uri = Uri.parse(uriStr)
+        if (uri.scheme == "file") {
+            return if (uri.path?.let { File(it).exists() } == true) DocStatus.AVAILABLE else DocStatus.DELETED
+        }
+        val hasPerm = contentResolver.persistedUriPermissions.any { it.uri == uri && it.isReadPermission }
+        return try {
+            val stream = contentResolver.openInputStream(uri)
+            if (stream != null) {
+                stream.close()
+                DocStatus.AVAILABLE
+            } else if (hasPerm) DocStatus.DELETED else DocStatus.EXPIRED
+        } catch (e: SecurityException) {
+            DocStatus.EXPIRED                 // 明确的权限问题 -> 授权过期
+        } catch (e: Exception) {
+            if (hasPerm) DocStatus.DELETED    // 有持久权限却打不开 -> 文件已删除
+            else DocStatus.EXPIRED            // 无持久权限 -> 授权过期/丢失
+        }
     }
 
     override fun onDestroy() {
-        // 释放 WebView，避免泄漏
         binding.webview.apply {
             (parent as? android.view.ViewGroup)?.removeView(this)
             destroy()
@@ -362,8 +473,8 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
     override fun markdown(): String = currentMarkdown
     override fun settingsJson(): String = prefs.settingsJson(this)
     override fun initialMode(): String = currentMode
+
     override fun onModeChanged(mode: String) {
-        // JS 自行切换了模式（如目录跳转时从源码切回预览），同步原生状态与菜单图标
         runOnUiThread {
             if (mode == "preview" || mode == "code") {
                 currentMode = mode
@@ -371,6 +482,20 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                 invalidateOptionsMenu()
             }
         }
+    }
+
+    override fun copyText(text: String) {
+        runOnUiThread {
+            runCatching {
+                getSystemService(ClipboardManager::class.java)
+                    ?.setPrimaryClip(ClipData.newPlainText("code", text))
+            }
+        }
+    }
+
+    override fun onCenterTap() {
+        // 点击正文中央区域唤出显示设置（电子书阅读器常见手势）
+        runOnUiThread { showSettings() }
     }
 
     companion object {
@@ -384,9 +509,10 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
 
 ## 怎么用
 
-- 点击右上角 **📂 打开**，选择手机里的 `.md` 文件
-- 点击 **源码 / 预览** 在两种呈现方式间切换
-- 点击 **显示设置**，拖动滑块调节 **字号 / 行间距 / 段间距**，并可切换浅色/深色
+- 点击 **目录** 唤出大纲，点击标题快速跳转
+- 点击 **源码 / 预览** 在两种呈现方式间切换；预览模式点击标题可折叠/展开
+- **点击屏幕中央** 调出「显示设置」（字号 / 行距 / 段距 / 主题）
+- 顶部可一键 **收藏** 当前文档；**⋮** 里可打开 **收藏夹** 与 **打开历史**
 - 在微信里长按 `.md` 文件 →「用其他应用打开」→ 选择「MD阅读器」
 
 ## 支持的语法示例
@@ -409,7 +535,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
 
 ### 代码
 
-行内代码 `val x = 1`，以及代码块：
+行内代码 `val x = 1`，以及代码块（右上角可一键复制）：
 
 ```kotlin
 fun main() {

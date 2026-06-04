@@ -4,6 +4,9 @@ import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
 
+/** 历史文档的可访问状态：可用 / 授权过期（如微信临时授权失效）/ 已删除（物理文件不存在）。 */
+enum class DocStatus { AVAILABLE, EXPIRED, DELETED }
+
 /** 打开历史记录存储（SharedPreferences 内存一个 JSON 数组，按最近打开排序，去重，限量）。 */
 class History(context: Context) {
 
