@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- 上传 TestFlight / App Store 用。teamID 由发布者填入自己的 Team ID。
+         若新版 Xcode 提示 method 取值，可改为 app-store-connect。 -->
+    <key>method</key>
+    <string>app-store</string>
+    <key>destination</key>
+    <string>export</string>
+    <key>signingStyle</key>
+    <string>automatic</string>
+    <key>teamID</key>
+    <string>YOUR_TEAM_ID</string>
+    <key>uploadSymbols</key>
+    <true/>
+    <key>stripSwiftSymbols</key>
+    <true/>
+</dict>
+</plist>
