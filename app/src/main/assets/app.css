@@ -96,12 +96,11 @@ body[data-mode="code"] #code { display: block; }
 .markdown-body .md-h.collapsible::before {
     content: '\25BE';            /* ▾ 展开 */
     display: inline-block;
-    width: 0.9em;
-    margin-left: -1.05em;        /* 箭头悬挂在文字左侧，不占用文字缩进 */
-    color: var(--muted);
-    font-size: 0.7em;
+    width: 1em;
+    margin-right: 0.3em;         /* 内联在标题文字前，不悬挂到左边缘，避免曲面屏裁切 */
+    color: var(--link);          /* 用主题色，更醒目 */
+    font-size: 0.85em;           /* 比正文标题略小但明显放大 */
     vertical-align: middle;
-    transition: transform .12s ease;
 }
 .markdown-body .md-h.collapsible.collapsed::before {
     content: '\25B8';            /* ▸ 收起 */
@@ -153,6 +152,32 @@ body[data-mode="code"] #code { display: block; }
     border-radius: 0;
     font-size: 0.86em;
     white-space: pre;
+}
+
+/* 代码块复制按钮 */
+.markdown-body pre { position: relative; }
+.markdown-body pre > .copy-btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    padding: 3px 10px;
+    font-size: 12px;
+    line-height: 1.5;
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: var(--fg);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    opacity: 0.82;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+.markdown-body pre > .copy-btn:active { opacity: 1; }
+.markdown-body pre > .copy-btn.copied {
+    color: #ffffff;
+    background: var(--link);
+    border-color: var(--link);
+    opacity: 1;
 }
 
 .markdown-body table {
