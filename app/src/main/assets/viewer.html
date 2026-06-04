@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
+    <link id="hljs-light" rel="stylesheet" href="lib/hljs-github.min.css">
+    <link id="hljs-dark" rel="stylesheet" href="lib/hljs-github-dark.min.css">
+    <link rel="stylesheet" href="app.css">
+    <script src="lib/markdown-it.min.js"></script>
+    <script src="lib/highlight.min.js"></script>
+</head>
+<body data-mode="preview">
+    <!-- 预览模式容器 -->
+    <div id="preview" class="markdown-body"></div>
+    <!-- 源码模式容器 -->
+    <pre id="code" class="code-view"><code class="language-markdown"></code></pre>
+
+    <!-- 目录侧滑面板 -->
+    <div id="toc-overlay" class="toc-overlay">
+        <div class="toc-panel">
+            <div class="toc-header">目录</div>
+            <div id="toc-empty" class="toc-empty" style="display:none">本文档没有标题，无法生成目录</div>
+            <nav id="toc-list" class="toc-list"></nav>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

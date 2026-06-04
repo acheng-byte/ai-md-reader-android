@@ -1,0 +1,25 @@
+.gradle/
+build/
+app/build/
+
+# Local Android / IDE state
+/local.properties
+.idea/
+*.iml
+captures/
+.DS_Store
+.cursorindexingignore
+.specstory/
+
+# Signing material must never be committed. Use your own local keystore.
+/keystore/
+*.keystore
+*.jks
+*.p12
+*.pem
+*.key
+
+# Build outputs are distributed through GitHub Releases, not tracked in git.
+/dist/
+*.apk
+*.aab

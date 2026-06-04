@@ -1,0 +1,36 @@
+name: Feature request
+description: 提议一个轻量、移动端友好的新能力
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: scenario
+    attributes:
+      label: 使用场景
+      description: 你在什么情况下需要这个能力？尤其欢迎 AI 生成 Markdown 的真实场景。
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 希望的解决方式
+      description: 说说你希望应用怎么做。
+    validations:
+      required: true
+  - type: dropdown
+    id: weight
+    attributes:
+      label: 对轻量性的影响
+      options:
+        - 应该很轻
+        - 可能增加一点复杂度
+        - 需要明显评估包体或性能
+    validations:
+      required: false
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 其他方案
+      description: 如果你已经试过其他工具或绕法，也可以写在这里。
+    validations:
+      required: false

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">MD阅读器</string>
+    <string name="open_with_label">用 MD阅读器 打开</string>
+
+    <string name="action_open">打开</string>
+    <string name="action_view_code">源码</string>
+    <string name="action_view_preview">预览</string>
+    <string name="action_settings">显示设置</string>
+
+    <string name="settings_title">显示设置</string>
+    <string name="label_font">字号</string>
+    <string name="label_line">行间距</string>
+    <string name="label_para">段间距</string>
+    <string name="label_theme">主题</string>
+    <string name="theme_system">跟随系统</string>
+    <string name="theme_light">浅色</string>
+    <string name="theme_dark">深色</string>
+    <string name="reset_default">恢复默认</string>
+
+    <string name="val_font">%1$d px</string>
+    <string name="open_failed">打开失败：%1$s</string>
+
+    <string name="action_toc">目录</string>
+    <string name="action_history">打开历史</string>
+    <string name="history_title">打开历史</string>
+    <string name="history_empty">暂无打开历史</string>
+    <string name="history_clear">清空</string>
+    <string name="history_deleted">已删除</string>
+    <string name="history_unavailable">该文档已被删除或无法访问</string>
+    <string name="history_cleared">已清空打开历史</string>
+</resources>
