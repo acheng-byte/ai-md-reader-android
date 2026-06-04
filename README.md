@@ -2,9 +2,26 @@
 
 一款为 AI 时代准备的轻量级 Android Markdown 阅读器。
 
+[![Latest release](https://img.shields.io/github/v/release/mizzlelover/ai-md-reader-android?label=latest)](https://github.com/mizzlelover/ai-md-reader-android/releases/latest)
+[![Android CI](https://github.com/mizzlelover/ai-md-reader-android/actions/workflows/android-ci.yml/badge.svg)](https://github.com/mizzlelover/ai-md-reader-android/actions/workflows/android-ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+![MD阅读器 v1.3：手机 Markdown 阅读、目录、收藏、代码复制与显示设置](docs/assets/readme-hero-v1.3.png)
+
 现在越来越多内容从 AI 对话、代码助手、知识库、会议纪要和自动化工作流里直接产出为 Markdown。电脑上阅读很方便，但手机上常常缺一个足够轻、足够直接、能从微信和文件管理器顺手打开 `.md` 的本地阅读器。**MD阅读器**解决的就是这个小而高频的痛点：把 Markdown 文件在手机上安静、清楚、离线地读起来。
 
 项目由 **谁是专家** 发起并完全开源，目标是在保持轻量级的前提下，逐步补齐 AI 辅助编码与 AI 内容消费中的高频场景。
+
+## 最新版本 v1.3
+
+v1.3 重点打磨“阅读时最常用的动作”，让手机上读 Markdown 更顺手：
+
+- **收藏常显**：工具栏直接显示收藏 / 取消收藏星标，重要文档一键保留。
+- **工具栏更清楚**：常显入口调整为目录、源码 / 预览切换、收藏、更多菜单，把阅读高频动作放到手边。
+- **显示设置更自然**：点击屏幕中央区域即可唤出字号、行间距、段间距和主题设置。
+- **折叠箭头更适合小屏**：标题折叠箭头改为内联到标题前，避免贴边裁切，也更容易识别。
+
+[下载 v1.3 APK](https://github.com/mizzlelover/ai-md-reader-android/releases/download/v1.3/MDReader-1.3.apk) · [查看 v1.3 Release](https://github.com/mizzlelover/ai-md-reader-android/releases/tag/v1.3)
 
 ## 核心定位
 
