@@ -43,6 +43,17 @@ adb install -r app/build/outputs/apk/release/app-release.apk
 
 说明：仓库不跟踪 APK、AAB、keystore 等二进制发布物和签名材料。源码归源码，安装包通过 Releases 分发。
 
+## 版本更新
+
+| 版本 | 类型 | 更新重点 |
+| --- | --- | --- |
+| [v1.3](https://github.com/mizzlelover/ai-md-reader-android/releases/tag/v1.3) | 最新版本 | 收藏 / 取消收藏移至工具栏常显；工具栏调整为目录、源码 / 预览、收藏、更多菜单；显示设置改为点击屏幕中央唤出；标题折叠箭头改为内联并使用主题色 |
+| [v1.2](https://github.com/mizzlelover/ai-md-reader-android/releases/tag/v1.2) | 历史记录 | 预览代码块新增一键复制；打开文件时仅允许 `.md` / `.markdown`；打开历史区分“授权过期”和“已删除”；新增收藏夹，收藏后复制到应用私有目录 |
+| [v1.1](https://github.com/mizzlelover/ai-md-reader-android/releases/tag/v1.1) | 首个 GitHub 开源发布版 | 新增文档目录、标题折叠 / 展开、打开历史；保留源码 / 预览切换、字号 / 行距 / 段距、明暗主题等基础阅读能力 |
+| [v1.0](https://github.com/mizzlelover/ai-md-reader-android/releases/tag/v1.0) | 历史记录 | 首个可安装版本；支持本地 Markdown 打开、源码 / 预览切换、从微信等应用“用其他应用打开”、基础排版调节和主题切换 |
+
+完整版本记录见 [CHANGELOG.md](CHANGELOG.md)，每版详细说明见 [GitHub Releases](https://github.com/mizzlelover/ai-md-reader-android/releases)。
+
 ## 使用方式
 
 1. 工具栏（右上）常显四项：目录、源码 / 预览切换、收藏切换、更多菜单（⋮）。
