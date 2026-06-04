@@ -1,0 +1,50 @@
+name: Bug report
+description: 报告打开、阅读、渲染或兼容性问题
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: 问题描述
+      description: 简短说明发生了什么。
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 请写清楚如何触发问题。
+      placeholder: |
+        1. 从微信打开 .md 文件
+        2. 切换到预览模式
+        3. 点击目录
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: 手机型号与 Android 版本
+      placeholder: 例如 Pixel 8 / Android 15
+    validations:
+      required: false
+  - type: dropdown
+    id: source
+    attributes:
+      label: 文件来源
+      options:
+        - 应用内文件选择器
+        - 微信
+        - 文件管理器
+        - QQ
+        - 邮件
+        - 其他
+    validations:
+      required: false
+  - type: textarea
+    id: markdown
+    attributes:
+      label: 可公开的 Markdown 样例
+      description: 请不要粘贴敏感内容。可以提供脱敏后的最小样例。
+    validations:
+      required: false
