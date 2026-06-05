@@ -14,7 +14,7 @@ object FileUtils {
             ?: throw IOException("无法打开文件输入流")
         var text = bytes.toString(Charsets.UTF_8)
         // 去除 UTF-8 BOM
-        if (text.isNotEmpty() && text[0] == '﻿') text = text.substring(1)
+        if (text.isNotEmpty() && text[0] == '\uFEFF') text = text.substring(1)
         return text
     }
 

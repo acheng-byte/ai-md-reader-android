@@ -6,10 +6,10 @@
 
 Android 版本号来源是 `app/build.gradle.kts`，每次发版需同时递增两个字段：
 
-- `versionName`：展示版本（如 `1.3`），用于 Git 标签与 Release 标题。
-- `versionCode`：整数，单调递增（如 `4`），用于 Android 升级判定。
+- `versionName`：展示版本（如 `1.4`），用于 Git 标签与 Release 标题。
+- `versionCode`：整数，单调递增（如 `5`），用于 Android 升级判定。
 
-当前最新：`versionName = "1.3"`，`versionCode = 4`。
+当前最新：`versionName = "1.4"`，`versionCode = 5`。
 
 iOS 版本号来源是 `ios/project.yml`：
 
@@ -23,7 +23,7 @@ iOS 归档 / TestFlight 前，还需配置 `DEVELOPMENT_TEAM`、Bundle ID 和签
 1. `CHANGELOG.md`：在顶部新增 `## vX.Y - 日期` 条目。
 2. `docs/RELEASE_NOTES_vX.Y.md`：新建当版发布说明（参照已有的 `RELEASE_NOTES_v1.1/1.2/1.3.md` 格式：本次更新 / 安装 / 说明）。
 3. `docs/ROADMAP.md`：把已交付项移入“已完成”，并维护“近期方向”。
-4. `README.md`：若功能、交互或平台状态有变化，同步“功能特性 / 使用方式 / 平台状态”。
+4. `README.md`：若功能、交互或平台状态有变化，同步“最新版本 / 功能特性 / 使用方式 / 平台状态”，必要时更新 README 首屏图。
 5. 如需公众号 / 社媒发布，文案只放本地草稿区，不提交到开源仓库。
 
 ## 构建“可分发”的签名 APK（务必本地构建）
