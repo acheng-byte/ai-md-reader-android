@@ -46,4 +46,9 @@
     <string name="fav_added">已收藏，并复制到收藏夹</string>
     <string name="fav_removed">已取消收藏</string>
     <string name="fav_failed">收藏失败</string>
+
+    <string name="action_share">转发</string>
+    <string name="share_chooser_title">转发 / 分享到…</string>
+    <string name="share_empty">没有可转发的内容</string>
+    <string name="share_failed">转发失败：%1$s</string>
 </resources>

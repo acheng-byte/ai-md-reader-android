@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- 转发分享用的临时文件目录（应用缓存内） -->
+    <cache-path name="shared" path="shared/" />
+</paths>

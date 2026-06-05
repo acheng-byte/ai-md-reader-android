@@ -16,6 +16,7 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.IntentCompat
+import androidx.core.content.FileProvider
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.webkit.WebViewAssetLoader
 import androidx.webkit.WebViewClientCompat
@@ -25,6 +26,7 @@ import com.mdreader.app.databinding.SheetFavoritesBinding
 import com.mdreader.app.databinding.SheetHistoryBinding
 import com.mdreader.app.databinding.SheetSettingsBinding
 import java.io.File
+import java.util.Locale
 import kotlin.math.roundToInt
 
 class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
@@ -234,6 +236,10 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean = when (item.itemId) {
+        R.id.action_share -> {
+            shareCurrentDocument()
+            true
+        }
         R.id.action_open -> {
             openPicker.launch(arrayOf("*/*"))
             true
@@ -266,6 +272,48 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         prefs.viewMode = currentMode
         js("window.appSetMode && window.appSetMode('$currentMode')")
         invalidateOptionsMenu()
+    }
+
+    // ---- 转发 / 分享 ----
+
+    /**
+     * 把当前正文以 .md 文件形式通过系统分享面板转发（微信/QQ 等）。
+     * 内容写入缓存目录，经 FileProvider 暴露为 content:// 并授予临时读权限；
+     * 选择微信后由微信自身的“发送给朋友”选择联系人（系统能力，无法绕过其选人界面）。
+     */
+    private fun shareCurrentDocument() {
+        if (currentUri == null || currentMarkdown.isEmpty()) {
+            Toast.makeText(this, R.string.share_empty, Toast.LENGTH_SHORT).show()
+            return
+        }
+        try {
+            val dir = File(cacheDir, "shared").apply { mkdirs() }
+            dir.listFiles()?.forEach { it.delete() }   // 清理旧的临时文件，目录内只保留本次
+            val name = shareFileName(currentTitle)
+            val file = File(dir, name)
+            file.writeText(currentMarkdown, Charsets.UTF_8)
+
+            val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+            val send = Intent(Intent.ACTION_SEND).apply {
+                type = "*/*"                       // .md 无标准 MIME，用 */* 让微信按文件接收
+                putExtra(Intent.EXTRA_STREAM, uri)
+                putExtra(Intent.EXTRA_SUBJECT, name)
+                putExtra(Intent.EXTRA_TITLE, name)
+                clipData = ClipData.newUri(contentResolver, name, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(Intent.createChooser(send, getString(R.string.share_chooser_title)))
+        } catch (e: Exception) {
+            Toast.makeText(this, getString(R.string.share_failed, e.message ?: ""), Toast.LENGTH_LONG).show()
+        }
+    }
+
+    /** 由文档标题生成合法的 .md 文件名。 */
+    private fun shareFileName(title: String): String {
+        var base = title.trim().ifEmpty { "document" }
+        base = base.replace(Regex("[\\\\/:*?\"<>|\\r\\n]"), "_")
+        if (!base.endsWith(".md", true) && !base.endsWith(".markdown", true)) base += ".md"
+        return base
     }
 
     // ---- 收藏 ----
@@ -373,8 +421,8 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
 
     private fun updateLabels(sheet: SheetSettingsBinding) {
         sheet.valFont.text = getString(R.string.val_font, prefs.fontSize.roundToInt())
-        sheet.valLine.text = String.format("%.1f", prefs.lineHeight)
-        sheet.valPara.text = String.format("%.1f", prefs.paraGap)
+        sheet.valLine.text = String.format(Locale.ROOT, "%.1f", prefs.lineHeight)
+        sheet.valPara.text = String.format(Locale.ROOT, "%.1f", prefs.paraGap)
     }
 
     private fun snap(v: Float, min: Float, max: Float, step: Float): Float {
@@ -512,7 +560,8 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
 - 点击 **目录** 唤出大纲，点击标题快速跳转
 - 点击 **源码 / 预览** 在两种呈现方式间切换；预览模式点击标题可折叠/展开
 - **点击屏幕中央** 调出「显示设置」（字号 / 行距 / 段距 / 主题）
-- 顶部可一键 **收藏** 当前文档；**⋮** 里可打开 **收藏夹** 与 **打开历史**
+- 打开文件后，顶部可一键 **转发** 完整 `.md`，也可一键 **收藏** 当前文档
+- **⋮** 里可打开 **收藏夹** 与 **打开历史**
 - 在微信里长按 `.md` 文件 →「用其他应用打开」→ 选择「MD阅读器」
 
 ## 支持的语法示例

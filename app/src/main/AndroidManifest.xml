@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- 用于加载 Markdown 中引用的远程图片/链接（可选；纯本地阅读不会联网） -->
     <uses-permission android:name="android.permission.INTERNET" />
@@ -28,7 +29,9 @@
 
             <!-- A. 按 MIME 匹配：content:// 与 file:// 均适用（覆盖微信等通过 content:// 分享的场景）。
                  .md 无标准 MIME，微信常以 application/octet-stream 传递，故一并登记。 -->
-            <intent-filter android:label="@string/open_with_label">
+            <intent-filter
+                android:label="@string/open_with_label"
+                tools:ignore="AppLinkUrlError">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="text/markdown" />
@@ -40,7 +43,9 @@
 
             <!-- B. 按扩展名匹配（无 mimeType）：覆盖文件管理器以 file:// 且不带类型打开 .md 的情况。
                  pathPattern 通配存在“首匹配即止”限制，故为多级文件名补多条规则。 -->
-            <intent-filter android:label="@string/open_with_label">
+            <intent-filter
+                android:label="@string/open_with_label"
+                tools:ignore="AppLinkUrlError">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
@@ -57,7 +62,9 @@
             </intent-filter>
 
             <!-- C. 按扩展名匹配（mimeType=*/*）：覆盖带任意类型且路径含 .md 的 file:// 打开。 -->
-            <intent-filter android:label="@string/open_with_label">
+            <intent-filter
+                android:label="@string/open_with_label"
+                tools:ignore="AppLinkUrlError">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
@@ -72,5 +79,16 @@
                 <data android:pathPattern=".*\\..*\\.markdown" />
             </intent-filter>
         </activity>
+
+        <!-- 用于把当前 md 文档以文件形式分享/转发给微信等应用 -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 </manifest>
