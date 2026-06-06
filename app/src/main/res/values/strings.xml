@@ -33,7 +33,6 @@
     <string name="history_expired">授权过期</string>
     <string name="toast_expired">打开授权已过期，请重新从来源（如微信）打开</string>
     <string name="toast_deleted">原文件已被删除，无法打开</string>
-    <string name="opened_from_fav">原文件已不可用，已从收藏夹打开</string>
 
     <string name="only_md">请选择 Markdown 文件（.md / .markdown）</string>
 

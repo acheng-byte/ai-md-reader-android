@@ -6,10 +6,10 @@
 
 Android 版本号来源是 `app/build.gradle.kts`，每次发版需同时递增两个字段：
 
-- `versionName`：展示版本（如 `1.4`），用于 Git 标签与 Release 标题。
-- `versionCode`：整数，单调递增（如 `5`），用于 Android 升级判定。
+- `versionName`：展示版本（如 `1.4.1`），用于 Git 标签与 Release 标题。
+- `versionCode`：整数，单调递增（如 `6`），用于 Android 升级判定。
 
-当前最新：`versionName = "1.4"`，`versionCode = 5`。
+当前最新：`versionName = "1.4.1"`，`versionCode = 6`。
 
 iOS 版本号来源是 `ios/project.yml`：
 

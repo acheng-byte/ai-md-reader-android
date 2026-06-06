@@ -35,12 +35,13 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
     private lateinit var prefs: Prefs
     private lateinit var history: History
     private lateinit var favorites: Favorites
+    private lateinit var reading: ReadingProgress
     private lateinit var webView: WebView
 
     @Volatile private var currentMarkdown: String = ""
     @Volatile private var currentMode: String = Prefs.DEFAULT_MODE
     private var currentTitle: String = ""
-    private var currentUri: String? = null   // 当前文档身份 URI（欢迎页为 null）
+    @Volatile private var currentUri: String? = null   // 当前文档身份 URI（欢迎页为 null；会在 WebView binder 线程被读取）
     private var pageReady: Boolean = false
 
     // 系统文件选择器（SAF），无需任何存储权限；选择后校验仅允许 .md / .markdown
@@ -66,6 +67,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         prefs = Prefs(this)
         history = History(this)
         favorites = Favorites(this)
+        reading = ReadingProgress(this)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         setSupportActionBar(binding.toolbar)
@@ -190,6 +192,8 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         js("window.appRender && window.appRender()")
         js("window.appSetMode && window.appSetMode('$currentMode')")
         applySettingsToWeb()
+        // 恢复滚动放在最后：render/setMode 已置顶，这里读取上次比例在两帧后定位（含设置重排后的最终高度）
+        js("window.appRestoreScroll && window.appRestoreScroll()")
     }
 
     private fun applySettingsToWeb() {
@@ -471,25 +475,28 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
     }
 
     private fun onHistoryEntryClicked(entry: History.Entry, status: DocStatus, dialog: BottomSheetDialog) {
+        // 1) 已收藏且副本仍在：历史记录直接指向收藏夹副本，静默打开（副本不会授权过期，无需任何提示）
+        val fav = favorites.find(entry.uri)
+        if (fav != null && favorites.fileOf(fav).exists()) {
+            dialog.dismiss()
+            loadDocument(Uri.fromFile(favorites.fileOf(fav)), fav.name, fav.uri)
+            return
+        }
+        // 2) 未收藏但可访问：打开原始来源
         if (status == DocStatus.AVAILABLE) {
             dialog.dismiss()
             loadDocument(Uri.parse(entry.uri), entry.name, entry.uri)
             return
         }
-        // 不可用：若已收藏，则从收藏夹的本地副本打开；否则按状态友好提示
-        val fav = favorites.find(entry.uri)
-        if (fav != null) {
-            dialog.dismiss()
-            Toast.makeText(this, R.string.opened_from_fav, Toast.LENGTH_SHORT).show()
-            loadDocument(Uri.fromFile(favorites.fileOf(fav)), fav.name, fav.uri)
-        } else {
-            val msg = if (status == DocStatus.EXPIRED) R.string.toast_expired else R.string.toast_deleted
-            Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
-        }
+        // 3) 不可用（曾收藏后又取消、副本已被删除即落到此处）：按状态友好提示
+        val msg = if (status == DocStatus.EXPIRED) R.string.toast_expired else R.string.toast_deleted
+        Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
     }
 
     /** 区分 已删除（物理文件不存在）与 授权过期（无访问权限，如微信临时授权失效）。 */
     private fun statusOf(uriStr: String): DocStatus {
+        // 已收藏且副本仍在：历史记录直接视为可用，不再显示「授权过期/已删除」（取消收藏副本删除后自动落回真实探测）
+        favorites.find(uriStr)?.let { if (favorites.fileOf(it).exists()) return DocStatus.AVAILABLE }
         val uri = Uri.parse(uriStr)
         if (uri.scheme == "file") {
             return if (uri.path?.let { File(it).exists() } == true) DocStatus.AVAILABLE else DocStatus.DELETED
@@ -521,6 +528,8 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
     override fun markdown(): String = currentMarkdown
     override fun settingsJson(): String = prefs.settingsJson(this)
     override fun initialMode(): String = currentMode
+    override fun readingRatio(): Double = currentUri?.let { reading.get(it) } ?: 0.0
+    override fun saveReadingRatio(ratio: Double) { currentUri?.let { reading.set(it, ratio) } }
 
     override fun onModeChanged(mode: String) {
         runOnUiThread {
@@ -560,6 +569,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
 - 点击 **目录** 唤出大纲，点击标题快速跳转
 - 点击 **源码 / 预览** 在两种呈现方式间切换；预览模式点击标题可折叠/展开
 - **点击屏幕中央** 调出「显示设置」（字号 / 行距 / 段距 / 主题）
+- 重新打开同一文档时，会自动回到上次阅读位置
 - 打开文件后，顶部可一键 **转发** 完整 `.md`，也可一键 **收藏** 当前文档
 - **⋮** 里可打开 **收藏夹** 与 **打开历史**
 - 在微信里长按 `.md` 文件 →「用其他应用打开」→ 选择「MD阅读器」
