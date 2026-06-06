@@ -5,6 +5,7 @@ app/build/
 # Local Android / IDE state
 /local.properties
 .idea/
+.vscode/
 *.iml
 captures/
 .DS_Store

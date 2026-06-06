@@ -29,6 +29,8 @@
 
     var headings = [];              // [{el, level, index}]
     var collapsed = new Set();      // 处于折叠状态的标题元素
+    var saveTimer = null;           // 阅读位置防抖保存定时器
+    var suppressSaveUntil = 0;      // 此刻之前忽略滚动保存（程序滚动/内容替换产生的 scroll 事件）
 
     function bridge() { return window.Android; }
     function isHeading(el) { return el.nodeType === 1 && /^H[1-6]$/.test(el.tagName); }
@@ -260,11 +262,67 @@
         }
     }
 
+    /* ---------- 阅读位置记忆 ---------- */
+    // 以滚动比例（scrollTop / 可滚动高度）记忆，原生侧按文档身份 URI 存储，重排后仍能大致定位。
+    function scrollEl() { return document.scrollingElement || document.documentElement; }
+
+    function currentRatio() {
+        var el = scrollEl();
+        var max = el.scrollHeight - el.clientHeight;
+        if (max <= 0) return 0;                       // 内容不足一屏：按顶部处理，避免除零
+        var top = window.pageYOffset || el.scrollTop || 0;
+        var r = top / max;
+        return r < 0 ? 0 : (r > 1 ? 1 : r);
+    }
+
+    function saveScrollNow() {
+        try {
+            var b = bridge();
+            if (b && b.saveScrollRatio) b.saveScrollRatio(currentRatio());
+        } catch (e) { /* ignore */ }
+    }
+
+    // 滚动防抖保存；定时器 fire 时二次校验抑制窗，避免切换文档时把上一篇位置写到当前文档
+    function onScroll() {
+        if (saveTimer) clearTimeout(saveTimer);
+        saveTimer = setTimeout(function () {
+            saveTimer = null;
+            if (Date.now() < suppressSaveUntil) return;
+            saveScrollNow();
+        }, 200);
+    }
+
+    // 退到后台 / 离开页面时立即落盘当前位置
+    function flushSave() {
+        if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+        if (Date.now() < suppressSaveUntil) return;
+        saveScrollNow();
+    }
+
+    // 由原生在文档渲染后（render→setMode→applySettings 之后）调用：定位到上次阅读比例。
+    // render/setMode 已把页面置顶，这里仅在有记录时跳转；进入即设抑制窗，吞掉内容替换与本次程序滚动的 scroll 事件。
+    function restoreScroll() {
+        suppressSaveUntil = Date.now() + 450;
+        var ratio = 0;
+        try { var b = bridge(); if (b && b.getInitialScrollRatio) ratio = b.getInitialScrollRatio() || 0; } catch (e) { ratio = 0; }
+        if (!(ratio > 0)) return;
+        // 两帧后再滚动，确保渲染/模式切换/设置重排导致的高度变化已稳定
+        requestAnimationFrame(function () {
+            requestAnimationFrame(function () {
+                var el = scrollEl();
+                var max = el.scrollHeight - el.clientHeight;
+                if (max > 0) window.scrollTo(0, Math.round(ratio * max));
+                suppressSaveUntil = Date.now() + 250;   // 跳转后小幅续期，避免本次程序滚动被回存
+            });
+        });
+    }
+
     /* ---------- 暴露给原生 ---------- */
     window.appRender = render;
     window.appApplySettings = applySettings;
     window.appSetMode = setMode;
     window.appToggleToc = toggleToc;
+    window.appRestoreScroll = restoreScroll;
 
     /* ---------- 首屏初始化 ---------- */
     try {
@@ -276,5 +334,10 @@
     } catch (e) { /* 使用默认样式 */ }
 
     setupCenterTap();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    document.addEventListener('visibilitychange', function () {
+        if (document.visibilityState === 'hidden') flushSave();
+    });
+    window.addEventListener('pagehide', flushSave);
     render();
 })();
