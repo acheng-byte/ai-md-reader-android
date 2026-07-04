@@ -1,0 +1,65 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    name: Build & Release APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build release APK
+        run: ./gradlew :app:assembleRelease
+
+      - name: Rename APK
+        run: |
+          TAG=${GITHUB_REF_NAME}
+          mv app/build/outputs/apk/release/app-release-unsigned.apk \
+             app/build/outputs/apk/release/md-reader-${TAG}.apk || \
+          mv app/build/outputs/apk/release/app-release.apk \
+             app/build/outputs/apk/release/md-reader-${TAG}.apk || true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: MD阅读器 ${{ github.ref_name }}
+          body: |
+            ## MD阅读器 ${{ github.ref_name }}
+
+            ### 新功能
+            - Obsidian Wikilink 兼容（`[[Page]]` 导航、`![[image.png]]` 本地图片）
+            - Mermaid 图表渲染
+            - YAML Frontmatter 元数据渲染
+            - 全文搜索（当前文档 + 全库搜索）
+            - 叠加式设置面板（含 Vault 文件夹选择）
+            - HTML 渲染支持
+            - 自动检查更新
+
+            ### 安装
+            下载 APK 文件，在设备上允许未知来源安装后直接安装。
+          files: app/build/outputs/apk/release/md-reader-*.apk
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -13,10 +13,12 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.IntentCompat
 import androidx.core.content.FileProvider
+import androidx.documentfile.provider.DocumentFile
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.webkit.WebViewAssetLoader
 import androidx.webkit.WebViewClientCompat
@@ -26,7 +28,9 @@ import com.mdreader.app.databinding.SheetFavoritesBinding
 import com.mdreader.app.databinding.SheetHistoryBinding
 import com.mdreader.app.databinding.SheetSettingsBinding
 import java.io.File
+import java.net.URLDecoder
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 import kotlin.math.roundToInt
 
 class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
@@ -41,10 +45,10 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
     @Volatile private var currentMarkdown: String = ""
     @Volatile private var currentMode: String = Prefs.DEFAULT_MODE
     private var currentTitle: String = ""
-    @Volatile private var currentUri: String? = null   // 当前文档身份 URI（欢迎页为 null；会在 WebView binder 线程被读取）
+    @Volatile private var currentUri: String? = null
+    @Volatile private var currentDocumentUri: Uri? = null   // actual file URI for resolving relative paths
     private var pageReady: Boolean = false
 
-    // 系统文件选择器（SAF），无需任何存储权限；选择后校验仅允许 .md / .markdown
     private val openPicker =
         registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
             if (uri != null) {
@@ -53,12 +57,24 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                     Toast.makeText(this, R.string.only_md, Toast.LENGTH_LONG).show()
                 } else {
                     runCatching {
-                        contentResolver.takePersistableUriPermission(
-                            uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
-                        )
+                        contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     }
                     loadDocument(uri)
                 }
+            }
+        }
+
+    private val vaultPicker =
+        registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
+            if (uri != null) {
+                runCatching {
+                    contentResolver.takePersistableUriPermission(
+                        uri,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                    )
+                }
+                prefs.vaultUri = uri.toString()
+                Toast.makeText(this, getString(R.string.vault_set), Toast.LENGTH_SHORT).show()
             }
         }
 
@@ -84,6 +100,8 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         }
         webView.setBackgroundColor(bgColor())
         webView.loadUrl(VIEWER_URL)
+
+        checkForUpdates()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -100,7 +118,16 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         webView.webViewClient = object : WebViewClientCompat() {
             override fun shouldInterceptRequest(
                 view: WebView, request: WebResourceRequest
-            ): WebResourceResponse? = assetLoader.shouldInterceptRequest(request.url)
+            ): WebResourceResponse? {
+                val url = request.url
+                // Serve bundled assets
+                assetLoader.shouldInterceptRequest(url)?.let { return it }
+                // Serve local vault assets: vault://encoded-filename
+                if (url.scheme == "vault") {
+                    return serveVaultAsset(url)
+                }
+                return null
+            }
 
             override fun onPageFinished(view: WebView, url: String) {
                 pageReady = true
@@ -112,6 +139,14 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             ): Boolean {
                 val url = request.url
                 if (url.host == ASSET_HOST) return false
+                // Handle wikilink navigation
+                if (url.scheme == "mdreader" && url.host == "open") {
+                    val noteName = try { URLDecoder.decode(url.path?.trimStart('/') ?: "", "UTF-8") } catch (e: Exception) { "" }
+                    if (noteName.isNotEmpty()) {
+                        runOnUiThread { openWikiLink(noteName) }
+                        return true
+                    }
+                }
                 return runCatching {
                     startActivity(Intent(Intent.ACTION_VIEW, url))
                     true
@@ -133,29 +168,48 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         webView.addJavascriptInterface(MarkdownBridge(this), "Android")
     }
 
+    /** Intercept vault:// URLs to serve local assets (images, etc.) from vault folder. */
+    private fun serveVaultAsset(url: Uri): WebResourceResponse? {
+        val encoded = url.toString().removePrefix("vault://")
+        val filename = try { URLDecoder.decode(encoded, "UTF-8") } catch (e: Exception) { encoded }
+        val vaultUriStr = prefs.vaultUri ?: return null
+        val vaultUri = Uri.parse(vaultUriStr)
+        return runCatching {
+            val file = VaultSearch.resolveRelativeAsset(this, vaultUri, currentDocumentUri, filename)
+                ?: return null
+            val mime = guessMime(filename)
+            val stream = contentResolver.openInputStream(file.uri) ?: return null
+            WebResourceResponse(mime, "utf-8", stream)
+        }.getOrNull()
+    }
+
+    private fun guessMime(name: String): String {
+        val ext = name.substringAfterLast('.', "").lowercase()
+        return when (ext) {
+            "png" -> "image/png"
+            "jpg", "jpeg" -> "image/jpeg"
+            "gif" -> "image/gif"
+            "svg" -> "image/svg+xml"
+            "webp" -> "image/webp"
+            "bmp" -> "image/bmp"
+            else -> "application/octet-stream"
+        }
+    }
+
     private fun handleIntent(intent: Intent?): Boolean {
         if (intent == null) return false
         val uri: Uri? = when (intent.action) {
             Intent.ACTION_VIEW -> intent.data
-            Intent.ACTION_SEND ->
-                IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
+            Intent.ACTION_SEND -> IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
             else -> null
         }
         return if (uri != null) {
-            // 尽力持久化读权限，便于之后从历史重新打开（仅当来源授权可持久化时生效）
-            runCatching {
-                contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
+            runCatching { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
             loadDocument(uri)
             true
         } else false
     }
 
-    /**
-     * @param readUri 实际读取内容的 URI（收藏夹打开时为本地副本）
-     * @param displayNameOverride 标题覆盖（收藏/历史已知名称时传入）
-     * @param identityUri 文档身份（用于历史/收藏去重；收藏夹打开时为原始 URI）
-     */
     private fun loadDocument(
         readUri: Uri,
         displayNameOverride: String? = null,
@@ -174,14 +228,13 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                     currentMarkdown = text
                     currentTitle = name
                     currentUri = identityUri
+                    currentDocumentUri = readUri
                     supportActionBar?.title = name
                     history.add(identityUri, name, System.currentTimeMillis())
                     renderCurrent()
-                    invalidateOptionsMenu()   // 刷新收藏星标状态
+                    invalidateOptionsMenu()
                 }.onFailure { e ->
-                    Toast.makeText(
-                        this, getString(R.string.open_failed, e.message ?: ""), Toast.LENGTH_LONG
-                    ).show()
+                    Toast.makeText(this, getString(R.string.open_failed, e.message ?: ""), Toast.LENGTH_LONG).show()
                 }
             }
         }.start()
@@ -192,7 +245,6 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         js("window.appRender && window.appRender()")
         js("window.appSetMode && window.appSetMode('$currentMode')")
         applySettingsToWeb()
-        // 恢复滚动放在最后：render/setMode 已置顶，这里读取上次比例在两帧后定位（含设置重排后的最终高度）
         js("window.appRestoreScroll && window.appRestoreScroll()")
     }
 
@@ -209,9 +261,37 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         if (prefs.isDark(this)) 0xFF0D1117.toInt() else 0xFFFFFFFF.toInt()
 
     private fun isMarkdownAllowed(name: String?): Boolean {
-        if (name == null) return true // 无法获知名称时不拦截
+        if (name == null) return true
         val n = name.lowercase()
         return n.endsWith(".md") || n.endsWith(".markdown")
+    }
+
+    // ---- 自动更新检查 ----
+
+    private fun checkForUpdates() {
+        val now = System.currentTimeMillis()
+        val lastCheck = prefs.lastUpdateCheck
+        // Only check once per day
+        if (now - lastCheck < TimeUnit.HOURS.toMillis(24)) return
+        prefs.lastUpdateCheck = now
+        Thread {
+            val info = UpdateChecker.checkLatest() ?: return@Thread
+            val currentVersion = packageManager.getPackageInfo(packageName, 0).versionName ?: return@Thread
+            if (UpdateChecker.isNewer(info.tagName, currentVersion)) {
+                runOnUiThread { showUpdateDialog(info) }
+            }
+        }.start()
+    }
+
+    private fun showUpdateDialog(info: UpdateChecker.ReleaseInfo) {
+        AlertDialog.Builder(this)
+            .setTitle(R.string.update_available_title)
+            .setMessage(getString(R.string.update_available_msg, info.tagName))
+            .setPositiveButton(R.string.update_go) { _, _ ->
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(info.htmlUrl)))
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
     }
 
     // ---- 菜单 ----
@@ -240,34 +320,14 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean = when (item.itemId) {
-        R.id.action_share -> {
-            shareCurrentDocument()
-            true
-        }
-        R.id.action_open -> {
-            openPicker.launch(arrayOf("*/*"))
-            true
-        }
-        R.id.action_toc -> {
-            js("window.appToggleToc && window.appToggleToc()")
-            true
-        }
-        R.id.action_toggle -> {
-            toggleMode()
-            true
-        }
-        R.id.action_favorite -> {
-            toggleFavorite()
-            true
-        }
-        R.id.action_favorites -> {
-            showFavorites()
-            true
-        }
-        R.id.action_history -> {
-            showHistory()
-            true
-        }
+        R.id.action_share -> { shareCurrentDocument(); true }
+        R.id.action_open -> { openPicker.launch(arrayOf("*/*")); true }
+        R.id.action_toc -> { js("window.appToggleToc && window.appToggleToc()"); true }
+        R.id.action_search -> { js("window.appOpenSearch && window.appOpenSearch()"); true }
+        R.id.action_toggle -> { toggleMode(); true }
+        R.id.action_favorite -> { toggleFavorite(); true }
+        R.id.action_favorites -> { showFavorites(); true }
+        R.id.action_history -> { showHistory(); true }
         else -> super.onOptionsItemSelected(item)
     }
 
@@ -278,13 +338,8 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         invalidateOptionsMenu()
     }
 
-    // ---- 转发 / 分享 ----
+    // ---- 分享 ----
 
-    /**
-     * 把当前正文以 .md 文件形式通过系统分享面板转发（微信/QQ 等）。
-     * 内容写入缓存目录，经 FileProvider 暴露为 content:// 并授予临时读权限；
-     * 选择微信后由微信自身的“发送给朋友”选择联系人（系统能力，无法绕过其选人界面）。
-     */
     private fun shareCurrentDocument() {
         if (currentUri == null || currentMarkdown.isEmpty()) {
             Toast.makeText(this, R.string.share_empty, Toast.LENGTH_SHORT).show()
@@ -292,14 +347,13 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         }
         try {
             val dir = File(cacheDir, "shared").apply { mkdirs() }
-            dir.listFiles()?.forEach { it.delete() }   // 清理旧的临时文件，目录内只保留本次
+            dir.listFiles()?.forEach { it.delete() }
             val name = shareFileName(currentTitle)
             val file = File(dir, name)
             file.writeText(currentMarkdown, Charsets.UTF_8)
-
             val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
             val send = Intent(Intent.ACTION_SEND).apply {
-                type = "*/*"                       // .md 无标准 MIME，用 */* 让微信按文件接收
+                type = "*/*"
                 putExtra(Intent.EXTRA_STREAM, uri)
                 putExtra(Intent.EXTRA_SUBJECT, name)
                 putExtra(Intent.EXTRA_TITLE, name)
@@ -312,7 +366,6 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         }
     }
 
-    /** 由文档标题生成合法的 .md 文件名。 */
     private fun shareFileName(title: String): String {
         var base = title.trim().ifEmpty { "document" }
         base = base.replace(Regex("[\\\\/:*?\"<>|\\r\\n]"), "_")
@@ -324,10 +377,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
 
     private fun toggleFavorite() {
         val id = currentUri
-        if (id == null) {
-            Toast.makeText(this, R.string.fav_need_doc, Toast.LENGTH_SHORT).show()
-            return
-        }
+        if (id == null) { Toast.makeText(this, R.string.fav_need_doc, Toast.LENGTH_SHORT).show(); return }
         if (favorites.isFavorite(id)) {
             favorites.remove(id)
             Toast.makeText(this, R.string.fav_removed, Toast.LENGTH_SHORT).show()
@@ -343,20 +393,15 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         val favs = favorites.all().toMutableList()
         val dialog = BottomSheetDialog(this)
         dialog.setContentView(sheet.root)
-
         fun refreshEmpty() {
             val empty = favs.isEmpty()
             sheet.favEmpty.visibility = if (empty) View.VISIBLE else View.GONE
             sheet.favList.visibility = if (empty) View.GONE else View.VISIBLE
         }
         refreshEmpty()
-
         val adapter = FavoritesAdapter(
             favs,
-            onOpen = { fav ->
-                dialog.dismiss()
-                loadDocument(Uri.fromFile(favorites.fileOf(fav)), fav.name, fav.uri)
-            },
+            onOpen = { fav -> dialog.dismiss(); loadDocument(Uri.fromFile(favorites.fileOf(fav)), fav.name, fav.uri) },
             onRemove = { fav ->
                 favorites.remove(fav.uri)
                 if (currentUri == fav.uri) invalidateOptionsMenu()
@@ -369,7 +414,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         dialog.show()
     }
 
-    // ---- 显示设置底部面板 ----
+    // ---- 设置底部面板（含 Vault 选择）----
 
     private fun showSettings() {
         val sheet = SheetSettingsBinding.inflate(layoutInflater)
@@ -387,15 +432,21 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             }
         )
 
-        sheet.sliderFont.addOnChangeListener { _, value, _ ->
-            prefs.fontSize = value; updateLabels(sheet); applySettingsToWeb()
+        // Show current vault folder name
+        val vaultStr = prefs.vaultUri
+        sheet.tvVaultPath.text = if (vaultStr != null) {
+            runCatching {
+                DocumentFile.fromTreeUri(this, Uri.parse(vaultStr))?.name ?: vaultStr
+            }.getOrDefault(vaultStr)
+        } else getString(R.string.vault_not_set)
+
+        sheet.btnSelectVault.setOnClickListener {
+            vaultPicker.launch(null)
         }
-        sheet.sliderLine.addOnChangeListener { _, value, _ ->
-            prefs.lineHeight = value; updateLabels(sheet); applySettingsToWeb()
-        }
-        sheet.sliderPara.addOnChangeListener { _, value, _ ->
-            prefs.paraGap = value; updateLabels(sheet); applySettingsToWeb()
-        }
+
+        sheet.sliderFont.addOnChangeListener { _, value, _ -> prefs.fontSize = value; updateLabels(sheet); applySettingsToWeb() }
+        sheet.sliderLine.addOnChangeListener { _, value, _ -> prefs.lineHeight = value; updateLabels(sheet); applySettingsToWeb() }
+        sheet.sliderPara.addOnChangeListener { _, value, _ -> prefs.paraGap = value; updateLabels(sheet); applySettingsToWeb() }
         sheet.toggleTheme.addOnButtonCheckedListener { _, checkedId, isChecked ->
             if (isChecked) {
                 prefs.themeMode = when (checkedId) {
@@ -407,20 +458,12 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             }
         }
         sheet.btnReset.setOnClickListener {
-            prefs.fontSize = Prefs.DEFAULT_FONT
-            prefs.lineHeight = Prefs.DEFAULT_LINE
-            prefs.paraGap = Prefs.DEFAULT_PARA
-            sheet.sliderFont.value = Prefs.DEFAULT_FONT
-            sheet.sliderLine.value = Prefs.DEFAULT_LINE
-            sheet.sliderPara.value = Prefs.DEFAULT_PARA
-            updateLabels(sheet)
-            applySettingsToWeb()
+            prefs.fontSize = Prefs.DEFAULT_FONT; prefs.lineHeight = Prefs.DEFAULT_LINE; prefs.paraGap = Prefs.DEFAULT_PARA
+            sheet.sliderFont.value = Prefs.DEFAULT_FONT; sheet.sliderLine.value = Prefs.DEFAULT_LINE; sheet.sliderPara.value = Prefs.DEFAULT_PARA
+            updateLabels(sheet); applySettingsToWeb()
         }
 
-        BottomSheetDialog(this).apply {
-            setContentView(sheet.root)
-            show()
-        }
+        BottomSheetDialog(this).apply { setContentView(sheet.root); show() }
     }
 
     private fun updateLabels(sheet: SheetSettingsBinding) {
@@ -436,14 +479,13 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         return r.coerceIn(min, max)
     }
 
-    // ---- 打开历史底部面板 ----
+    // ---- 历史面板 ----
 
     private fun showHistory() {
         val sheet = SheetHistoryBinding.inflate(layoutInflater)
         val entries = history.all()
         val dialog = BottomSheetDialog(this)
         dialog.setContentView(sheet.root)
-
         if (entries.isEmpty()) {
             sheet.historyEmpty.visibility = View.VISIBLE
             sheet.historyList.visibility = View.GONE
@@ -457,45 +499,32 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             }
             sheet.historyList.layoutManager = LinearLayoutManager(this)
             sheet.historyList.adapter = adapter
-            // 后台逐条检测状态（可用 / 授权过期 / 已删除）
             Thread {
                 val map = HashMap<String, DocStatus>(entries.size)
                 entries.forEach { map[it.uri] = statusOf(it.uri) }
                 runOnUiThread { adapter.setStatuses(map) }
             }.start()
         }
-
         sheet.btnClearHistory.setOnClickListener {
-            history.clear()
-            dialog.dismiss()
+            history.clear(); dialog.dismiss()
             Toast.makeText(this, R.string.history_cleared, Toast.LENGTH_SHORT).show()
         }
-
         dialog.show()
     }
 
     private fun onHistoryEntryClicked(entry: History.Entry, status: DocStatus, dialog: BottomSheetDialog) {
-        // 1) 已收藏且副本仍在：历史记录直接指向收藏夹副本，静默打开（副本不会授权过期，无需任何提示）
         val fav = favorites.find(entry.uri)
         if (fav != null && favorites.fileOf(fav).exists()) {
-            dialog.dismiss()
-            loadDocument(Uri.fromFile(favorites.fileOf(fav)), fav.name, fav.uri)
-            return
+            dialog.dismiss(); loadDocument(Uri.fromFile(favorites.fileOf(fav)), fav.name, fav.uri); return
         }
-        // 2) 未收藏但可访问：打开原始来源
         if (status == DocStatus.AVAILABLE) {
-            dialog.dismiss()
-            loadDocument(Uri.parse(entry.uri), entry.name, entry.uri)
-            return
+            dialog.dismiss(); loadDocument(Uri.parse(entry.uri), entry.name, entry.uri); return
         }
-        // 3) 不可用（曾收藏后又取消、副本已被删除即落到此处）：按状态友好提示
         val msg = if (status == DocStatus.EXPIRED) R.string.toast_expired else R.string.toast_deleted
         Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
     }
 
-    /** 区分 已删除（物理文件不存在）与 授权过期（无访问权限，如微信临时授权失效）。 */
     private fun statusOf(uriStr: String): DocStatus {
-        // 已收藏且副本仍在：历史记录直接视为可用，不再显示「授权过期/已删除」（取消收藏副本删除后自动落回真实探测）
         favorites.find(uriStr)?.let { if (favorites.fileOf(it).exists()) return DocStatus.AVAILABLE }
         val uri = Uri.parse(uriStr)
         if (uri.scheme == "file") {
@@ -504,27 +533,19 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         val hasPerm = contentResolver.persistedUriPermissions.any { it.uri == uri && it.isReadPermission }
         return try {
             val stream = contentResolver.openInputStream(uri)
-            if (stream != null) {
-                stream.close()
-                DocStatus.AVAILABLE
-            } else if (hasPerm) DocStatus.DELETED else DocStatus.EXPIRED
-        } catch (e: SecurityException) {
-            DocStatus.EXPIRED                 // 明确的权限问题 -> 授权过期
-        } catch (e: Exception) {
-            if (hasPerm) DocStatus.DELETED    // 有持久权限却打不开 -> 文件已删除
-            else DocStatus.EXPIRED            // 无持久权限 -> 授权过期/丢失
-        }
+            if (stream != null) { stream.close(); DocStatus.AVAILABLE }
+            else if (hasPerm) DocStatus.DELETED else DocStatus.EXPIRED
+        } catch (e: SecurityException) { DocStatus.EXPIRED
+        } catch (e: Exception) { if (hasPerm) DocStatus.DELETED else DocStatus.EXPIRED }
     }
 
     override fun onDestroy() {
-        binding.webview.apply {
-            (parent as? android.view.ViewGroup)?.removeView(this)
-            destroy()
-        }
+        binding.webview.apply { (parent as? android.view.ViewGroup)?.removeView(this); destroy() }
         super.onDestroy()
     }
 
-    // ---- MarkdownBridge.Provider（运行在 binder 线程）----
+    // ---- MarkdownBridge.Provider ----
+
     override fun markdown(): String = currentMarkdown
     override fun settingsJson(): String = prefs.settingsJson(this)
     override fun initialMode(): String = currentMode
@@ -533,11 +554,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
 
     override fun onModeChanged(mode: String) {
         runOnUiThread {
-            if (mode == "preview" || mode == "code") {
-                currentMode = mode
-                prefs.viewMode = mode
-                invalidateOptionsMenu()
-            }
+            if (mode == "preview" || mode == "code") { currentMode = mode; prefs.viewMode = mode; invalidateOptionsMenu() }
         }
     }
 
@@ -550,9 +567,35 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         }
     }
 
-    override fun onCenterTap() {
-        // 点击正文中央区域唤出显示设置（电子书阅读器常见手势）
-        runOnUiThread { showSettings() }
+    override fun onCenterTap() { runOnUiThread { showSettings() } }
+
+    override fun openWikiLink(noteName: String) {
+        val vaultUriStr = prefs.vaultUri
+        if (vaultUriStr == null) {
+            runOnUiThread { Toast.makeText(this, R.string.vault_not_set_toast, Toast.LENGTH_LONG).show() }
+            return
+        }
+        Thread {
+            val file = VaultSearch.findFile(this, Uri.parse(vaultUriStr), noteName)
+            runOnUiThread {
+                if (file != null) {
+                    loadDocument(file.uri, file.name)
+                } else {
+                    Toast.makeText(this, getString(R.string.wikilink_not_found, noteName), Toast.LENGTH_SHORT).show()
+                }
+            }
+        }.start()
+    }
+
+    override fun searchVault(query: String): String {
+        val vaultUriStr = prefs.vaultUri ?: return "[]"
+        return VaultSearch.search(this, Uri.parse(vaultUriStr), query)
+    }
+
+    override fun openVaultFile(uri: String) {
+        runOnUiThread {
+            runCatching { loadDocument(Uri.parse(uri)) }
+        }
     }
 
     companion object {
@@ -567,40 +610,44 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
 ## 怎么用
 
 - 点击 **目录** 唤出大纲，点击标题快速跳转
+- 点击 **搜索** 在当前文档中搜索，也可切换为全库搜索
 - 点击 **源码 / 预览** 在两种呈现方式间切换；预览模式点击标题可折叠/展开
-- **点击屏幕中央** 调出「显示设置」（字号 / 行距 / 段距 / 主题）
+- **点击屏幕中央** 调出「显示设置」（字号 / 行距 / 段距 / 主题 / Vault 文件夹）
+- 在设置中选择 **Vault 文件夹** 后，可使用 `[[wikilink]]` 导航与全库搜索
 - 重新打开同一文档时，会自动回到上次阅读位置
 - 打开文件后，顶部可一键 **转发** 完整 `.md`，也可一键 **收藏** 当前文档
-- **⋮** 里可打开 **收藏夹** 与 **打开历史**
-- 在微信里长按 `.md` 文件 →「用其他应用打开」→ 选择「MD阅读器」
 
-## 支持的语法示例
+## 新功能（v1.5.1）
 
-### 列表与引用
+- `[[Page Name]]` — Obsidian wikilink 导航
+- `![[image.png]]` — 本地图片嵌入（需设置 Vault 文件夹）
+- Mermaid 图表渲染
+- YAML frontmatter 渲染
+- 全文搜索（点击搜索图标）
+- 跨文件全库搜索（需设置 Vault 文件夹）
+- 自动检查更新
 
-1. 有序列表项一
-2. 有序列表项二
-   - 嵌套无序项
+## Mermaid 示例
 
-> 这是一段引用文字（blockquote）。
+```mermaid
+graph TD
+    A[开始] --> B{是否有 Vault?}
+    B -->|是| C[全库搜索]
+    B -->|否| D[设置 Vault 文件夹]
+    C --> E[找到文件]
+```
 
-### 表格
+## 支持的语法
 
 | 功能 | 是否支持 |
 | --- | :---: |
 | 标题 / 列表 | ✅ |
 | 表格 | ✅ |
 | 代码高亮 | ✅ |
-
-### 代码
-
-行内代码 `val x = 1`，以及代码块（右上角可一键复制）：
-
-```kotlin
-fun main() {
-    println("Hello, Markdown!")
-}
-```
+| Mermaid 图表 | ✅ |
+| Wikilinks | ✅ |
+| Frontmatter | ✅ |
+| HTML 渲染 | ✅ |
 
 ---
 

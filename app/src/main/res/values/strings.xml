@@ -7,6 +7,7 @@
     <string name="action_view_code">源码</string>
     <string name="action_view_preview">预览</string>
     <string name="action_settings">显示设置</string>
+    <string name="action_search">搜索</string>
 
     <string name="settings_title">显示设置</string>
     <string name="label_font">字号</string>
@@ -50,4 +51,17 @@
     <string name="share_chooser_title">转发 / 分享到…</string>
     <string name="share_empty">没有可转发的内容</string>
     <string name="share_failed">转发失败：%1$s</string>
+
+    <!-- Vault / Wikilink -->
+    <string name="label_vault">Vault 文件夹</string>
+    <string name="vault_not_set">未设置（点击选择）</string>
+    <string name="btn_select_vault">选择文件夹</string>
+    <string name="vault_set">Vault 文件夹已设置</string>
+    <string name="vault_not_set_toast">请先在设置中选择 Vault 文件夹</string>
+    <string name="wikilink_not_found">找不到文件：%1$s</string>
+
+    <!-- Auto-update -->
+    <string name="update_available_title">发现新版本</string>
+    <string name="update_available_msg">新版本 %1$s 已发布，是否前往下载？</string>
+    <string name="update_go">前往下载</string>
 </resources>

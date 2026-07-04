@@ -22,14 +22,12 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal">
-
         <TextView
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:text="@string/label_font"
             android:textAppearance="@style/TextAppearance.Material3.BodyLarge" />
-
         <TextView
             android:id="@+id/val_font"
             android:layout_width="wrap_content"
@@ -39,7 +37,6 @@
             tools:ignore="HardcodedText"
             android:text="16 px" />
     </LinearLayout>
-
     <com.google.android.material.slider.Slider
         android:id="@+id/slider_font"
         android:layout_width="match_parent"
@@ -54,14 +51,12 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal">
-
         <TextView
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:text="@string/label_line"
             android:textAppearance="@style/TextAppearance.Material3.BodyLarge" />
-
         <TextView
             android:id="@+id/val_line"
             android:layout_width="wrap_content"
@@ -71,7 +66,6 @@
             tools:ignore="HardcodedText"
             android:text="1.7" />
     </LinearLayout>
-
     <com.google.android.material.slider.Slider
         android:id="@+id/slider_line"
         android:layout_width="match_parent"
@@ -86,14 +80,12 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal">
-
         <TextView
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:text="@string/label_para"
             android:textAppearance="@style/TextAppearance.Material3.BodyLarge" />
-
         <TextView
             android:id="@+id/val_para"
             android:layout_width="wrap_content"
@@ -103,7 +95,6 @@
             tools:ignore="HardcodedText"
             android:text="1.0" />
     </LinearLayout>
-
     <com.google.android.material.slider.Slider
         android:id="@+id/slider_para"
         android:layout_width="match_parent"
@@ -121,14 +112,12 @@
         android:layout_marginBottom="8dp"
         android:text="@string/label_theme"
         android:textAppearance="@style/TextAppearance.Material3.BodyLarge" />
-
     <com.google.android.material.button.MaterialButtonToggleGroup
         android:id="@+id/toggle_theme"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         app:singleSelection="true"
         app:selectionRequired="true">
-
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_theme_system"
             style="?attr/materialButtonOutlinedStyle"
@@ -136,7 +125,6 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:text="@string/theme_system" />
-
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_theme_light"
             style="?attr/materialButtonOutlinedStyle"
@@ -144,7 +132,6 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:text="@string/theme_light" />
-
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_theme_dark"
             style="?attr/materialButtonOutlinedStyle"
@@ -154,11 +141,43 @@
             android:text="@string/theme_dark" />
     </com.google.android.material.button.MaterialButtonToggleGroup>
 
+    <!-- Vault 文件夹 -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:layout_marginBottom="4dp"
+        android:text="@string/label_vault"
+        android:textAppearance="@style/TextAppearance.Material3.BodyLarge" />
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginBottom="4dp">
+        <TextView
+            android:id="@+id/tv_vault_path"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+            android:textColor="?attr/colorOnSurfaceVariant"
+            android:ellipsize="middle"
+            android:singleLine="true"
+            android:text="@string/vault_not_set" />
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_select_vault"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/btn_select_vault" />
+    </LinearLayout>
+
     <com.google.android.material.button.MaterialButton
         android:id="@+id/btn_reset"
         style="@style/Widget.Material3.Button.TextButton"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
+        android:layout_marginTop="4dp"
         android:text="@string/reset_default" />
 </LinearLayout>
