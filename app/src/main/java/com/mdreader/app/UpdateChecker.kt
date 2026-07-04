@@ -1,5 +1,6 @@
 package com.mdreader.app
 
+import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -10,7 +11,12 @@ object UpdateChecker {
     const val RELEASES_PAGE =
         "https://github.com/acheng-byte/ai-md-reader-android/releases/latest"
 
-    data class ReleaseInfo(val tagName: String, val htmlUrl: String)
+    data class ReleaseInfo(
+        val tagName: String,
+        val htmlUrl: String,
+        val apkDownloadUrl: String?,
+        val releaseNotes: String = ""
+    )
 
     fun checkLatest(): ReleaseInfo? = runCatching {
         val conn = URL(RELEASES_API).openConnection() as HttpURLConnection
@@ -20,9 +26,21 @@ object UpdateChecker {
         conn.readTimeout = 8_000
         if (conn.responseCode == 200) {
             val json = JSONObject(conn.inputStream.bufferedReader().readText())
+            val assets: JSONArray = json.optJSONArray("assets") ?: JSONArray()
+            var apkUrl: String? = null
+            for (i in 0 until assets.length()) {
+                val asset = assets.getJSONObject(i)
+                val name = asset.optString("name", "")
+                if (name.endsWith(".apk", ignoreCase = true)) {
+                    apkUrl = asset.optString("browser_download_url")
+                    break
+                }
+            }
             ReleaseInfo(
                 tagName = json.optString("tag_name", ""),
-                htmlUrl = json.optString("html_url", RELEASES_PAGE)
+                htmlUrl = json.optString("html_url", RELEASES_PAGE),
+                apkDownloadUrl = apkUrl,
+                releaseNotes = json.optString("body", "").take(500)
             )
         } else null
     }.getOrNull()

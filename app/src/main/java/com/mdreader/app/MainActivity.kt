@@ -1,10 +1,16 @@
 package com.mdreader.app
 
+import android.app.DownloadManager
+import android.content.BroadcastReceiver
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
@@ -31,6 +37,7 @@ import java.io.File
 import java.net.URLDecoder
 import java.util.Locale
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.roundToInt
 
 class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
@@ -46,14 +53,21 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
     @Volatile private var currentMode: String = Prefs.DEFAULT_MODE
     private var currentTitle: String = ""
     @Volatile private var currentUri: String? = null
-    @Volatile private var currentDocumentUri: Uri? = null   // actual file URI for resolving relative paths
+    @Volatile private var currentDocumentUri: Uri? = null
     private var pageReady: Boolean = false
+
+    // Cancel token: increment before each new load; JS render checks if it's stale
+    private val loadGeneration = AtomicInteger(0)
+
+    // Debounce renderCurrent
+    private val renderHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var pendingRender: Runnable? = null
 
     private val openPicker =
         registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
             if (uri != null) {
                 val name = FileUtils.displayName(this, uri)
-                if (!isMarkdownAllowed(name)) {
+                if (!isAllowedFile(name)) {
                     Toast.makeText(this, R.string.only_md, Toast.LENGTH_LONG).show()
                 } else {
                     runCatching {
@@ -111,8 +125,10 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
     }
 
     private fun setupWebView() {
+        // Use WebViewAssetLoader for both bundled assets AND vault assets
         val assetLoader = WebViewAssetLoader.Builder()
             .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(this))
+            .addPathHandler("/vault/", VaultPathHandler())
             .build()
 
         webView.webViewClient = object : WebViewClientCompat() {
@@ -120,13 +136,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                 view: WebView, request: WebResourceRequest
             ): WebResourceResponse? {
                 val url = request.url
-                // Serve bundled assets
-                assetLoader.shouldInterceptRequest(url)?.let { return it }
-                // Serve local vault assets: vault://encoded-filename
-                if (url.scheme == "vault") {
-                    return serveVaultAsset(url)
-                }
-                return null
+                return assetLoader.shouldInterceptRequest(url)
             }
 
             override fun onPageFinished(view: WebView, url: String) {
@@ -139,9 +149,10 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             ): Boolean {
                 val url = request.url
                 if (url.host == ASSET_HOST) return false
-                // Handle wikilink navigation
                 if (url.scheme == "mdreader" && url.host == "open") {
-                    val noteName = try { URLDecoder.decode(url.path?.trimStart('/') ?: "", "UTF-8") } catch (e: Exception) { "" }
+                    val noteName = try {
+                        URLDecoder.decode(url.path?.trimStart('/') ?: "", "UTF-8")
+                    } catch (e: Exception) { "" }
                     if (noteName.isNotEmpty()) {
                         runOnUiThread { openWikiLink(noteName) }
                         return true
@@ -168,19 +179,20 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         webView.addJavascriptInterface(MarkdownBridge(this), "Android")
     }
 
-    /** Intercept vault:// URLs to serve local assets (images, etc.) from vault folder. */
-    private fun serveVaultAsset(url: Uri): WebResourceResponse? {
-        val encoded = url.toString().removePrefix("vault://")
-        val filename = try { URLDecoder.decode(encoded, "UTF-8") } catch (e: Exception) { encoded }
-        val vaultUriStr = prefs.vaultUri ?: return null
-        val vaultUri = Uri.parse(vaultUriStr)
-        return runCatching {
-            val file = VaultSearch.resolveRelativeAsset(this, vaultUri, currentDocumentUri, filename)
-                ?: return null
-            val mime = guessMime(filename)
-            val stream = contentResolver.openInputStream(file.uri) ?: return null
-            WebResourceResponse(mime, "utf-8", stream)
-        }.getOrNull()
+    /** Custom path handler for vault:// scheme via WebViewAssetLoader at /vault/ path. */
+    private inner class VaultPathHandler : WebViewAssetLoader.PathHandler {
+        override fun handle(path: String): WebResourceResponse? {
+            val filename = try { URLDecoder.decode(path.trimStart('/'), "UTF-8") } catch (e: Exception) { path.trimStart('/') }
+            val vaultUriStr = prefs.vaultUri ?: return null
+            val vaultUri = Uri.parse(vaultUriStr)
+            return runCatching {
+                val file = VaultSearch.resolveRelativeAsset(this@MainActivity, vaultUri, currentDocumentUri, filename)
+                    ?: return null
+                val mime = guessMime(filename)
+                val stream = contentResolver.openInputStream(file.uri) ?: return null
+                WebResourceResponse(mime, null, stream)
+            }.getOrNull()
+        }
     }
 
     private fun guessMime(name: String): String {
@@ -192,6 +204,15 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             "svg" -> "image/svg+xml"
             "webp" -> "image/webp"
             "bmp" -> "image/bmp"
+            "ico" -> "image/x-icon"
+            "mp4" -> "video/mp4"
+            "webm" -> "video/webm"
+            "ogv" -> "video/ogg"
+            "mov" -> "video/quicktime"
+            "mp3" -> "audio/mpeg"
+            "ogg" -> "audio/ogg"
+            "wav" -> "audio/wav"
+            "pdf" -> "application/pdf"
             else -> "application/octet-stream"
         }
     }
@@ -215,6 +236,9 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         displayNameOverride: String? = null,
         identityUri: String = readUri.toString()
     ) {
+        // Increment generation to cancel any in-flight load
+        val gen = loadGeneration.incrementAndGet()
+
         Thread {
             val result = runCatching {
                 val name = displayNameOverride
@@ -224,6 +248,8 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                 name to text
             }
             runOnUiThread {
+                // Stale load — a newer one is already running
+                if (gen != loadGeneration.get()) return@runOnUiThread
                 result.onSuccess { (name, text) ->
                     currentMarkdown = text
                     currentTitle = name
@@ -242,10 +268,17 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
 
     private fun renderCurrent() {
         if (!pageReady) return
-        js("window.appRender && window.appRender()")
-        js("window.appSetMode && window.appSetMode('$currentMode')")
-        applySettingsToWeb()
-        js("window.appRestoreScroll && window.appRestoreScroll()")
+        // Debounce: cancel pending render and schedule a fresh one
+        pendingRender?.let { renderHandler.removeCallbacks(it) }
+        val r = Runnable {
+            pendingRender = null
+            js("window.appRender && window.appRender()")
+            js("window.appSetMode && window.appSetMode('$currentMode')")
+            applySettingsToWeb()
+            js("window.appRestoreScroll && window.appRestoreScroll()")
+        }
+        pendingRender = r
+        renderHandler.postDelayed(r, 50)
     }
 
     private fun applySettingsToWeb() {
@@ -260,10 +293,11 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
     private fun bgColor(): Int =
         if (prefs.isDark(this)) 0xFF0D1117.toInt() else 0xFFFFFFFF.toInt()
 
-    private fun isMarkdownAllowed(name: String?): Boolean {
+    private fun isAllowedFile(name: String?): Boolean {
         if (name == null) return true
         val n = name.lowercase()
-        return n.endsWith(".md") || n.endsWith(".markdown")
+        return n.endsWith(".md") || n.endsWith(".markdown") ||
+               n.endsWith(".txt") || n.endsWith(".docx") || n.endsWith(".doc")
     }
 
     // ---- 自动更新检查 ----
@@ -271,12 +305,13 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
     private fun checkForUpdates() {
         val now = System.currentTimeMillis()
         val lastCheck = prefs.lastUpdateCheck
-        // Only check once per day
         if (now - lastCheck < TimeUnit.HOURS.toMillis(24)) return
         prefs.lastUpdateCheck = now
         Thread {
             val info = UpdateChecker.checkLatest() ?: return@Thread
-            val currentVersion = packageManager.getPackageInfo(packageName, 0).versionName ?: return@Thread
+            val currentVersion = runCatching {
+                packageManager.getPackageInfo(packageName, 0).versionName
+            }.getOrNull() ?: return@Thread
             if (UpdateChecker.isNewer(info.tagName, currentVersion)) {
                 runOnUiThread { showUpdateDialog(info) }
             }
@@ -284,14 +319,72 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
     }
 
     private fun showUpdateDialog(info: UpdateChecker.ReleaseInfo) {
-        AlertDialog.Builder(this)
+        val builder = AlertDialog.Builder(this)
             .setTitle(R.string.update_available_title)
             .setMessage(getString(R.string.update_available_msg, info.tagName))
-            .setPositiveButton(R.string.update_go) { _, _ ->
+            .setNegativeButton(android.R.string.cancel, null)
+
+        if (info.apkDownloadUrl != null) {
+            builder.setPositiveButton(R.string.update_download) { _, _ ->
+                downloadApk(info.apkDownloadUrl, info.tagName)
+            }
+        } else {
+            builder.setPositiveButton(R.string.update_go) { _, _ ->
                 startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(info.htmlUrl)))
             }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
+        }
+        builder.show()
+    }
+
+    private fun downloadApk(url: String, tagName: String) {
+        try {
+            val fileName = "MDReader-$tagName.apk"
+            val request = DownloadManager.Request(Uri.parse(url)).apply {
+                setTitle(getString(R.string.update_downloading, tagName))
+                setDescription(getString(R.string.app_name))
+                setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
+                setMimeType("application/vnd.android.package-archive")
+                allowScanningByMediaScanner()
+            }
+            val dm = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+            val downloadId = dm.enqueue(request)
+            Toast.makeText(this, R.string.update_downloading_toast, Toast.LENGTH_SHORT).show()
+
+            // Register receiver to trigger install when download completes
+            val receiver = object : BroadcastReceiver() {
+                override fun onReceive(ctx: Context, intent: Intent) {
+                    val id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1)
+                    if (id == downloadId) {
+                        unregisterReceiver(this)
+                        val apkUri = dm.getUriForDownloadedFile(downloadId) ?: return
+                        installApk(apkUri)
+                    }
+                }
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                registerReceiver(receiver, IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE),
+                    Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                @Suppress("UnspecifiedRegisterReceiverFlag")
+                registerReceiver(receiver, IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE))
+            }
+        } catch (e: Exception) {
+            // Fallback: open browser
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(UpdateChecker.RELEASES_PAGE)))
+        }
+    }
+
+    private fun installApk(apkUri: Uri) {
+        runCatching {
+            val install = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(apkUri, "application/vnd.android.package-archive")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(install)
+        }.onFailure {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(UpdateChecker.RELEASES_PAGE)))
+        }
     }
 
     // ---- 菜单 ----
@@ -321,7 +414,10 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean = when (item.itemId) {
         R.id.action_share -> { shareCurrentDocument(); true }
-        R.id.action_open -> { openPicker.launch(arrayOf("*/*")); true }
+        R.id.action_open -> {
+            openPicker.launch(arrayOf("*/*"))
+            true
+        }
         R.id.action_toc -> { js("window.appToggleToc && window.appToggleToc()"); true }
         R.id.action_search -> { js("window.appOpenSearch && window.appOpenSearch()"); true }
         R.id.action_toggle -> { toggleMode(); true }
@@ -432,6 +528,10 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             }
         )
 
+        // Frontmatter and citations toggles
+        sheet.switchFrontmatter.isChecked = prefs.showFrontmatter
+        sheet.switchCitations.isChecked = prefs.showCitations
+
         // Show current vault folder name
         val vaultStr = prefs.vaultUri
         sheet.tvVaultPath.text = if (vaultStr != null) {
@@ -440,9 +540,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             }.getOrDefault(vaultStr)
         } else getString(R.string.vault_not_set)
 
-        sheet.btnSelectVault.setOnClickListener {
-            vaultPicker.launch(null)
-        }
+        sheet.btnSelectVault.setOnClickListener { vaultPicker.launch(null) }
 
         sheet.sliderFont.addOnChangeListener { _, value, _ -> prefs.fontSize = value; updateLabels(sheet); applySettingsToWeb() }
         sheet.sliderLine.addOnChangeListener { _, value, _ -> prefs.lineHeight = value; updateLabels(sheet); applySettingsToWeb() }
@@ -456,6 +554,14 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                 }
                 applySettingsToWeb()
             }
+        }
+        sheet.switchFrontmatter.setOnCheckedChangeListener { _, checked ->
+            prefs.showFrontmatter = checked
+            applySettingsToWeb()
+        }
+        sheet.switchCitations.setOnCheckedChangeListener { _, checked ->
+            prefs.showCitations = checked
+            applySettingsToWeb()
         }
         sheet.btnReset.setOnClickListener {
             prefs.fontSize = Prefs.DEFAULT_FONT; prefs.lineHeight = Prefs.DEFAULT_LINE; prefs.paraGap = Prefs.DEFAULT_PARA
@@ -540,6 +646,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
     }
 
     override fun onDestroy() {
+        pendingRender?.let { renderHandler.removeCallbacks(it) }
         binding.webview.apply { (parent as? android.view.ViewGroup)?.removeView(this); destroy() }
         super.onDestroy()
     }
@@ -592,66 +699,84 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         return VaultSearch.search(this, Uri.parse(vaultUriStr), query)
     }
 
-    override fun openVaultFile(uri: String) {
-        runOnUiThread {
-            runCatching { loadDocument(Uri.parse(uri)) }
+    override fun searchVaultAsync(query: String, callbackId: String) {
+        val vaultUriStr = prefs.vaultUri
+        if (vaultUriStr == null) {
+            val escaped = org.json.JSONArray().toString()
+            runOnUiThread { js("window.appVaultSearchResult && window.appVaultSearchResult('${escapeJs(callbackId)}', '${escapeJs(escaped)}')") }
+            return
         }
+        Thread {
+            val result = VaultSearch.search(this, Uri.parse(vaultUriStr), query)
+            runOnUiThread {
+                js("window.appVaultSearchResult && window.appVaultSearchResult('${escapeJs(callbackId)}', ${org.json.JSONObject.quote(result)})")
+            }
+        }.start()
     }
+
+    override fun openVaultFile(uri: String) {
+        runOnUiThread { runCatching { loadDocument(Uri.parse(uri)) } }
+    }
+
+    override fun searchVaultForEmbed(ref: String): String {
+        val vaultUriStr = prefs.vaultUri ?: return ""
+        return runCatching {
+            VaultSearch.findFile(this, Uri.parse(vaultUriStr), ref.substringBeforeLast('.'))?.uri?.toString() ?: ""
+        }.getOrDefault("")
+    }
+
+    override fun loadEmbedContent(uri: String): String {
+        return runCatching {
+            FileUtils.readText(this, Uri.parse(uri))
+        }.getOrDefault("")
+    }
+
+    private fun escapeJs(s: String): String = s.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n")
 
     companion object {
         private const val ASSET_HOST = "appassets.androidplatform.net"
         private const val VIEWER_URL = "https://$ASSET_HOST/assets/viewer.html"
 
         private val WELCOME_MD = """
-# 👋 欢迎使用 MD 阅读器
+# 欢迎使用 MD 阅读器
 
-这是一个本地 **Markdown 阅读器**。下面用一段示例展示渲染效果，你可以立刻试试顶部的几个按钮。
+这是一个本地 **Markdown 阅读器**（v1.6.0）。
 
 ## 怎么用
 
 - 点击 **目录** 唤出大纲，点击标题快速跳转
 - 点击 **搜索** 在当前文档中搜索，也可切换为全库搜索
-- 点击 **源码 / 预览** 在两种呈现方式间切换；预览模式点击标题可折叠/展开
+- 点击 **源码 / 预览** 切换呈现方式；预览模式点击标题可折叠/展开
 - **点击屏幕中央** 调出「显示设置」（字号 / 行距 / 段距 / 主题 / Vault 文件夹）
 - 在设置中选择 **Vault 文件夹** 后，可使用 `[[wikilink]]` 导航与全库搜索
 - 重新打开同一文档时，会自动回到上次阅读位置
-- 打开文件后，顶部可一键 **转发** 完整 `.md`，也可一键 **收藏** 当前文档
 
-## 新功能（v1.5.1）
+## v1.6.0 新特性
 
-- `[[Page Name]]` — Obsidian wikilink 导航
-- `![[image.png]]` — 本地图片嵌入（需设置 Vault 文件夹）
-- Mermaid 图表渲染
-- YAML frontmatter 渲染
-- 全文搜索（点击搜索图标）
-- 跨文件全库搜索（需设置 Vault 文件夹）
-- 自动检查更新
-
-## Mermaid 示例
-
-```mermaid
-graph TD
-    A[开始] --> B{是否有 Vault?}
-    B -->|是| C[全库搜索]
-    B -->|否| D[设置 Vault 文件夹]
-    C --> E[找到文件]
-```
+- 支持 **.txt / .docx / .doc** 文档打开
+- **图片 & 视频**：Vault 内的图片和视频文件现在可正确加载
+- `![[doc.md]]` 内联展开：点击展开查看被引用文档内容
+- 显示设置新增「关闭元数据自动识别」和「关闭引用样式」开关
+- 搜索增强：全库搜索不再阻塞 UI
+- 自动更新：有新版本时可直接下载安装
 
 ## 支持的语法
 
 | 功能 | 是否支持 |
 | --- | :---: |
-| 标题 / 列表 | ✅ |
-| 表格 | ✅ |
+| 标题 / 列表 / 表格 | ✅ |
 | 代码高亮 | ✅ |
 | Mermaid 图表 | ✅ |
 | Wikilinks | ✅ |
 | Frontmatter | ✅ |
 | HTML 渲染 | ✅ |
+| 任务列表 `- [ ]` | ✅ |
+| 图片 & 视频（Vault 内）| ✅ |
+| TXT / DOCX 文档 | ✅ |
 
 ---
 
-打开一个文件开始阅读吧 📖
+打开一个文件开始阅读吧
         """.trimIndent()
     }
 }

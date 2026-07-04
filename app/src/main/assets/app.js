@@ -1,9 +1,48 @@
-/* MD 阅读器前端 v1.5.1：markdown-it 渲染、highlight.js 高亮、目录/标题折叠、
-   Obsidian wikilink 兼容、Mermaid 图表、YAML frontmatter、全局搜索。 */
+/* MD 阅读器前端 v1.6.0：markdown-it 渲染、highlight.js 高亮、目录/标题折叠、
+   Obsidian wikilink 兼容、Mermaid 图表、YAML frontmatter、全文/全库搜索、
+   任务列表、视频/图片嵌入、引用文档内联展开、异步全库搜索。 */
 (function () {
     'use strict';
 
-    /* ---------- markdown-it 初始化（启用 HTML 渲染）---------- */
+    var VAULT_BASE = 'https://appassets.androidplatform.net/vault/';
+
+    /* ---------- 任务列表渲染规则 ---------- */
+    function patchTaskLists(mdInstance) {
+        var defaultRender = mdInstance.renderer.rules.list_item_open ||
+            function (tokens, idx, options, env, self) { return self.renderToken(tokens, idx, options); };
+        mdInstance.renderer.rules.list_item_open = function (tokens, idx, options, env, self) {
+            return defaultRender(tokens, idx, options, env, self);
+        };
+
+        var coreRule = function (state) {
+            var blockTokens = state.tokens;
+            for (var i = 0; i < blockTokens.length; i++) {
+                if (blockTokens[i].type !== 'inline') continue;
+                var inlineTokens = blockTokens[i].children;
+                if (!inlineTokens || !inlineTokens.length) continue;
+                var first = inlineTokens[0];
+                if (!first || first.type !== 'softbreak' && first.type !== 'text') continue;
+                var text = first.content;
+                var isTask = /^\[([ xX])\]\s*/.test(text);
+                if (!isTask) continue;
+                var checked = /^\[[xX]\]/.test(text);
+                first.content = text.replace(/^\[[ xX]\]\s*/, '');
+                var checkbox = new state.Token('html_inline', '', 0);
+                checkbox.content = '<input type="checkbox" class="task-checkbox"' +
+                    (checked ? ' checked' : '') + ' disabled> ';
+                inlineTokens.unshift(checkbox);
+
+                // Mark parent li
+                var listOpen = blockTokens[i - 1];
+                if (listOpen && listOpen.type === 'list_item_open') {
+                    listOpen.attrSet('class', 'task-list-item');
+                }
+            }
+        };
+        mdInstance.core.ruler.push('task_lists', coreRule);
+    }
+
+    /* ---------- markdown-it 初始化 ---------- */
     var md = window.markdownit({
         html: true,
         linkify: true,
@@ -24,6 +63,7 @@
             return '<pre class="hljs"><code>' + md.utils.escapeHtml(str) + '</code></pre>';
         }
     });
+    patchTaskLists(md);
 
     var previewEl = document.getElementById('preview');
     var codeBlockEl = document.getElementById('code').querySelector('code');
@@ -39,6 +79,7 @@
     var collapsed = new Set();
     var saveTimer = null;
     var suppressSaveUntil = 0;
+    var currentSettings = {};
 
     function bridge() { return window.Android; }
     function isHeading(el) { return el.nodeType === 1 && /^H[1-6]$/.test(el.tagName); }
@@ -79,15 +120,27 @@
 
     /* ---------- Obsidian Wikilink 预处理 ---------- */
     function preprocessWikilinks(source) {
-        // ![[image.ext]] → ![image.ext](vault://image.ext)
+        // ![[image.ext]] → 直接渲染图片/视频/嵌入文档
         source = source.replace(/!\[\[([^\]]+)\]\]/g, function (_, ref) {
             var ext = ref.split('.').pop().toLowerCase();
             var imageExts = ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp', 'ico'];
+            var videoExts = ['mp4', 'webm', 'ogv', 'mov'];
             if (imageExts.indexOf(ext) >= 0) {
-                return '!['  + ref + '](vault://' + encodeURIComponent(ref) + ')';
+                var imgUrl = VAULT_BASE + encodeURIComponent(ref);
+                return '!['  + ref + '](' + imgUrl + ')';
             }
-            // Non-image embed: render as wikilink
-            return '[[' + ref + ']]';
+            if (videoExts.indexOf(ext) >= 0) {
+                var vidUrl = VAULT_BASE + encodeURIComponent(ref);
+                return '<div class="video-embed"><video controls preload="metadata" src="' +
+                    escapeHtml(vidUrl) + '"></video><p class="video-caption">' + escapeHtml(ref) + '</p></div>';
+            }
+            // 非图片/视频：生成可展开的引用块
+            return '<div class="embed-block" data-embed-ref="' + escapeHtml(ref) + '">' +
+                '<div class="embed-header" onclick="window._toggleEmbed(this)">' +
+                '<span class="embed-icon">&#128196;</span>' +
+                '<span class="embed-name">' + escapeHtml(ref) + '</span>' +
+                '<span class="embed-toggle">&#8964;</span></div>' +
+                '<div class="embed-content" style="display:none"></div></div>';
         });
 
         // [[Page|Display]] → [Display](mdreader://open/Page)
@@ -101,13 +154,61 @@
                 noteName = inner.trim();
                 display = noteName;
             }
-            // Strip .md extension from note name for matching
             var linkName = noteName.replace(/\.md$/i, '');
             return '[' + display + '](mdreader://open/' + encodeURIComponent(linkName) + ')';
         });
 
         return source;
     }
+
+    /* ---------- 引用文档展开 ---------- */
+    window._toggleEmbed = function (headerEl) {
+        var block = headerEl.parentElement;
+        var content = block.querySelector('.embed-content');
+        var toggle = headerEl.querySelector('.embed-toggle');
+        if (!content) return;
+        if (content.style.display !== 'none') {
+            content.style.display = 'none';
+            if (toggle) toggle.textContent = '⌄';
+            return;
+        }
+        // 展开：若已加载则直接显示
+        if (content.dataset.loaded === '1') {
+            content.style.display = 'block';
+            if (toggle) toggle.textContent = '⌃';
+            return;
+        }
+        // 异步加载
+        var ref = block.dataset.embedRef || '';
+        content.innerHTML = '<div class="embed-loading">加载中…</div>';
+        content.style.display = 'block';
+        if (toggle) toggle.textContent = '⌃';
+        setTimeout(function () {
+            try {
+                var b = bridge();
+                if (!b || !b.searchVaultForEmbed) {
+                    content.innerHTML = '<div class="embed-error">请先设置 Vault 文件夹</div>';
+                    return;
+                }
+                var uri = b.searchVaultForEmbed(ref);
+                if (!uri) {
+                    content.innerHTML = '<div class="embed-error">找不到文件：' + escapeHtml(ref) + '</div>';
+                    return;
+                }
+                var embedMd = b.loadEmbedContent(uri);
+                if (!embedMd) {
+                    content.innerHTML = '<div class="embed-error">内容为空</div>';
+                    return;
+                }
+                var parsed2 = parseFrontmatter(embedMd);
+                var bodyMd = preprocessWikilinks(parsed2.body);
+                content.innerHTML = '<div class="embed-inner markdown-body">' + md.render(bodyMd) + '</div>';
+                content.dataset.loaded = '1';
+            } catch (e) {
+                content.innerHTML = '<div class="embed-error">加载失败</div>';
+            }
+        }, 0);
+    };
 
     /* ---------- Mermaid 渲染 ---------- */
     var mermaidReady = false;
@@ -156,10 +257,14 @@
         var rawSource = '';
         try { var b = bridge(); if (b && b.getMarkdown) rawSource = b.getMarkdown() || ''; } catch (e) { rawSource = ''; }
 
+        // 立即清空旧内容，防止停留在上一个文档
+        previewEl.innerHTML = '';
+
         var parsed = parseFrontmatter(rawSource);
         var source = preprocessWikilinks(parsed.body);
 
-        var html = (parsed.meta ? renderFrontmatter(parsed.meta) : '') + md.render(source);
+        var showFm = currentSettings.showFrontmatter !== false;
+        var html = (parsed.meta && showFm ? renderFrontmatter(parsed.meta) : '') + md.render(source);
         previewEl.innerHTML = html;
 
         addCopyButtons();
@@ -322,6 +427,7 @@
     var searchMatches = [];
     var searchIdx = -1;
     var searchVaultMode = false;
+    var vaultSearchTimer = null;
 
     function openSearch() {
         searchOverlay.style.display = 'block';
@@ -339,19 +445,19 @@
         vaultResultsEl.style.display = 'none';
         vaultResultsEl.innerHTML = '';
         searchVaultMode = false;
+        if (vaultSearchTimer) { clearTimeout(vaultSearchTimer); vaultSearchTimer = null; }
     }
 
     function doSearch() {
         var q = searchInput.value.trim();
         if (searchVaultMode) {
-            doVaultSearch(q);
+            doVaultSearchDebounced(q);
             return;
         }
         clearHighlights();
         searchMatches = [];
         searchIdx = -1;
         if (!q) { searchCount.textContent = ''; return; }
-        // Walk text nodes in preview
         highlightText(previewEl, q);
         searchMatches = Array.prototype.slice.call(previewEl.querySelectorAll('.search-mark'));
         if (searchMatches.length > 0) {
@@ -389,7 +495,6 @@
         if (node.nodeType !== 1) return;
         var tag = node.tagName;
         if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'MARK') return;
-        // Walk children in reverse to avoid index issues after replacement
         var children = Array.prototype.slice.call(node.childNodes);
         children.forEach(function (c) { walkTextNodes(c, fn); });
     }
@@ -426,44 +531,81 @@
         scrollToMatch(searchIdx);
     }
 
+    /* 异步全库搜索 - 防止UI卡顿 */
+    function doVaultSearchDebounced(q) {
+        if (vaultSearchTimer) clearTimeout(vaultSearchTimer);
+        vaultResultsEl.innerHTML = q ? '<div class="vault-searching">搜索中…</div>' : '';
+        vaultResultsEl.style.display = q ? 'block' : 'none';
+        if (!q) return;
+        vaultSearchTimer = setTimeout(function () {
+            vaultSearchTimer = null;
+            doVaultSearch(q);
+        }, 300);
+    }
+
     function doVaultSearch(q) {
-        vaultResultsEl.innerHTML = '<div class="vault-searching">搜索中…</div>';
-        vaultResultsEl.style.display = 'block';
-        if (!q) { vaultResultsEl.innerHTML = ''; return; }
         try {
             var b = bridge();
-            if (!b || !b.searchVault) {
+            if (!b) {
+                vaultResultsEl.innerHTML = '<div class="vault-no-vault">请先在设置中选择 Vault 文件夹</div>';
+                return;
+            }
+            // 优先使用异步接口
+            if (b.searchVaultAsync) {
+                var cbId = 'vs_' + Date.now();
+                window._vaultSearchCallback = function (id, jsonStr) {
+                    if (id !== cbId) return;
+                    renderVaultResults(jsonStr);
+                };
+                b.searchVaultAsync(q, cbId);
+                return;
+            }
+            // 降级同步
+            if (!b.searchVault) {
                 vaultResultsEl.innerHTML = '<div class="vault-no-vault">请先在设置中选择 Vault 文件夹</div>';
                 return;
             }
             var json = b.searchVault(q);
-            var results = JSON.parse(json || '[]');
-            if (results.length === 0) {
-                vaultResultsEl.innerHTML = '<div class="vault-no-results">无结果</div>';
-                return;
-            }
-            var items = results.map(function (r) {
-                var div = document.createElement('div');
-                div.className = 'vault-result-item';
-                div.innerHTML = '<div class="vault-result-name">' + escapeHtml(r.name) + '</div>' +
-                    '<div class="vault-result-excerpt">' + escapeHtml(r.excerpt) + '</div>';
-                div.onclick = function () {
-                    closeSearch();
-                    try { if (bridge() && bridge().openVaultFile) bridge().openVaultFile(r.uri); } catch (e) { }
-                };
-                return div;
-            });
-            vaultResultsEl.innerHTML = '';
-            items.forEach(function (i) { vaultResultsEl.appendChild(i); });
+            renderVaultResults(json);
         } catch (e) {
             vaultResultsEl.innerHTML = '<div class="vault-no-vault">搜索出错</div>';
         }
     }
 
+    function renderVaultResults(json) {
+        var results;
+        try { results = JSON.parse(json || '[]'); } catch (e) { results = []; }
+        if (results.length === 0) {
+            vaultResultsEl.innerHTML = '<div class="vault-no-results">无结果</div>';
+            return;
+        }
+        var frag = document.createDocumentFragment();
+        results.forEach(function (r) {
+            var div = document.createElement('div');
+            div.className = 'vault-result-item';
+            div.innerHTML = '<div class="vault-result-name">' + escapeHtml(r.name) + '</div>' +
+                '<div class="vault-result-excerpt">' + escapeHtml(r.excerpt) + '</div>';
+            div.onclick = function () {
+                closeSearch();
+                try { if (bridge() && bridge().openVaultFile) bridge().openVaultFile(r.uri); } catch (e) { }
+            };
+            frag.appendChild(div);
+        });
+        vaultResultsEl.innerHTML = '';
+        vaultResultsEl.appendChild(frag);
+    }
+
+    // 供原生层回调
+    window.appVaultSearchResult = function (callbackId, jsonStr) {
+        if (window._vaultSearchCallback) {
+            window._vaultSearchCallback(callbackId, jsonStr);
+        }
+    };
+
     // Search UI wiring
     searchInput.addEventListener('input', function () {
         clearTimeout(searchInput._t);
-        searchInput._t = setTimeout(doSearch, 200);
+        searchInput._t = setTimeout(doSearch, 150);
     });
     searchInput.addEventListener('keydown', function (e) {
         if (e.key === 'Enter') { searchNext(); e.preventDefault(); }
@@ -497,8 +639,9 @@
             var t = ev.target;
             while (t && t !== document.body) {
                 var tag = t.tagName;
-                if (tag === 'A' || tag === 'BUTTON') return;
+                if (tag === 'A' || tag === 'BUTTON' || tag === 'INPUT') return;
                 if (t.classList && t.classList.contains('md-h')) return;
+                if (t.classList && (t.classList.contains('embed-header') || t.classList.contains('embed-block'))) return;
                 t = t.parentNode;
             }
             var w = window.innerWidth, h = window.innerHeight;
@@ -512,6 +655,7 @@
     /* ---------- 设置 / 模式 ---------- */
     function applySettings(s) {
         if (!s) return;
+        currentSettings = s;
         var root = document.documentElement;
         if (s.fontSize != null) root.style.setProperty('--font-size', s.fontSize + 'px');
         if (s.lineHeight != null) root.style.setProperty('--line-height', String(s.lineHeight));
@@ -522,9 +666,13 @@
             var lightSheet = document.getElementById('hljs-light');
             if (darkSheet) darkSheet.disabled = !s.dark;
             if (lightSheet) lightSheet.disabled = !!s.dark;
-            // Re-init mermaid with correct theme
             initMermaid(!!s.dark);
         }
+        // 引用块样式开关
+        if (s.showCitations != null) {
+            document.body.classList.toggle('hide-citations', !s.showCitations);
+        }
+        // frontmatter开关（需要重渲染，不在此处处理，render()中检查currentSettings）
     }
 
     function setMode(mode) {
