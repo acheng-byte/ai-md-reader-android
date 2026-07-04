@@ -93,12 +93,27 @@
         var yaml = source.slice(4, end).trim();
         var rest = source.slice(end + 4).replace(/^\n/, '');
         var meta = {};
+        var lastKey = null;
         yaml.split('\n').forEach(function (line) {
+            // YAML list item under previous key: "  - value"
+            var listMatch = line.match(/^[ \t]+-\s*(.*)/);
+            if (listMatch && lastKey) {
+                var item = listMatch[1].trim();
+                if (item) {
+                    var cur = meta[lastKey];
+                    if (Array.isArray(cur)) {
+                        cur.push(item);
+                    } else {
+                        meta[lastKey] = cur === '' ? [item] : [cur, item];
+                    }
+                }
+                return;
+            }
             var colon = line.indexOf(':');
             if (colon < 0) return;
             var key = line.slice(0, colon).trim();
             var val = line.slice(colon + 1).trim();
-            if (key) meta[key] = val;
+            if (key) { meta[key] = val; lastKey = key; }
         });
         return { meta: meta, body: rest };
     }
@@ -106,8 +121,16 @@
     function renderFrontmatter(meta) {
         if (!meta || Object.keys(meta).length === 0) return '';
         var rows = Object.keys(meta).map(function (k) {
-            return '<tr><td class="fm-key">' + escapeHtml(k) + '</td><td class="fm-val">' +
-                escapeHtml(meta[k]) + '</td></tr>';
+            var v = meta[k];
+            var valHtml;
+            if (Array.isArray(v)) {
+                valHtml = v.map(function (item) {
+                    return '<span class="fm-tag">' + escapeHtml(item) + '</span>';
+                }).join('');
+            } else {
+                valHtml = escapeHtml(v);
+            }
+            return '<tr><td class="fm-key">' + escapeHtml(k) + '</td><td class="fm-val">' + valHtml + '</td></tr>';
         }).join('');
         return '<div class="frontmatter"><table>' + rows + '</table></div>';
     }
@@ -159,6 +182,50 @@
         });
 
         return source;
+    }
+
+    /* ---------- 普通 Markdown 图片路径 → Vault URL ---------- */
+    function preprocessImages(source) {
+        return source.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, function (match, alt, src) {
+            // 跳过绝对 URL、data: URI、已经是 vault 路径的
+            if (/^(https?:|data:|#|\/\/|https:\/\/appassets)/.test(src)) return match;
+            // 跳过绝对路径
+            if (src.charAt(0) === '/') return match;
+            return '![' + alt + '](' + VAULT_BASE + encodeURIComponent(src) + ')';
+        });
+    }
+
+    /* ---------- Obsidian Callout 后处理 ---------- */
+    function calloutIcon(type) {
+        var icons = {
+            info: 'ℹ', warning: '⚠', caution: '⚠', danger: '✖', error: '✖',
+            tip: '💡', hint: '💡', success: '✔', check: '✔', done: '✔',
+            question: '?', help: '?', faq: '?', note: '✎', abstract: '☰',
+            summary: '☰', bug: '☁', quote: '❝', cite: '❝'
+        };
+        return icons[type] || '◆';
+    }
+
+    function postprocessCallouts(container, showFm) {
+        var metaTypes = { info: 1, metadata: 1, abstract: 1, summary: 1 };
+        container.querySelectorAll('blockquote').forEach(function (bq) {
+            var first = bq.firstElementChild;
+            if (!first) return;
+            var text = (first.textContent || '').trim();
+            var m = text.match(/^\[!([^\]\s]+)\](?:\s+(.*?))?\s*$/);
+            if (!m) return;
+            var type = m[1].trim().toLowerCase();
+            var title = (m[2] || (type.charAt(0).toUpperCase() + type.slice(1))).trim();
+            first.remove();
+            bq.classList.add('callout', 'callout-' + type);
+            var titleEl = document.createElement('div');
+            titleEl.className = 'callout-title';
+            titleEl.innerHTML = '<span class="callout-icon">' + calloutIcon(type) + '</span>' +
+                '<span>' + escapeHtml(title) + '</span>';
+            bq.insertBefore(titleEl, bq.firstChild);
+            // metadata 类型 callout 跟随 showFrontmatter 开关
+            if (!showFm && metaTypes[type]) bq.style.display = 'none';
+        });
     }
 
     /* ---------- 引用文档展开 ---------- */
@@ -261,12 +328,13 @@
         previewEl.innerHTML = '';
 
         var parsed = parseFrontmatter(rawSource);
-        var source = preprocessWikilinks(parsed.body);
+        var source = preprocessImages(preprocessWikilinks(parsed.body));
 
         var showFm = currentSettings.showFrontmatter !== false;
         var html = (parsed.meta && showFm ? renderFrontmatter(parsed.meta) : '') + md.render(source);
         previewEl.innerHTML = html;
 
+        postprocessCallouts(previewEl, showFm);
         addCopyButtons();
         renderMermaid();
 
@@ -655,6 +723,8 @@
     /* ---------- 设置 / 模式 ---------- */
     function applySettings(s) {
         if (!s) return;
+        var prevFm = currentSettings.showFrontmatter;
+        var prevCit = currentSettings.showCitations;
         currentSettings = s;
         var root = document.documentElement;
         if (s.fontSize != null) root.style.setProperty('--font-size', s.fontSize + 'px');
@@ -668,11 +738,13 @@
             if (lightSheet) lightSheet.disabled = !!s.dark;
             initMermaid(!!s.dark);
         }
-        // 引用块样式开关
         if (s.showCitations != null) {
             document.body.classList.toggle('hide-citations', !s.showCitations);
         }
-        // frontmatter开关（需要重渲染，不在此处处理，render()中检查currentSettings）
+        // frontmatter 或 citations 开关变化时立即重渲染
+        if (prevFm !== s.showFrontmatter || prevCit !== s.showCitations) {
+            render();
+        }
     }
 
     function setMode(mode) {
