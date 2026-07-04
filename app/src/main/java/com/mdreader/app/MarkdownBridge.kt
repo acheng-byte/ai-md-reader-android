@@ -3,7 +3,7 @@ package com.mdreader.app
 import android.webkit.JavascriptInterface
 
 /**
- * 暴露给 WebView 内 JS 的桥。v1.5.1 新增：wikilink 导航、Vault 搜索、文件打开。
+ * 暴露给 WebView 内 JS 的桥。
  * 注意：以下方法运行在 WebView 的 binder 线程，provider 实现需自行切回主线程。
  */
 class MarkdownBridge(private val provider: Provider) {
@@ -17,10 +17,14 @@ class MarkdownBridge(private val provider: Provider) {
         fun copyText(text: String)
         fun onCenterTap()
         fun saveReadingRatio(ratio: Double)
-        // v1.5.1
         fun openWikiLink(noteName: String)
         fun searchVault(query: String): String
+        fun searchVaultAsync(query: String, callbackId: String)
         fun openVaultFile(uri: String)
+        /** 按文件名在 Vault 中查找文件，返回 URI 字符串（供内联展开用）。 */
+        fun searchVaultForEmbed(ref: String): String
+        /** 加载 wikilink 嵌入文档的内容，返回 Markdown 文本（供内联展开用）。 */
+        fun loadEmbedContent(uri: String): String
     }
 
     @JavascriptInterface fun getMarkdown(): String = provider.markdown()
@@ -32,15 +36,22 @@ class MarkdownBridge(private val provider: Provider) {
     @JavascriptInterface fun onCenterTap() = provider.onCenterTap()
     @JavascriptInterface fun saveScrollRatio(ratio: Double) = provider.saveReadingRatio(ratio)
 
-    /** 导航到 [[wikilink]] 指向的文档（在原生侧解析 Vault 文件夹）。 */
     @JavascriptInterface
     fun openWikiLink(noteName: String) = provider.openWikiLink(noteName)
 
-    /** 全库搜索，返回 JSON 数组 [{uri, name, excerpt}]。 */
     @JavascriptInterface
     fun searchVault(query: String): String = provider.searchVault(query)
 
-    /** 从搜索结果打开指定文件（content:// URI 字符串）。 */
+    @JavascriptInterface
+    fun searchVaultAsync(query: String, callbackId: String) = provider.searchVaultAsync(query, callbackId)
+
     @JavascriptInterface
     fun openVaultFile(uri: String) = provider.openVaultFile(uri)
+
+    @JavascriptInterface
+    fun searchVaultForEmbed(ref: String): String = runCatching { provider.searchVaultForEmbed(ref) }.getOrDefault("")
+
+    /** 同步加载嵌入文档内容（在 binder 线程执行 I/O，不阻塞 UI 线程）。 */
+    @JavascriptInterface
+    fun loadEmbedContent(uri: String): String = runCatching { provider.loadEmbedContent(uri) }.getOrDefault("")
 }

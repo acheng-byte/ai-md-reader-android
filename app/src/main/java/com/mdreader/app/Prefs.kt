@@ -43,6 +43,16 @@ class Prefs(context: Context) {
         get() = sp.getLong(KEY_LAST_UPDATE_CHECK, 0L)
         set(v) { sp.edit().putLong(KEY_LAST_UPDATE_CHECK, v).apply() }
 
+    /** 是否自动解析并显示 YAML frontmatter 元数据表格 */
+    var showFrontmatter: Boolean
+        get() = sp.getBoolean(KEY_SHOW_FRONTMATTER, true)
+        set(v) { sp.edit().putBoolean(KEY_SHOW_FRONTMATTER, v).apply() }
+
+    /** 是否显示引用块样式（blockquote / citation）*/
+    var showCitations: Boolean
+        get() = sp.getBoolean(KEY_SHOW_CITATIONS, true)
+        set(v) { sp.edit().putBoolean(KEY_SHOW_CITATIONS, v).apply() }
+
     fun isDark(context: Context): Boolean = when (themeMode) {
         1 -> false
         2 -> true
@@ -57,6 +67,8 @@ class Prefs(context: Context) {
         put("lineHeight", round1(lineHeight))
         put("paraGap", round1(paraGap))
         put("dark", isDark(context))
+        put("showFrontmatter", showFrontmatter)
+        put("showCitations", showCitations)
     }.toString()
 
     private fun round1(v: Float): Double = (v * 10).roundToInt() / 10.0
@@ -82,5 +94,7 @@ class Prefs(context: Context) {
         private const val KEY_MODE = "view_mode"
         private const val KEY_VAULT_URI = "vault_uri"
         private const val KEY_LAST_UPDATE_CHECK = "last_update_check"
+        private const val KEY_SHOW_FRONTMATTER = "show_frontmatter"
+        private const val KEY_SHOW_CITATIONS = "show_citations"
     }
 }

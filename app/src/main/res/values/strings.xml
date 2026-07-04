@@ -18,9 +18,13 @@
     <string name="theme_light">浅色</string>
     <string name="theme_dark">深色</string>
     <string name="reset_default">恢复默认</string>
+    <string name="label_content_options">内容解析</string>
+    <string name="label_frontmatter">自动识别元数据（Frontmatter）</string>
+    <string name="label_citations">显示引用块样式</string>
 
     <string name="val_font">%1$d px</string>
     <string name="open_failed">打开失败：%1$s</string>
+    <string name="only_md">请选择 Markdown / TXT / DOCX 文件</string>
 
     <string name="action_toc">目录</string>
     <string name="action_history">打开历史</string>
@@ -34,8 +38,6 @@
     <string name="history_expired">授权过期</string>
     <string name="toast_expired">打开授权已过期，请重新从来源（如微信）打开</string>
     <string name="toast_deleted">原文件已被删除，无法打开</string>
-
-    <string name="only_md">请选择 Markdown 文件（.md / .markdown）</string>
 
     <string name="action_favorite">收藏</string>
     <string name="action_unfavorite">取消收藏</string>
@@ -62,6 +64,9 @@
 
     <!-- Auto-update -->
     <string name="update_available_title">发现新版本</string>
-    <string name="update_available_msg">新版本 %1$s 已发布，是否前往下载？</string>
+    <string name="update_available_msg">新版本 %1$s 已发布，立即下载安装？</string>
     <string name="update_go">前往下载</string>
+    <string name="update_download">立即下载</string>
+    <string name="update_downloading">正在下载 %1$s…</string>
+    <string name="update_downloading_toast">开始下载更新，完成后请安装</string>
 </resources>
