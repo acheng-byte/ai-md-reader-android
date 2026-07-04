@@ -308,6 +308,16 @@ body[data-mode="code"] #code { display: block; }
     border: 1px solid var(--border);
     word-break: break-word;
 }
+.frontmatter .fm-tag {
+    display: inline-block;
+    background: var(--link);
+    color: #fff;
+    border-radius: 4px;
+    padding: 1px 7px;
+    font-size: 0.8em;
+    margin: 2px 3px 2px 0;
+    opacity: 0.85;
+}
 
 /* ============ Mermaid ============ */
 .mermaid-container {
@@ -511,8 +521,51 @@ body.dark mark.search-mark-active { background: #b36e00; outline-color: #b36e00;
 }
 .embed-error { color: #e05252; }
 
-/* ============ 引用块隐藏开关 ============ */
-body.hide-citations .markdown-body blockquote {
+/* ============ Obsidian Callout ============ */
+.markdown-body .callout {
+    border-left: 4px solid var(--link);
+    border-radius: 6px;
+    background: var(--code-bg);
+    padding: 0;
+    margin-bottom: var(--para-gap);
+    color: inherit;
+    overflow: hidden;
+}
+.markdown-body .callout-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    font-weight: 600;
+    font-size: 0.9em;
+    background: rgba(0,0,0,0.06);
+    border-bottom: 1px solid var(--border);
+}
+body.dark .markdown-body .callout-title {
+    background: rgba(255,255,255,0.06);
+}
+.markdown-body .callout-icon {
+    font-style: normal;
+    font-size: 1em;
+    min-width: 1.2em;
+    text-align: center;
+}
+.markdown-body .callout > *:not(.callout-title) {
+    padding: 8px 14px;
+    margin: 0;
+}
+.markdown-body .callout > *:not(.callout-title):last-child {
+    padding-bottom: 10px;
+}
+.markdown-body .callout-warning, .markdown-body .callout-caution { border-left-color: #e8a000; }
+.markdown-body .callout-danger,  .markdown-body .callout-error   { border-left-color: #e05252; }
+.markdown-body .callout-success, .markdown-body .callout-check,
+.markdown-body .callout-done                                      { border-left-color: #3cb978; }
+.markdown-body .callout-tip,     .markdown-body .callout-hint    { border-left-color: #7c6af7; }
+.markdown-body .callout-note                                      { border-left-color: #4a9eff; }
+
+/* ============ 引用块隐藏开关（callout 不受影响）============ */
+body.hide-citations .markdown-body blockquote:not(.callout) {
     border-left: none;
     padding: 0;
     margin: 0;
