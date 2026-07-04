@@ -187,11 +187,11 @@
     /* ---------- 普通 Markdown 图片路径 → Vault URL ---------- */
     function preprocessImages(source) {
         return source.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, function (match, alt, src) {
-            // 跳过绝对 URL、data: URI、已经是 vault 路径的
+            // 跳过网络 URL、data: URI、已经是 vault 路径的
             if (/^(https?:|data:|#|\/\/|https:\/\/appassets)/.test(src)) return match;
-            // 跳过绝对路径
-            if (src.charAt(0) === '/') return match;
-            return '![' + alt + '](' + VAULT_BASE + encodeURIComponent(src) + ')';
+            // /vault-root/path → 去掉开头的 / 当作 vault 根路径处理（Obsidian 绝对引用惯例）
+            var vaultPath = src.charAt(0) === '/' ? src.slice(1) : src;
+            return '![' + alt + '](' + VAULT_BASE + encodeURIComponent(vaultPath) + ')';
         });
     }
 
