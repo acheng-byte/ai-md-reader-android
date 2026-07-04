@@ -5,7 +5,7 @@ import android.content.res.Configuration
 import org.json.JSONObject
 import kotlin.math.roundToInt
 
-/** SharedPreferences 封装：字号、行间距、段间距、主题、视图模式，并生成给 WebView 的设置 JSON。 */
+/** SharedPreferences 封装：字号、行间距、段间距、主题、视图模式，以及 Vault 路径等扩展设置。 */
 class Prefs(context: Context) {
 
     private val sp = context.applicationContext
@@ -33,6 +33,16 @@ class Prefs(context: Context) {
         get() = sp.getString(KEY_MODE, DEFAULT_MODE) ?: DEFAULT_MODE
         set(v) { sp.edit().putString(KEY_MODE, v).apply() }
 
+    /** Vault 文件夹的持久化 content:// URI（null = 未设置） */
+    var vaultUri: String?
+        get() = sp.getString(KEY_VAULT_URI, null)
+        set(v) { sp.edit().putString(KEY_VAULT_URI, v).apply() }
+
+    /** 最后一次检查更新的时间戳（ms），避免每次启动都请求 */
+    var lastUpdateCheck: Long
+        get() = sp.getLong(KEY_LAST_UPDATE_CHECK, 0L)
+        set(v) { sp.edit().putLong(KEY_LAST_UPDATE_CHECK, v).apply() }
+
     fun isDark(context: Context): Boolean = when (themeMode) {
         1 -> false
         2 -> true
@@ -42,7 +52,6 @@ class Prefs(context: Context) {
         }
     }
 
-    /** 供 evaluateJavascript / JS 桥使用，数值已规整避免浮点噪声。 */
     fun settingsJson(context: Context): String = JSONObject().apply {
         put("fontSize", fontSize.roundToInt())
         put("lineHeight", round1(lineHeight))
@@ -71,5 +80,7 @@ class Prefs(context: Context) {
         private const val KEY_PARA = "para_gap"
         private const val KEY_THEME = "theme_mode"
         private const val KEY_MODE = "view_mode"
+        private const val KEY_VAULT_URI = "vault_uri"
+        private const val KEY_LAST_UPDATE_CHECK = "last_update_check"
     }
 }

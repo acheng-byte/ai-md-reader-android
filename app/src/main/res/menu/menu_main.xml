@@ -16,6 +16,13 @@
         android:title="@string/action_toc"
         app:showAsAction="always" />
 
+    <!-- 常显：搜索 -->
+    <item
+        android:id="@+id/action_search"
+        android:icon="@drawable/ic_search"
+        android:title="@string/action_search"
+        app:showAsAction="always" />
+
     <!-- 常显：源码 / 预览切换 -->
     <item
         android:id="@+id/action_toggle"
@@ -23,14 +30,14 @@
         android:title="@string/action_view_code"
         app:showAsAction="always" />
 
-    <!-- 常显：收藏 / 取消收藏切换（图标随状态在代码中切换为实心/空心星） -->
+    <!-- 常显：收藏 / 取消收藏切换 -->
     <item
         android:id="@+id/action_favorite"
         android:icon="@drawable/ic_star_border"
         android:title="@string/action_favorite"
         app:showAsAction="always" />
 
-    <!-- 以下进入「更多菜单」(⋮) -->
+    <!-- 更多菜单 (⋮) -->
     <item
         android:id="@+id/action_open"
         android:icon="@drawable/ic_open"
