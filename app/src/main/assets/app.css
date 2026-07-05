@@ -573,3 +573,40 @@ body.hide-citations .markdown-body blockquote:not(.callout) {
     background: none;
     font-style: normal;
 }
+
+/* ============ Obsidian ==高亮== ============ */
+.ob-highlight {
+    background: #fff176;
+    color: #1f2328;
+    border-radius: 2px;
+    padding: 0 2px;
+}
+body.dark .ob-highlight {
+    background: #5a5200;
+    color: #e6edf3;
+}
+
+/* ============ Obsidian #标签 ============ */
+.ob-tag {
+    display: inline-block;
+    font-size: 0.82em;
+    color: var(--link);
+    background: color-mix(in srgb, var(--link) 12%, transparent);
+    border-radius: 10px;
+    padding: 1px 7px;
+    margin: 0 1px;
+    vertical-align: middle;
+    white-space: nowrap;
+}
+
+/* ============ 脚注 ============ */
+.footnote-ref sup, .footnote-ref a {
+    font-size: 0.75em;
+    color: var(--link);
+    text-decoration: none;
+}
+.footnotes-sep { margin: 2em 0 1em; }
+.footnotes { font-size: 0.88em; color: var(--muted); }
+.footnotes ol { padding-left: 1.5em; }
+.footnote-item { margin: 0.4em 0; }
+.footnote-backref { color: var(--link); text-decoration: none; margin-left: 4px; }

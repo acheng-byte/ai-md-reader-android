@@ -1,6 +1,7 @@
-/* MD 阅读器前端 v1.6.0：markdown-it 渲染、highlight.js 高亮、目录/标题折叠、
+/* MD 阅读器前端 v1.6.2：markdown-it 渲染、highlight.js 高亮、目录/标题折叠、
    Obsidian wikilink 兼容、Mermaid 图表、YAML frontmatter、全文/全库搜索、
-   任务列表、视频/图片嵌入、引用文档内联展开、异步全库搜索。 */
+   任务列表、视频/图片嵌入、引用文档内联展开、异步全库搜索、
+   ==高亮==、#标签、脚注、更多 Obsidian 格式。 */
 (function () {
     'use strict';
 
@@ -64,6 +65,82 @@
         }
     });
     patchTaskLists(md);
+
+    /* ---------- ==highlight== 支持 ---------- */
+    md.core.ruler.push('obsidian_highlight', function (state) {
+        state.tokens.forEach(function (token) {
+            if (token.type !== 'inline' || !token.children) return;
+            var out = [];
+            token.children.forEach(function (t) {
+                if (t.type !== 'text' || t.content.indexOf('==') < 0) { out.push(t); return; }
+                var text = t.content;
+                var result = text.replace(/==([^=\n]+)==/g, function (_, inner) {
+                    return '\x00MARK\x01' + inner + '\x00/MARK\x01';
+                });
+                if (result === text) { out.push(t); return; }
+                var parts = result.split(/(\x00MARK\x01[^\x00]*\x00\/MARK\x01)/);
+                parts.forEach(function (part) {
+                    var m = part.match(/^\x00MARK\x01(.*)\x00\/MARK\x01$/);
+                    if (m) {
+                        var open = new state.Token('html_inline', '', 0);
+                        open.content = '<mark class="ob-highlight">' + escapeHtml(m[1]) + '</mark>';
+                        out.push(open);
+                    } else if (part) {
+                        var nt = new state.Token('text', '', 0);
+                        nt.content = part;
+                        out.push(nt);
+                    }
+                });
+            });
+            token.children = out;
+        });
+    });
+
+    /* ---------- %%Obsidian 注释%% 隐藏 ---------- */
+    md.core.ruler.push('obsidian_comment', function (state) {
+        state.tokens.forEach(function (token) {
+            if (token.type !== 'inline' || !token.children) return;
+            var out = [];
+            token.children.forEach(function (t) {
+                if (t.type !== 'text' || t.content.indexOf('%%') < 0) { out.push(t); return; }
+                var result = t.content.replace(/%%[^%]*%%/g, '');
+                var nt = new state.Token('text', '', 0);
+                nt.content = result;
+                out.push(nt);
+            });
+            token.children = out;
+        });
+    });
+
+    /* ---------- #标签 高亮 ---------- */
+    md.core.ruler.push('obsidian_tags', function (state) {
+        state.tokens.forEach(function (token) {
+            if (token.type !== 'inline' || !token.children) return;
+            var out = [];
+            token.children.forEach(function (t) {
+                if (t.type !== 'text') { out.push(t); return; }
+                var text = t.content;
+                var result = text.replace(/(^|[\s一-鿿（【「『])(#[\w一-鿿\-_/]+)/g, function (_, pre, tag) {
+                    return pre + '\x00TAG\x01' + tag + '\x00/TAG\x01';
+                });
+                if (result === text) { out.push(t); return; }
+                var parts = result.split(/(\x00TAG\x01[^\x00]*\x00\/TAG\x01)/);
+                parts.forEach(function (part) {
+                    var m = part.match(/^\x00TAG\x01(.*)\x00\/TAG\x01$/);
+                    if (m) {
+                        var ht = new state.Token('html_inline', '', 0);
+                        ht.content = '<span class="ob-tag">' + escapeHtml(m[1]) + '</span>';
+                        out.push(ht);
+                    } else if (part) {
+                        var nt = new state.Token('text', '', 0);
+                        nt.content = part;
+                        out.push(nt);
+                    }
+                });
+            });
+            token.children = out;
+        });
+    });
 
     var previewEl = document.getElementById('preview');
     var codeBlockEl = document.getElementById('code').querySelector('code');
@@ -181,6 +258,48 @@
             return '[' + display + '](mdreader://open/' + encodeURIComponent(linkName) + ')';
         });
 
+        return source;
+    }
+
+    /* ---------- 脚注预处理 ---------- */
+    function preprocessFootnotes(source) {
+        // Collect definitions: [^1]: text
+        var defs = {};
+        source = source.replace(/^\[\^([^\]]+)\]:\s*(.+)$/gm, function (_, id, text) {
+            defs[id] = text.trim();
+            return '';
+        });
+        if (Object.keys(defs).length === 0) return source;
+        // Replace inline references: [^1]
+        var counter = 0;
+        var order = [];
+        source = source.replace(/\[\^([^\]]+)\]/g, function (_, id) {
+            if (!defs[id]) return _; // unknown ref, leave as-is
+            if (order.indexOf(id) < 0) order.push(id);
+            var n = order.indexOf(id) + 1;
+            return '<sup class="footnote-ref"><a href="#fn-' + escapeHtml(id) + '" id="fnref-' + escapeHtml(id) + '">[' + n + ']</a></sup>';
+        });
+        // Append footnotes section
+        if (order.length > 0) {
+            var fnHtml = '\n\n<hr class="footnotes-sep">\n<section class="footnotes"><ol>\n';
+            order.forEach(function (id) {
+                fnHtml += '<li id="fn-' + escapeHtml(id) + '" class="footnote-item">' + defs[id] +
+                    ' <a href="#fnref-' + escapeHtml(id) + '" class="footnote-backref">↩</a></li>\n';
+            });
+            fnHtml += '</ol></section>';
+            source += fnHtml;
+        }
+        return source;
+    }
+
+    /* ---------- Obsidian [[#Heading]] 内部链接处理 ---------- */
+    function preprocessInternalLinks(source) {
+        // [[#Heading]] → anchor link
+        source = source.replace(/\[\[#([^\]|]+)(\|[^\]]*)?\]\]/g, function (_, heading, display) {
+            var text = display ? display.slice(1).trim() : heading.trim();
+            var anchor = heading.trim().toLowerCase().replace(/\s+/g, '-').replace(/[^\w一-鿿-]/g, '');
+            return '[' + escapeHtml(text) + '](#' + anchor + ')';
+        });
         return source;
     }
 
@@ -328,7 +447,7 @@
         previewEl.innerHTML = '';
 
         var parsed = parseFrontmatter(rawSource);
-        var source = preprocessImages(preprocessWikilinks(parsed.body));
+        var source = preprocessFootnotes(preprocessInternalLinks(preprocessImages(preprocessWikilinks(parsed.body))));
 
         var showFm = currentSettings.showFrontmatter !== false;
         var html = (parsed.meta && showFm ? renderFrontmatter(parsed.meta) : '') + md.render(source);
@@ -469,9 +588,24 @@
         headings.forEach(function (h) {
             var a = document.createElement('a');
             a.className = 'toc-item lvl-' + h.level;
-            a.textContent = (h.el.textContent || '').trim() || '(无标题)';
-            a.href = 'javascript:void(0)';
-            a.onclick = function () { closeToc(); scrollToHeading(h.el); };
+            // Strip leading # symbols (from Obsidian-style #tag headings)
+            var raw = (h.el.textContent || '').trim();
+            a.textContent = raw.replace(/^[#\s]+/, '') || raw || '(无标题)';
+            var headingId = h.el.id;
+            a.href = '#';
+            a.onclick = function (e) {
+                e.preventDefault();
+                closeToc();
+                // Use ID lookup to avoid stale element reference issues
+                var target = document.getElementById(headingId);
+                if (!target) return;
+                expandAncestors(target);
+                requestAnimationFrame(function () {
+                    requestAnimationFrame(function () {
+                        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    });
+                });
+            };
             tocListEl.appendChild(a);
         });
     }
