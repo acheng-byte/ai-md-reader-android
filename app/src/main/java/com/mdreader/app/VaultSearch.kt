@@ -61,7 +61,27 @@ object VaultSearch {
 
     fun findFile(context: Context, vaultUri: Uri, noteName: String): DocumentFile? {
         val root = DocumentFile.fromTreeUri(context, vaultUri) ?: return null
-        return findInDir(root, noteName)
+        // Strip heading anchor: [[File#Heading]] → "File"
+        val cleanName = noteName.substringBefore('#').trim()
+        // Handle path-based wikilinks: [[Folder/Filename]]
+        if (cleanName.contains('/')) {
+            val parts = cleanName.split('/').filter { it.isNotEmpty() }
+            val filename = parts.last()
+            val dirParts = parts.dropLast(1)
+            // Try exact path navigation first
+            var dir: DocumentFile? = root
+            for (part in dirParts) {
+                dir = dir?.listFiles()?.find { it.isDirectory && (it.name ?: "").equals(part, ignoreCase = true) }
+                if (dir == null) break
+            }
+            if (dir != null) {
+                val found = findInDir(dir, filename)
+                if (found != null) return found
+            }
+            // Fallback: search entire vault by filename only
+            return findInDir(root, filename)
+        }
+        return findInDir(root, cleanName)
     }
 
     private fun findInDir(dir: DocumentFile, noteName: String): DocumentFile? {

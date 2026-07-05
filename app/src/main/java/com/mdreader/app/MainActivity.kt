@@ -111,6 +111,10 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             currentMarkdown = WELCOME_MD
             currentTitle = getString(R.string.app_name)
             supportActionBar?.title = currentTitle
+            // Auto-show history panel on launch if there's any history
+            if (history.all().isNotEmpty()) {
+                webView.post { showHistory() }
+            }
         }
         webView.setBackgroundColor(bgColor())
         webView.loadUrl(VIEWER_URL)
@@ -740,7 +744,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         private val WELCOME_MD = """
 # 欢迎使用 MD 阅读器
 
-这是一个本地 **Markdown 阅读器**（v1.6.0）。
+这是一个本地 **Markdown 阅读器**（v1.6.2）。
 
 ## 怎么用
 
@@ -750,15 +754,20 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
 - **点击屏幕中央** 调出「显示设置」（字号 / 行距 / 段距 / 主题 / Vault 文件夹）
 - 在设置中选择 **Vault 文件夹** 后，可使用 `[[wikilink]]` 导航与全库搜索
 - 重新打开同一文档时，会自动回到上次阅读位置
+- 启动时自动弹出打开历史，快速继续阅读
 
-## v1.6.0 新特性
+## v1.6.2 更新
 
-- 支持 **.txt / .docx / .doc** 文档打开
-- **图片 & 视频**：Vault 内的图片和视频文件现在可正确加载
-- `![[doc.md]]` 内联展开：点击展开查看被引用文档内容
-- 显示设置新增「关闭元数据自动识别」和「关闭引用样式」开关
-- 搜索增强：全库搜索不再阻塞 UI
-- 自动更新：有新版本时可直接下载安装
+- **修复**：`[[文件夹/文件名]]` 路径式 Wikilink 无法跳转
+- **修复**：目录项前多余的 `#` 符号已去除
+- **修复**：目录点击无法跳转
+- **修复**：TXT 文件 GBK/GB2312 编码显示乱码
+- **新增**：启动时自动弹出打开历史面板
+- **新增**：`==高亮==` Obsidian 高亮语法
+- **新增**：`%%注释%%` 隐藏内容
+- **新增**：`#标签` 样式显示
+- **新增**：脚注 `[^1]` 支持
+- **新增**：`[[#标题]]` 内部锚点链接
 
 ## 支持的语法
 
@@ -767,12 +776,19 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
 | 标题 / 列表 / 表格 | ✅ |
 | 代码高亮 | ✅ |
 | Mermaid 图表 | ✅ |
-| Wikilinks | ✅ |
-| Frontmatter | ✅ |
+| Wikilinks `[[链接]]` | ✅ |
+| 路径式 Wikilinks `[[目录/文件]]` | ✅ |
+| Frontmatter 元数据 | ✅ |
 | HTML 渲染 | ✅ |
 | 任务列表 `- [ ]` | ✅ |
 | 图片 & 视频（Vault 内）| ✅ |
-| TXT / DOCX 文档 | ✅ |
+| TXT（UTF-8 / GBK）/ DOCX | ✅ |
+| Callout `> [!NOTE]` | ✅ |
+| 折叠标题 | ✅ |
+| `==高亮==` | ✅ |
+| `#标签` | ✅ |
+| `%%注释%%` | ✅ |
+| 脚注 `[^1]` | ✅ |
 
 ---
 

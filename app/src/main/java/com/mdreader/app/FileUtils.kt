@@ -36,10 +36,17 @@ object FileUtils {
     }
 
     private fun decodeText(bytes: ByteArray): String {
-        var text = bytes.toString(Charsets.UTF_8)
-        // 去除 UTF-8 BOM
-        if (text.isNotEmpty() && text[0] == '﻿') text = text.substring(1)
-        return text
+        // Detect encoding: count UTF-8 replacement characters to decide if it's really GBK
+        val utf8Text = bytes.toString(Charsets.UTF_8)
+        val replacements = utf8Text.count { it == '�' }
+        val text = if (replacements > 0 && replacements.toDouble() / utf8Text.length > 0.01) {
+            // Likely GBK/GB2312 (common for Chinese Windows files)
+            runCatching { bytes.toString(charset("GBK")) }.getOrElse { utf8Text }
+        } else {
+            utf8Text
+        }
+        // Strip UTF-8 BOM
+        return if (text.isNotEmpty() && text[0] == '﻿') text.substring(1) else text
     }
 
     private fun wrapPlainText(filename: String, text: String): String {
