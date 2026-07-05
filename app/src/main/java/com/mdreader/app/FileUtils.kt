@@ -51,8 +51,17 @@ object FileUtils {
 
     private fun wrapPlainText(filename: String, text: String): String {
         val title = filename.substringBeforeLast('.')
-        val escaped = text.replace("```", "\\`\\`\\`")
-        return "# $title\n\n```\n$escaped\n```"
+        // Escape markdown special chars so plain text renders as-is (not as headings/lists/etc.)
+        val escaped = text
+            .replace("\\", "\\\\")
+            .replace("`", "\\`")
+            .replace("*", "\\*")
+            .replace("_", "\\_")
+            .replace("#", "\\#")
+            .replace("[", "\\[")
+            .replace("|", "\\|")
+            .replace(">", "\\>")
+        return "# $title\n\n$escaped"
     }
 
     /** Extract readable markdown from DOCX by parsing word/document.xml inside the ZIP. */
@@ -105,10 +114,14 @@ object FileUtils {
                         localName == "pStyle" && isWordNs -> {
                             val styleVal = parser.getAttributeValue(null, "val") ?: ""
                             headingLevel = when {
-                                styleVal.equals("Heading1", ignoreCase = true) || styleVal == "1" -> 1
-                                styleVal.equals("Heading2", ignoreCase = true) || styleVal == "2" -> 2
-                                styleVal.equals("Heading3", ignoreCase = true) || styleVal == "3" -> 3
-                                styleVal.equals("Heading4", ignoreCase = true) || styleVal == "4" -> 4
+                                styleVal.equals("Heading1", ignoreCase = true) ||
+                                styleVal.equals("标题1") || styleVal.equals("标题 1") -> 1
+                                styleVal.equals("Heading2", ignoreCase = true) ||
+                                styleVal.equals("标题2") || styleVal.equals("标题 2") -> 2
+                                styleVal.equals("Heading3", ignoreCase = true) ||
+                                styleVal.equals("标题3") || styleVal.equals("标题 3") -> 3
+                                styleVal.equals("Heading4", ignoreCase = true) ||
+                                styleVal.equals("标题4") || styleVal.equals("标题 4") -> 4
                                 else -> 0
                             }
                         }
@@ -127,8 +140,13 @@ object FileUtils {
                         if (paraText.isNotBlank()) {
                             if (headingLevel > 0) {
                                 sb.append("#".repeat(headingLevel)).append(' ')
+                                sb.append(paraText.trim()).append("\n\n")
+                            } else {
+                                val line = paraText.trim()
+                                // Escape leading '#' so markdown doesn't treat it as a heading
+                                val escaped = if (line.startsWith("#")) "\\$line" else line
+                                sb.append(escaped).append("\n\n")
                             }
-                            sb.append(paraText.trim()).append("\n\n")
                         } else {
                             sb.append('\n')
                         }
