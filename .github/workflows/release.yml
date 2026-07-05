@@ -29,41 +29,44 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Decode keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            mkdir -p keystore
+            echo "$KEYSTORE_BASE64" | base64 --decode > keystore/mdreader-release.jks
+            cat > keystore/keystore.properties <<EOF
+          storeFile=keystore/mdreader-release.jks
+          storePassword=${KEYSTORE_PASSWORD}
+          keyAlias=${KEY_ALIAS}
+          keyPassword=${KEY_PASSWORD}
+          EOF
+            echo "Release keystore configured."
+          else
+            echo "KEYSTORE_BASE64 not set — falling back to debug signing."
+          fi
+
       - name: Build release APK
         run: ./gradlew :app:assembleRelease
 
       - name: Rename APK
         run: |
           TAG=${GITHUB_REF_NAME}
-          mv app/build/outputs/apk/release/app-release-unsigned.apk \
-             app/build/outputs/apk/release/md-reader-${TAG}.apk || \
           mv app/build/outputs/apk/release/app-release.apk \
-             app/build/outputs/apk/release/md-reader-${TAG}.apk || true
+             app/build/outputs/apk/release/MDReader-${TAG}.apk 2>/dev/null || \
+          mv app/build/outputs/apk/release/app-release-unsigned.apk \
+             app/build/outputs/apk/release/MDReader-${TAG}.apk || true
 
-      - name: Create GitHub Release
+      - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           name: MD阅读器 ${{ github.ref_name }}
-          body: |
-            ## MD阅读器 ${{ github.ref_name }}
-
-            ### v1.6.0 新特性
-            - 支持 **.docx / .doc / .txt** 文档打开（Word 文档自动转换为可阅读格式）
-            - **图片 & 视频修复**：Vault 内图片/视频现在可正确加载
-            - `![[doc.md]]` **引用展开**：点击折叠条内联展开被引用文档
-            - **任务列表** `- [ ]` / `- [x]` 渲染为复选框
-            - **显示设置新增开关**：关闭 Frontmatter 元数据 / 关闭引用块样式
-            - **搜索流畅性优化**：全库搜索异步化，不卡顿
-            - 快速切换文档时不再停留在旧内容
-            - 自动检查更新，发现新版本可直接下载安装
-
-            ### 所有支持的格式
-            `.md` `.markdown` `.txt` `.docx` `.doc`
-
-            ### 安装
-            下载 APK，在设备上允许未知来源安装后直接安装。
-            > 如遇"解析包失败"，请先卸载旧版本。
-          files: app/build/outputs/apk/release/md-reader-*.apk
+          body_path: docs/RELEASE_NOTES_${{ github.ref_name }}.md
+          files: app/build/outputs/apk/release/MDReader-*.apk
           draft: false
           prerelease: false
         env:

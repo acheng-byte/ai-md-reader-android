@@ -7,6 +7,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -19,6 +20,7 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.activity.result.contract.ActivityResultContracts
@@ -56,6 +58,9 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
     @Volatile private var currentDocumentUri: Uri? = null
     private var pageReady: Boolean = false
 
+    // Edit mode state
+    private var isEditing: Boolean = false
+
     // Cancel token: increment before each new load; JS render checks if it's stale
     private val loadGeneration = AtomicInteger(0)
 
@@ -71,9 +76,32 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                     Toast.makeText(this, R.string.only_md, Toast.LENGTH_LONG).show()
                 } else {
                     runCatching {
-                        contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        contentResolver.takePersistableUriPermission(
+                            uri,
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                        )
                     }
                     loadDocument(uri)
+                }
+            }
+        }
+
+    private val saveDocLauncher =
+        registerForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri: Uri? ->
+            if (uri != null) {
+                val text = binding.editText.text.toString()
+                val ok = writeTextToUri(uri, text)
+                if (ok) {
+                    currentMarkdown = text
+                    currentUri = uri.toString()
+                    currentDocumentUri = uri
+                    supportActionBar?.title = currentTitle
+                    isEditing = false
+                    binding.editScroll.visibility = View.GONE
+                    binding.webview.visibility = View.VISIBLE
+                    invalidateOptionsMenu()
+                    renderCurrent()
+                    Toast.makeText(this, R.string.edit_saved, Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -118,6 +146,24 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         }
         webView.setBackgroundColor(bgColor())
         webView.loadUrl(VIEWER_URL)
+
+        // Back press: prompt if editing with unsaved changes
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (isEditing) {
+                    val original = currentMarkdown
+                    val edited = binding.editText.text.toString()
+                    if (edited != original) {
+                        confirmDiscardEdit()
+                    } else {
+                        exitEditMode(save = false)
+                    }
+                } else {
+                    isEnabled = false
+                    onBackPressedDispatcher.onBackPressed()
+                }
+            }
+        })
 
         checkForUpdates()
     }
@@ -240,6 +286,13 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         displayNameOverride: String? = null,
         identityUri: String = readUri.toString()
     ) {
+        // Exit edit mode silently when opening a different document
+        if (isEditing) {
+            isEditing = false
+            binding.editScroll.visibility = View.GONE
+            binding.webview.visibility = View.VISIBLE
+            invalidateOptionsMenu()
+        }
         // Increment generation to cancel any in-flight load
         val gen = loadGeneration.incrementAndGet()
 
@@ -287,7 +340,13 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
 
     private fun applySettingsToWeb() {
         js("window.appApplySettings && window.appApplySettings(${prefs.settingsJson(this)})")
-        webView.setBackgroundColor(bgColor())
+        val bg = bgColor()
+        webView.setBackgroundColor(bg)
+        if (isEditing) {
+            binding.editText.setTextColor(if (prefs.isDark(this)) Color.WHITE else Color.BLACK)
+            binding.editText.setBackgroundColor(bg)
+            binding.editScroll.setBackgroundColor(bg)
+        }
     }
 
     private fun js(code: String) {
@@ -399,24 +458,43 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
     }
 
     override fun onPrepareOptionsMenu(menu: Menu): Boolean {
-        menu.findItem(R.id.action_toggle)?.let { item ->
-            if (currentMode == "preview") {
-                item.setTitle(R.string.action_view_code)
-                item.setIcon(R.drawable.ic_code)
-            } else {
-                item.setTitle(R.string.action_view_preview)
-                item.setIcon(R.drawable.ic_preview)
+        // Edit mode: show save/cancel, hide normal actions
+        menu.findItem(R.id.action_save)?.isVisible = isEditing
+        menu.findItem(R.id.action_cancel_edit)?.isVisible = isEditing
+        val normalVisible = !isEditing
+        listOf(
+            R.id.action_share, R.id.action_toc, R.id.action_search,
+            R.id.action_toggle, R.id.action_favorite, R.id.action_edit,
+            R.id.action_open, R.id.action_favorites, R.id.action_history
+        ).forEach { menu.findItem(it)?.isVisible = normalVisible }
+
+        if (!isEditing) {
+            menu.findItem(R.id.action_toggle)?.let { item ->
+                if (currentMode == "preview") {
+                    item.setTitle(R.string.action_view_code)
+                    item.setIcon(R.drawable.ic_code)
+                } else {
+                    item.setTitle(R.string.action_view_preview)
+                    item.setIcon(R.drawable.ic_preview)
+                }
             }
-        }
-        menu.findItem(R.id.action_favorite)?.let { item ->
-            val fav = currentUri?.let { favorites.isFavorite(it) } == true
-            item.setIcon(if (fav) R.drawable.ic_star else R.drawable.ic_star_border)
-            item.setTitle(if (fav) R.string.action_unfavorite else R.string.action_favorite)
+            menu.findItem(R.id.action_favorite)?.let { item ->
+                val fav = currentUri?.let { favorites.isFavorite(it) } == true
+                item.setIcon(if (fav) R.drawable.ic_star else R.drawable.ic_star_border)
+                item.setTitle(if (fav) R.string.action_unfavorite else R.string.action_favorite)
+            }
         }
         return super.onPrepareOptionsMenu(menu)
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean = when (item.itemId) {
+        R.id.action_save -> { exitEditMode(save = true); true }
+        R.id.action_cancel_edit -> {
+            val edited = binding.editText.text.toString()
+            if (edited != currentMarkdown) confirmDiscardEdit() else exitEditMode(save = false)
+            true
+        }
+        R.id.action_edit -> { enterEditMode(); true }
         R.id.action_share -> { shareCurrentDocument(); true }
         R.id.action_open -> {
             openPicker.launch(arrayOf("*/*"))
@@ -437,6 +515,74 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         js("window.appSetMode && window.appSetMode('$currentMode')")
         invalidateOptionsMenu()
     }
+
+    // ---- 编辑模式 ----
+
+    private fun enterEditMode() {
+        isEditing = true
+        binding.editText.setText(currentMarkdown)
+        binding.editText.setTextColor(if (prefs.isDark(this)) Color.WHITE else Color.BLACK)
+        binding.editText.setBackgroundColor(bgColor())
+        binding.editScroll.setBackgroundColor(bgColor())
+        binding.webview.visibility = View.GONE
+        binding.editScroll.visibility = View.VISIBLE
+        binding.editText.requestFocus()
+        supportActionBar?.title = currentTitle + getString(R.string.edit_title_suffix)
+        invalidateOptionsMenu()
+    }
+
+    private fun exitEditMode(save: Boolean) {
+        if (save) {
+            val newText = binding.editText.text.toString()
+            val saved = trySaveInPlace(newText)
+            if (saved) {
+                currentMarkdown = newText
+                Toast.makeText(this, R.string.edit_saved, Toast.LENGTH_SHORT).show()
+            } else {
+                // No write permission — offer Save As
+                Toast.makeText(this, R.string.edit_save_as_hint, Toast.LENGTH_LONG).show()
+                val safeName = shareFileName(currentTitle).removeSuffix(".md") + ".md"
+                saveDocLauncher.launch(safeName)
+                return
+            }
+        }
+        isEditing = false
+        binding.editScroll.visibility = View.GONE
+        binding.webview.visibility = View.VISIBLE
+        supportActionBar?.title = currentTitle
+        invalidateOptionsMenu()
+        if (save) renderCurrent()
+    }
+
+    private fun confirmDiscardEdit() {
+        AlertDialog.Builder(this)
+            .setTitle(R.string.edit_discard_title)
+            .setMessage(R.string.edit_discard_msg)
+            .setPositiveButton(R.string.edit_discard_confirm) { _, _ -> exitEditMode(save = false) }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    /** Try to write [text] back to the current URI in-place. Returns true on success. */
+    private fun trySaveInPlace(text: String): Boolean {
+        val uri = currentDocumentUri ?: return false
+        if (uri.scheme == "file") {
+            return runCatching {
+                val path = uri.path ?: return false
+                File(path).writeText(text, Charsets.UTF_8)
+                true
+            }.getOrDefault(false)
+        }
+        return writeTextToUri(uri, text)
+    }
+
+    private fun writeTextToUri(uri: Uri, text: String): Boolean =
+        runCatching {
+            contentResolver.openOutputStream(uri, "wt")?.use { out ->
+                out.write(text.toByteArray(Charsets.UTF_8))
+            }
+            true
+        }.getOrDefault(false)
 
     // ---- 分享 ----
 
@@ -755,6 +901,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
 - 在设置中选择 **Vault 文件夹** 后，可使用 `[[wikilink]]` 导航与全库搜索
 - 重新打开同一文档时，会自动回到上次阅读位置
 - 启动时自动弹出打开历史，快速继续阅读
+- 点击右上角 **⋮ → 编辑**，直接在应用内编辑 Markdown，保存后立即刷新预览
 
 ## v1.6.2 更新
 
