@@ -17,9 +17,35 @@
             app:titleTextAppearance="@style/TextAppearance.Material3.TitleMedium" />
     </com.google.android.material.appbar.AppBarLayout>
 
-    <WebView
-        android:id="@+id/webview"
+    <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1" />
+        android:layout_weight="1">
+
+        <WebView
+            android:id="@+id/webview"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+        <ScrollView
+            android:id="@+id/editScroll"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone"
+            android:fillViewport="true">
+
+            <EditText
+                android:id="@+id/editText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@null"
+                android:fontFamily="monospace"
+                android:gravity="top|start"
+                android:inputType="textMultiLine|textNoSuggestions"
+                android:lineSpacingMultiplier="1.5"
+                android:minHeight="100dp"
+                android:padding="16dp"
+                android:textSize="14sp" />
+        </ScrollView>
+    </FrameLayout>
 </LinearLayout>

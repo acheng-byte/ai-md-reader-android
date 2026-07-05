@@ -2,35 +2,51 @@
 <menu xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
 
-    <!-- 常显：转发 / 分享当前文档 -->
+    <!-- 编辑模式：保存（默认隐藏，进入编辑后显示） -->
+    <item
+        android:id="@+id/action_save"
+        android:icon="@drawable/ic_done"
+        android:title="@string/action_save"
+        android:visible="false"
+        app:showAsAction="always" />
+
+    <!-- 编辑模式：取消（默认隐藏，进入编辑后显示） -->
+    <item
+        android:id="@+id/action_cancel_edit"
+        android:icon="@drawable/ic_close"
+        android:title="@string/action_cancel_edit"
+        android:visible="false"
+        app:showAsAction="always" />
+
+    <!-- 正常模式：转发 / 分享当前文档 -->
     <item
         android:id="@+id/action_share"
         android:icon="@drawable/ic_share"
         android:title="@string/action_share"
         app:showAsAction="always" />
 
-    <!-- 常显：目录 -->
+    <!-- 正常模式：目录 -->
     <item
         android:id="@+id/action_toc"
         android:icon="@drawable/ic_toc"
         android:title="@string/action_toc"
         app:showAsAction="always" />
 
-    <!-- 常显：搜索 -->
+    <!-- 正常模式：搜索 -->
     <item
         android:id="@+id/action_search"
         android:icon="@drawable/ic_search"
         android:title="@string/action_search"
         app:showAsAction="always" />
 
-    <!-- 常显：源码 / 预览切换 -->
+    <!-- 正常模式：源码 / 预览切换 -->
     <item
         android:id="@+id/action_toggle"
         android:icon="@drawable/ic_code"
         android:title="@string/action_view_code"
         app:showAsAction="always" />
 
-    <!-- 常显：收藏 / 取消收藏切换 -->
+    <!-- 正常模式：收藏 / 取消收藏切换 -->
     <item
         android:id="@+id/action_favorite"
         android:icon="@drawable/ic_star_border"
@@ -38,6 +54,12 @@
         app:showAsAction="always" />
 
     <!-- 更多菜单 (⋮) -->
+    <item
+        android:id="@+id/action_edit"
+        android:icon="@drawable/ic_edit"
+        android:title="@string/action_edit"
+        app:showAsAction="never" />
+
     <item
         android:id="@+id/action_open"
         android:icon="@drawable/ic_open"
