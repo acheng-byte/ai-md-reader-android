@@ -903,7 +903,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         private val WELCOME_MD = """
 # 欢迎使用 MD 阅读器
 
-这是一个本地 **Markdown 阅读器**（v1.6.3）。
+这是一个本地 **Markdown 阅读器**（v1.6.4）。
 
 ## 怎么用
 
@@ -916,8 +916,9 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
 - 启动时自动弹出打开历史，快速继续阅读
 - 点击右上角 **⋮ → 编辑**，直接在应用内编辑 Markdown，保存后立即刷新预览
 
-## v1.6.3 更新
+## v1.6.4 更新
 
+- **新增**：启动时自动恢复上次阅读的文档；首次安装才显示欢迎页
 - **修复**：Markdown 单个换行不生效，需要空行才能换段——现在单个回车即可换行
 - **修复**：DOCX 文档全部段落被误识别为标题（显示 `#` / `##`）——修正样式 ID 检测逻辑
 - **优化**：TXT 文件不再用代码块包裹，文本自动折行，告别横向滚动

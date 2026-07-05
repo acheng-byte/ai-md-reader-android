@@ -1,4 +1,4 @@
-/* MD 阅读器前端 v1.6.3：markdown-it 渲染、highlight.js 高亮、目录/标题折叠、
+/* MD 阅读器前端 v1.6.4：markdown-it 渲染、highlight.js 高亮、目录/标题折叠、
    Obsidian wikilink 兼容、Mermaid 图表、YAML frontmatter、全文/全库搜索、
    任务列表、视频/图片嵌入、引用文档内联展开、异步全库搜索、
    ==高亮==、#标签、脚注、更多 Obsidian 格式。 */
