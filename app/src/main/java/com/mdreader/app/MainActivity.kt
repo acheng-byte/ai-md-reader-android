@@ -136,12 +136,23 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
 
         val handled = handleIntent(intent)
         if (!handled) {
-            currentMarkdown = WELCOME_MD
-            currentTitle = getString(R.string.app_name)
-            supportActionBar?.title = currentTitle
-            // Auto-show history panel on launch if there's any history
-            if (history.all().isNotEmpty()) {
-                webView.post { showHistory() }
+            val lastUri = prefs.lastDocUri
+            if (lastUri != null) {
+                // Reopen last document; fall back to welcome screen on failure
+                runCatching { loadDocument(Uri.parse(lastUri), prefs.lastDocName.ifEmpty { null }) }
+                    .onFailure {
+                        currentMarkdown = WELCOME_MD
+                        currentTitle = getString(R.string.app_name)
+                        supportActionBar?.title = currentTitle
+                    }
+            } else {
+                // First launch ever: show welcome screen
+                currentMarkdown = WELCOME_MD
+                currentTitle = getString(R.string.app_name)
+                supportActionBar?.title = currentTitle
+                if (history.all().isNotEmpty()) {
+                    webView.post { showHistory() }
+                }
             }
         }
         webView.setBackgroundColor(bgColor())
@@ -313,6 +324,8 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                     currentUri = identityUri
                     currentDocumentUri = readUri
                     supportActionBar?.title = name
+                    prefs.lastDocUri = identityUri
+                    prefs.lastDocName = name
                     history.add(identityUri, name, System.currentTimeMillis())
                     renderCurrent()
                     invalidateOptionsMenu()

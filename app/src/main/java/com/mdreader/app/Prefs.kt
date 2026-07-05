@@ -43,6 +43,16 @@ class Prefs(context: Context) {
         get() = sp.getLong(KEY_LAST_UPDATE_CHECK, 0L)
         set(v) { sp.edit().putLong(KEY_LAST_UPDATE_CHECK, v).apply() }
 
+    /** 上次关闭时正在阅读的文档 URI（null = 从未打开过文件） */
+    var lastDocUri: String?
+        get() = sp.getString(KEY_LAST_DOC_URI, null)
+        set(v) { sp.edit().putString(KEY_LAST_DOC_URI, v).apply() }
+
+    /** 上次关闭时正在阅读的文档显示名 */
+    var lastDocName: String
+        get() = sp.getString(KEY_LAST_DOC_NAME, "") ?: ""
+        set(v) { sp.edit().putString(KEY_LAST_DOC_NAME, v).apply() }
+
     /** 是否自动解析并显示 YAML frontmatter 元数据表格 */
     var showFrontmatter: Boolean
         get() = sp.getBoolean(KEY_SHOW_FRONTMATTER, true)
@@ -96,5 +106,7 @@ class Prefs(context: Context) {
         private const val KEY_LAST_UPDATE_CHECK = "last_update_check"
         private const val KEY_SHOW_FRONTMATTER = "show_frontmatter"
         private const val KEY_SHOW_CITATIONS = "show_citations"
+        private const val KEY_LAST_DOC_URI = "last_doc_uri"
+        private const val KEY_LAST_DOC_NAME = "last_doc_name"
     }
 }
