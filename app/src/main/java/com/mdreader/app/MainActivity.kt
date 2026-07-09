@@ -41,6 +41,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.net.URLDecoder
 import java.util.Locale
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.roundToInt
@@ -524,7 +525,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         R.id.action_favorite -> { toggleFavorite(); true }
         R.id.action_favorites -> { showFavorites(); true }
         R.id.action_history -> { showHistory(); true }
-        R.id.action_export_image -> { exportLongImage(); true }
+        R.id.action_export_image -> { requestStorageAndExportImage(); true }
         R.id.action_export_html -> { exportHtml(); true }
         else -> super.onOptionsItemSelected(item)
     }
@@ -922,6 +923,29 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
 
     // ---- 导出功能 ----
 
+    /** Android 9 及以下需要 WRITE_EXTERNAL_STORAGE 权限，先检查再导出 */
+    private fun requestStorageAndExportImage() {
+        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P &&
+            checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(android.Manifest.permission.WRITE_EXTERNAL_STORAGE), REQ_WRITE_STORAGE)
+        } else {
+            exportLongImage()
+        }
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQ_WRITE_STORAGE) {
+            if (grantResults.isNotEmpty() && grantResults[0] == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                exportLongImage()
+            } else {
+                Toast.makeText(this, getString(R.string.export_image_failed, "需要存储权限"), Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
     /** 导出当前渲染内容为长图片（滚动截图拼接） */
     private fun exportLongImage() {
         if (currentMode != "preview") {
@@ -948,53 +972,74 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                 val scale = if (contentHeight > maxBitmapHeight) maxBitmapHeight.toFloat() / contentHeight else 1f
                 val finalHeight = (contentHeight * scale).toInt()
                 val finalWidth = (viewWidth * scale).toInt()
+                val bgColor = if (prefs.isDark(this)) 0xFF0D1117.toInt() else 0xFFFFFFFF.toInt()
+                val savedTitle = currentTitle
 
-                val bitmap = Bitmap.createBitmap(finalWidth, finalHeight, Bitmap.Config.ARGB_8888)
-                val canvas = Canvas(bitmap)
-                canvas.drawColor(if (prefs.isDark(this)) 0xFF0D1117.toInt() else 0xFFFFFFFF.toInt())
+                // 在后台线程执行截图拼接，避免阻塞主线程
+                // webView.draw() 必须在主线程调用，通过 CountDownLatch 同步
+                Thread {
+                    try {
+                        val bitmap = Bitmap.createBitmap(finalWidth, finalHeight, Bitmap.Config.ARGB_8888)
+                        val canvas = Canvas(bitmap)
+                        canvas.drawColor(bgColor)
 
-                if (contentHeight <= viewHeight) {
-                    webView.draw(canvas)
-                } else {
-                    val screenshotHeight = viewHeight
-                    var scrollY = 0
-                    while (scrollY < contentHeight) {
-                        val sy = scrollY
-                        webView.post { webView.scrollTo(0, sy) }
-                        Thread.sleep(200)
-                        val srcTop = (scrollY * scale).toInt()
-                        val srcBottom = minOf(((scrollY + screenshotHeight) * scale).toInt(), finalHeight)
-                        if (srcBottom > srcTop) {
-                            val tempBmp = Bitmap.createBitmap(viewWidth, screenshotHeight, Bitmap.Config.ARGB_8888)
-                            val tempCanvas = Canvas(tempBmp)
-                            tempCanvas.drawColor(if (prefs.isDark(this)) 0xFF0D1117.toInt() else 0xFFFFFFFF.toInt())
-                            webView.draw(tempCanvas)
-                            val srcRect = android.graphics.Rect(0, 0, viewWidth, screenshotHeight)
-                            val dstRect = android.graphics.Rect(0, srcTop, finalWidth, srcBottom)
-                            canvas.drawBitmap(tempBmp, srcRect, dstRect, null)
-                            tempBmp.recycle()
+                        if (contentHeight <= viewHeight) {
+                            val latch = CountDownLatch(1)
+                            runOnUiThread {
+                                webView.draw(canvas)
+                                latch.countDown()
+                            }
+                            latch.await(3, TimeUnit.SECONDS)
+                        } else {
+                            var scrollY = 0
+                            while (scrollY < contentHeight) {
+                                val currentScroll = scrollY
+                                val srcTop = (scrollY * scale).toInt()
+                                val srcBottom = minOf(((scrollY + viewHeight) * scale).toInt(), finalHeight)
+                                if (srcBottom > srcTop) {
+                                    val tempBmp = Bitmap.createBitmap(viewWidth, viewHeight, Bitmap.Config.ARGB_8888)
+                                    val tempCanvas = Canvas(tempBmp)
+                                    val latch = CountDownLatch(1)
+                                    runOnUiThread {
+                                        webView.scrollTo(0, currentScroll)
+                                        // postDelayed 等待 WebView 在下一帧完成重绘后再截图
+                                        webView.postDelayed({
+                                            tempCanvas.drawColor(bgColor)
+                                            webView.draw(tempCanvas)
+                                            val srcRect = android.graphics.Rect(0, 0, viewWidth, viewHeight)
+                                            val dstRect = android.graphics.Rect(0, srcTop, finalWidth, srcBottom)
+                                            canvas.drawBitmap(tempBmp, srcRect, dstRect, null)
+                                            tempBmp.recycle()
+                                            latch.countDown()
+                                        }, 200)
+                                    }
+                                    latch.await(5, TimeUnit.SECONDS)
+                                }
+                                scrollY += viewHeight
+                            }
+                            runOnUiThread { webView.scrollTo(0, 0) }
                         }
-                        scrollY += screenshotHeight
+
+                        val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                        dir.mkdirs()
+                        val safeName = shareFileName(savedTitle).removeSuffix(".md").replace(Regex("[^a-zA-Z0-9\\u4e00-\\u9fff_\\-]"), "_")
+                        val file = File(dir, "$safeName.png")
+                        FileOutputStream(file).use { out ->
+                            bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+                        }
+                        bitmap.recycle()
+
+                        runOnUiThread {
+                            Toast.makeText(this, getString(R.string.export_image_saved), Toast.LENGTH_LONG).show()
+                        }
+                    } catch (e: Exception) {
+                        runOnUiThread {
+                            Toast.makeText(this, getString(R.string.export_image_failed, e.message ?: ""), Toast.LENGTH_LONG).show()
+                        }
                     }
-                    webView.post { webView.scrollTo(0, 0) }
-                }
-
-                val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-                dir.mkdirs()
-                val safeName = shareFileName(currentTitle).removeSuffix(".md").replace(Regex("[^a-zA-Z0-9\\u4e00-\\u9fff_\\-]"), "_")
-                val file = File(dir, "$safeName.png")
-                FileOutputStream(file).use { out ->
-                    bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
-                }
-                bitmap.recycle()
-
-                runOnUiThread {
-                    Toast.makeText(this, getString(R.string.export_image_saved), Toast.LENGTH_LONG).show()
-                }
+                }.start()
             } catch (e: Exception) {
-                runOnUiThread {
-                    Toast.makeText(this, getString(R.string.export_image_failed, e.message ?: ""), Toast.LENGTH_LONG).show()
-                }
+                Toast.makeText(this, getString(R.string.export_image_failed, e.message ?: ""), Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -1060,6 +1105,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
     companion object {
         private const val ASSET_HOST = "appassets.androidplatform.net"
         private const val VIEWER_URL = "https://$ASSET_HOST/assets/viewer.html"
+        private const val REQ_WRITE_STORAGE = 1001
 
         /** 导出 HTML 时内嵌的样式表 */
         private val EXPORT_CSS = """
