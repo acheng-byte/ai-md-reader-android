@@ -21,8 +21,8 @@ android {
         applicationId = "com.mdreader.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 11
-        versionName = "1.6.4"
+        versionCode = 12
+        versionName = "1.7.0"
         resourceConfigurations += listOf("zh", "en")
     }
 
@@ -64,6 +64,14 @@ android {
     buildFeatures {
         viewBinding = true
     }
+    // 排除 POI 等库中重复的 META-INF 文件，防止打包冲突
+    packaging {
+        resources.excludes += setOf(
+            "META-INF/DEPENDENCIES",
+            "META-INF/LICENSE*",
+            "META-INF/NOTICE*"
+        )
+    }
 }
 
 dependencies {
@@ -72,4 +80,6 @@ dependencies {
     implementation("com.google.android.material:material:1.12.0")
     implementation("androidx.webkit:webkit:1.11.0")
     implementation("androidx.documentfile:documentfile:1.0.1")
+    // Apache POI HWPF — 正确解析旧版 .doc（OLE2）格式，解决乱码问题
+    implementation("org.apache.poi:poi:5.2.5")
 }

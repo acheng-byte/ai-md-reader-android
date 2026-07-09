@@ -14,9 +14,10 @@ import com.mdreader.app.databinding.HistoryItemBinding
  * 已收藏的条目名称前加 ★。
  */
 class HistoryAdapter(
-    private val items: List<History.Entry>,
+    private val items: MutableList<History.Entry>,
     private val favorites: Set<String>,
-    private val onClick: (History.Entry) -> Unit
+    private val onClick: (History.Entry) -> Unit,
+    private val onDelete: ((History.Entry, Int) -> Unit)? = null
 ) : RecyclerView.Adapter<HistoryAdapter.VH>() {
 
     private val statuses = HashMap<String, DocStatus>()
@@ -28,6 +29,15 @@ class HistoryAdapter(
     }
 
     fun statusOf(uri: String): DocStatus = statuses[uri] ?: DocStatus.AVAILABLE
+
+    /** 删除指定位置的条目（外部调用后需自行更新数据源） */
+    fun removeAt(position: Int) {
+        if (position in items.indices) {
+            items.removeAt(position)
+            notifyItemRemoved(position)
+            notifyItemRangeChanged(position, items.size)
+        }
+    }
 
     class VH(val binding: HistoryItemBinding) : RecyclerView.ViewHolder(binding.root)
 
@@ -67,6 +77,14 @@ class HistoryAdapter(
         }
 
         holder.binding.root.setOnClickListener { onClick(e) }
+
+        // 删除按钮
+        holder.binding.btnDelete.setOnClickListener {
+            val pos = holder.bindingAdapterPosition
+            if (pos != RecyclerView.NO_POSITION) {
+                onDelete?.invoke(e, pos)
+            }
+        }
     }
 
     companion object {

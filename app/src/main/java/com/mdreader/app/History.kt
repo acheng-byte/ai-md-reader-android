@@ -38,6 +38,12 @@ class History(context: Context) {
 
     fun clear() = sp.edit().remove(KEY).apply()
 
+    /** 删除单条历史记录 */
+    fun remove(uri: String) {
+        val list = all().filterNot { it.uri == uri }
+        save(list)
+    }
+
     private fun save(list: List<Entry>) {
         val arr = JSONArray()
         list.forEach {

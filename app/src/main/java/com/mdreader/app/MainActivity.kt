@@ -7,6 +7,8 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Color
 import android.net.Uri
 import android.os.Build
@@ -36,6 +38,7 @@ import com.mdreader.app.databinding.SheetFavoritesBinding
 import com.mdreader.app.databinding.SheetHistoryBinding
 import com.mdreader.app.databinding.SheetSettingsBinding
 import java.io.File
+import java.io.FileOutputStream
 import java.net.URLDecoder
 import java.util.Locale
 import java.util.concurrent.TimeUnit
@@ -373,7 +376,8 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         if (name == null) return true
         val n = name.lowercase()
         return n.endsWith(".md") || n.endsWith(".markdown") ||
-               n.endsWith(".txt") || n.endsWith(".docx") || n.endsWith(".doc")
+               n.endsWith(".txt") || n.endsWith(".docx") || n.endsWith(".doc") ||
+               n.endsWith(".pdf")
     }
 
     // ---- 自动更新检查 ----
@@ -478,7 +482,8 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         listOf(
             R.id.action_share, R.id.action_toc, R.id.action_search,
             R.id.action_toggle, R.id.action_favorite, R.id.action_edit,
-            R.id.action_open, R.id.action_favorites, R.id.action_history
+            R.id.action_open, R.id.action_favorites, R.id.action_history,
+            R.id.action_export_image, R.id.action_export_html
         ).forEach { menu.findItem(it)?.isVisible = normalVisible }
 
         if (!isEditing) {
@@ -519,6 +524,8 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         R.id.action_favorite -> { toggleFavorite(); true }
         R.id.action_favorites -> { showFavorites(); true }
         R.id.action_history -> { showHistory(); true }
+        R.id.action_export_image -> { exportLongImage(); true }
+        R.id.action_export_html -> { exportHtml(); true }
         else -> super.onOptionsItemSelected(item)
     }
 
@@ -752,7 +759,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
 
     private fun showHistory() {
         val sheet = SheetHistoryBinding.inflate(layoutInflater)
-        val entries = history.all()
+        val entries = history.all().toMutableList()
         val dialog = BottomSheetDialog(this)
         dialog.setContentView(sheet.root)
         if (entries.isEmpty()) {
@@ -763,9 +770,26 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             sheet.historyList.visibility = View.VISIBLE
             val favSet = favorites.all().map { it.uri }.toHashSet()
             lateinit var adapter: HistoryAdapter
-            adapter = HistoryAdapter(entries, favSet) { entry ->
-                onHistoryEntryClicked(entry, adapter.statusOf(entry.uri), dialog)
-            }
+            adapter = HistoryAdapter(
+                items = entries,
+                favorites = favSet,
+                onClick = { entry ->
+                    onHistoryEntryClicked(entry, adapter.statusOf(entry.uri), dialog)
+                },
+                onDelete = { entry, position ->
+                    // 从持久化存储中删除
+                    history.remove(entry.uri)
+                    // 从列表中移除
+                    adapter.removeAt(position)
+                    entries.removeAt(position)
+                    Toast.makeText(this, R.string.history_deleted_confirm, Toast.LENGTH_SHORT).show()
+                    // 如果列表空了，显示空状态
+                    if (entries.isEmpty()) {
+                        sheet.historyEmpty.visibility = View.VISIBLE
+                        sheet.historyList.visibility = View.GONE
+                    }
+                }
+            )
             sheet.historyList.layoutManager = LinearLayoutManager(this)
             sheet.historyList.adapter = adapter
             Thread {
@@ -896,14 +920,194 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
 
     private fun escapeJs(s: String): String = s.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n")
 
+    // ---- 导出功能 ----
+
+    /** 导出当前渲染内容为长图片（滚动截图拼接） */
+    private fun exportLongImage() {
+        if (currentMode != "preview") {
+            toggleMode()
+            webView.postDelayed({ exportLongImage() }, 300)
+            return
+        }
+        Toast.makeText(this, R.string.export_image_saving, Toast.LENGTH_SHORT).show()
+        webView.post {
+            try {
+                val contentHeight = webView.computeVerticalScrollRange()
+                val viewHeight = webView.height
+                if (contentHeight <= 0 || viewHeight <= 0) {
+                    Toast.makeText(this, getString(R.string.export_image_failed, "内容为空"), Toast.LENGTH_LONG).show()
+                    return@post
+                }
+                val width = webView.width
+                val maxBitmapHeight = 4096 // 防止内存溢出
+                val scale = if (contentHeight > maxBitmapHeight) maxBitmapHeight.toFloat() / contentHeight else 1f
+                val finalHeight = (contentHeight * scale).toInt()
+                val finalWidth = (width * scale).toInt()
+
+                val bitmap = Bitmap.createBitmap(finalWidth, finalHeight, Bitmap.Config.ARGB_8888)
+                val canvas = Canvas(bitmap)
+                canvas.drawColor(if (prefs.isDark(this)) 0xFF0D1117.toInt() else 0xFFFFFFFF.toInt())
+
+                if (contentHeight <= viewHeight) {
+                    // 内容不超过一屏，直接绘制
+                    webView.draw(canvas)
+                } else {
+                    // 滚动截图拼接
+                    val screenshotHeight = viewHeight
+                    var scrollY = 0
+                    while (scrollY < contentHeight) {
+                        webView.scrollTo(0, scrollY)
+                        webView.postDelayed({
+                            // 延迟后绘制这一屏
+                            val srcTop = (scrollY * scale).toInt()
+                            val srcBottom = minOf(((scrollY + screenshotHeight) * scale).toInt(), finalHeight)
+                            val srcHeight = srcBottom - srcTop
+                            if (srcHeight > 0) {
+                                val tempBmp = Bitmap.createBitmap(width, screenshotHeight, Bitmap.Config.ARGB_8888)
+                                val tempCanvas = Canvas(tempBmp)
+                                tempCanvas.drawColor(if (prefs.isDark(this)) 0xFF0D1117.toInt() else 0xFFFFFFFF.toInt())
+                                webView.draw(tempCanvas)
+                                val srcRect = android.graphics.Rect(0, 0, width, screenshotHeight)
+                                val dstRect = android.graphics.Rect(0, srcTop, finalWidth, srcBottom)
+                                canvas.drawBitmap(tempBmp, srcRect, dstRect, null)
+                                tempBmp.recycle()
+                            }
+                        }, 150)
+                        scrollY += screenshotHeight
+                        // 等待绘制完成
+                        Thread.sleep(200)
+                    }
+                    webView.scrollTo(0, 0)
+                }
+
+                // 保存到下载目录
+                val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                dir.mkdirs()
+                val safeName = shareFileName(currentTitle).removeSuffix(".md").replace(Regex("[^a-zA-Z0-9\\u4e00-\\u9fff_\\-]"), "_")
+                val file = File(dir, "$safeName.png")
+                FileOutputStream(file).use { out ->
+                    bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+                }
+                bitmap.recycle()
+
+                runOnUiThread {
+                    Toast.makeText(this, getString(R.string.export_image_saved), Toast.LENGTH_LONG).show()
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    Toast.makeText(this, getString(R.string.export_image_failed, e.message ?: ""), Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    /** 导出当前渲染结果为独立 HTML 文件 */
+    private fun exportHtml() {
+        if (currentMode != "preview") {
+            toggleMode()
+            webView.postDelayed({ exportHtml() }, 300)
+            return
+        }
+        webView.evaluateJavascript("document.getElementById('preview').innerHTML") { htmlContent ->
+            if (htmlContent.isNullOrBlank() || htmlContent == "null") {
+                Toast.makeText(this, getString(R.string.export_html_failed, "内容为空"), Toast.LENGTH_LONG).show()
+                return@evaluateJavascript
+            }
+            try {
+                // 去除 JS 返回的外层引号
+                val cleanHtml = htmlContent.trim().removeSurrounding("\"")
+                    .replace("\\\"", "\"")
+                    .replace("\\n", "\n")
+
+                val fullHtml = buildString {
+                    appendLine("<!DOCTYPE html>")
+                    appendLine("<html lang=\"zh-CN\">")
+                    appendLine("<head>")
+                    appendLine("<meta charset=\"utf-8\">")
+                    appendLine("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">")
+                    appendLine("<title>${escapeHtml(currentTitle)}</title>")
+                    appendLine("<style>")
+                    appendLine(EXPORT_CSS)
+                    appendLine("</style>")
+                    appendLine("</head>")
+                    appendLine("<body>")
+                    appendLine("<div class=\"markdown-body\">")
+                    appendLine(cleanHtml)
+                    appendLine("</div>")
+                    appendLine("</body>")
+                    appendLine("</html>")
+                }
+
+                val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                dir.mkdirs()
+                val safeName = shareFileName(currentTitle).removeSuffix(".md").replace(Regex("[^a-zA-Z0-9\\u4e00-\\u9fff_\\-]"), "_")
+                val file = File(dir, "$safeName.html")
+                FileOutputStream(file).use { out ->
+                    out.write(fullHtml.toByteArray(Charsets.UTF_8))
+                }
+                runOnUiThread {
+                    Toast.makeText(this, getString(R.string.export_html_saved), Toast.LENGTH_LONG).show()
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    Toast.makeText(this, getString(R.string.export_html_failed, e.message ?: ""), Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    private fun escapeHtml(s: String): String =
+        s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
     companion object {
         private const val ASSET_HOST = "appassets.androidplatform.net"
         private const val VIEWER_URL = "https://$ASSET_HOST/assets/viewer.html"
 
+        /** 导出 HTML 时内嵌的样式表 */
+        private val EXPORT_CSS = """
+:root { --font-size: 16px; --line-height: 1.7; --para-gap: 1em; --max-width: 880px;
+  --bg: #ffffff; --fg: #1f2328; --muted: #656d76; --border: #d0d7de;
+  --code-bg: #f6f8fa; --code-fg: #1f2328; --link: #0969da; --table-stripe: #f6f8fa; }
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", "Helvetica Neue", Arial, sans-serif;
+  font-size: var(--font-size); line-height: var(--line-height); margin: 0; padding: 0; }
+.markdown-body { max-width: var(--max-width); margin: 0 auto; padding: 24px 16px 48px; }
+.markdown-body p, .markdown-body ul, .markdown-body ol, .markdown-body blockquote,
+.markdown-body table, .markdown-body pre, .markdown-body dl { margin-top: 0; margin-bottom: var(--para-gap); }
+.markdown-body h1, .markdown-body h2, .markdown-body h3, .markdown-body h4, .markdown-body h5, .markdown-body h6 { margin: 1.4em 0 0.6em; line-height: 1.3; font-weight: 600; }
+.markdown-body h1 { font-size: 1.8em; padding-bottom: 0.3em; border-bottom: 1px solid var(--border); }
+.markdown-body h2 { font-size: 1.5em; padding-bottom: 0.3em; border-bottom: 1px solid var(--border); }
+.markdown-body h3 { font-size: 1.25em; }
+.markdown-body a { color: var(--link); text-decoration: none; }
+.markdown-body ul, .markdown-body ol { padding-left: 2em; }
+.markdown-body blockquote { margin-left: 0; margin-right: 0; padding: 0 1em; color: var(--muted); border-left: 0.25em solid var(--border); }
+.markdown-body img { max-width: 100%; height: auto; }
+.markdown-body code { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; background: var(--code-bg); padding: 0.2em 0.4em; border-radius: 6px; font-size: 0.88em; }
+.markdown-body pre { background: var(--code-bg); padding: 14px 16px; border-radius: 8px; overflow: auto; line-height: 1.5; }
+.markdown-body pre code { background: transparent; padding: 0; font-size: 0.86em; }
+.markdown-body table { border-collapse: collapse; width: 100%; }
+.markdown-body th, .markdown-body td { border: 1px solid var(--border); padding: 6px 13px; }
+.markdown-body th { font-weight: 600; background: var(--table-stripe); }
+.markdown-body tr:nth-child(2n) td { background: var(--table-stripe); }
+.markdown-body hr { border: 0; height: 1px; background: var(--border); margin: 1.6em 0; }
+.ob-highlight { background: #fff176; border-radius: 2px; padding: 0 2px; }
+.ob-tag { display: inline-block; font-size: 0.82em; color: var(--link); background: rgba(9,105,218,0.12); border-radius: 10px; padding: 1px 7px; }
+.task-list-item { list-style: none; margin-left: -1.4em; }
+.task-checkbox { margin-right: 0.4em; }
+.callout { border-left: 4px solid var(--link); border-radius: 6px; background: var(--code-bg); padding: 0; margin-bottom: var(--para-gap); overflow: hidden; }
+.callout-title { display: flex; align-items: center; gap: 6px; padding: 8px 14px; font-weight: 600; background: rgba(0,0,0,0.06); border-bottom: 1px solid var(--border); }
+.callout > *:not(.callout-title) { padding: 8px 14px; margin: 0; }
+.frontmatter { margin-bottom: var(--para-gap); border: 1px solid var(--border); border-radius: 8px; background: var(--code-bg); }
+.frontmatter table { width: 100%; border-collapse: collapse; display: table; }
+.frontmatter .fm-key { font-weight: 600; color: var(--muted); font-size: 0.85em; padding: 5px 12px; border: 1px solid var(--border); width: 30%; }
+.frontmatter .fm-val { padding: 5px 12px; font-size: 0.88em; border: 1px solid var(--border); }
+.frontmatter .fm-tag { display: inline-block; background: var(--link); color: #fff; border-radius: 4px; padding: 1px 7px; font-size: 0.8em; margin: 2px 3px; }
+        """.trimIndent()
+
         private val WELCOME_MD = """
 # 欢迎使用 MD 阅读器
 
-这是一个本地 **Markdown 阅读器**（v1.6.4）。
+这是一个本地 **Markdown 阅读器**（v1.7.0）。
 
 ## 怎么用
 
@@ -916,14 +1120,17 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
 - 启动时自动弹出打开历史，快速继续阅读
 - 点击右上角 **⋮ → 编辑**，直接在应用内编辑 Markdown，保存后立即刷新预览
 
-## v1.6.4 更新
+## v1.7.0 更新
 
-- **新增**：启动时自动恢复上次阅读的文档；首次安装才显示欢迎页
-- **修复**：Markdown 单个换行不生效，需要空行才能换段——现在单个回车即可换行
-- **修复**：DOCX 文档全部段落被误识别为标题（显示 `#` / `##`）——修正样式 ID 检测逻辑
-- **优化**：TXT 文件不再用代码块包裹，文本自动折行，告别横向滚动
+- **新增**：PDF 文件阅读支持（逐页渲染为图片查看）
+- **新增**：导出长图片功能（渲染好的文档一键保存为 PNG）
+- **新增**：导出 HTML 功能（生成独立 HTML 文件，可在任何浏览器打开）
+- **新增**：历史记录支持单条删除（不再只能全部清空）
+- **修复**：旧版 .doc 文档打开乱码（改用 Apache POI OLE2 解析）
+- **修复**：DOC/DOCX 文档中的内嵌图片无法查看（现在提取并显示）
+- **优化**：增强 WebView 渲染稳定性与内存管理
 
-## 支持的语法
+## 支持的格式
 
 | 功能 | 是否支持 |
 | --- | :---: |
@@ -936,13 +1143,15 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
 | HTML 渲染 | ✅ |
 | 任务列表 `- [ ]` | ✅ |
 | 图片 & 视频（Vault 内）| ✅ |
-| TXT（UTF-8 / GBK）/ DOCX | ✅ |
+| TXT（UTF-8 / GBK）/ DOCX / DOC | ✅ |
+| PDF（逐页渲染） | ✅ |
 | Callout `> [!NOTE]` | ✅ |
 | 折叠标题 | ✅ |
 | `==高亮==` | ✅ |
 | `#标签` | ✅ |
-| `%%注释%%` | ✅ |
+| `%%注释%%` ✅ |
 | 脚注 `[^1]` | ✅ |
+| 导出长图片 / HTML | ✅ |
 
 ---
 
