@@ -77,4 +77,15 @@
         android:icon="@drawable/ic_history"
         android:title="@string/action_history"
         app:showAsAction="never" />
+
+    <!-- 导出功能 -->
+    <item
+        android:id="@+id/action_export_image"
+        android:title="@string/action_export_image"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_export_html"
+        android:title="@string/action_export_html"
+        app:showAsAction="never" />
 </menu>

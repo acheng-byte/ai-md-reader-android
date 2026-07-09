@@ -24,7 +24,7 @@
 
     <string name="val_font">%1$d px</string>
     <string name="open_failed">打开失败：%1$s</string>
-    <string name="only_md">请选择 Markdown / TXT / DOCX 文件</string>
+    <string name="only_md">请选择 Markdown / TXT / DOC / DOCX / PDF 文件</string>
 
     <string name="action_toc">目录</string>
     <string name="action_history">打开历史</string>
@@ -81,4 +81,17 @@
     <string name="update_download">立即下载</string>
     <string name="update_downloading">正在下载 %1$s…</string>
     <string name="update_downloading_toast">开始下载更新，完成后请安装</string>
+
+    <!-- History single delete -->
+    <string name="history_delete_item">删除</string>
+    <string name="history_deleted_confirm">已从历史中删除</string>
+
+    <!-- Export -->
+    <string name="action_export_image">导出长图片</string>
+    <string name="action_export_html">导出 HTML</string>
+    <string name="export_image_saving">正在生成长图片…</string>
+    <string name="export_image_saved">长图片已保存至下载目录</string>
+    <string name="export_image_failed">导出失败：%1$s</string>
+    <string name="export_html_saved">HTML 已保存至下载目录</string>
+    <string name="export_html_failed">HTML 导出失败：%1$s</string>
 </resources>
