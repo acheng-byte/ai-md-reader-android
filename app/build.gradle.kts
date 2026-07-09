@@ -77,7 +77,7 @@ android {
 dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
-    implementation("com.google.android.material:material:1.12.0")
+    implementation("com.google.android.material:material:1.14.0")
     implementation("androidx.webkit:webkit:1.11.0")
     implementation("androidx.documentfile:documentfile:1.0.1")
     // Apache POI HWPF — 正确解析旧版 .doc（OLE2）格式，解决乱码问题
