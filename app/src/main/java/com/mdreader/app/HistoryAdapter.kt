@@ -80,7 +80,7 @@ class HistoryAdapter(
 
         // 删除按钮
         holder.binding.btnDelete.setOnClickListener {
-            val pos = holder.bindingAdapterPosition
+            val pos = holder.adapterPosition
             if (pos != RecyclerView.NO_POSITION) {
                 onDelete?.invoke(e, pos)
             }

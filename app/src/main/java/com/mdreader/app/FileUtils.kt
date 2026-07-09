@@ -43,7 +43,7 @@ object FileUtils {
     private fun decodeText(bytes: ByteArray): String {
         // Detect encoding: count UTF-8 replacement characters to decide if it's really GBK
         val utf8Text = bytes.toString(Charsets.UTF_8)
-        val replacements = utf8Text.count { it == '' }
+        val replacements = utf8Text.count { it == '\uFFFD' }
         val text = if (replacements > 0 && replacements.toDouble() / utf8Text.length > 0.01) {
             // Likely GBK/GB2312 (common for Chinese Windows files)
             runCatching { bytes.toString(charset("GBK")) }.getOrElse { utf8Text }
@@ -240,11 +240,12 @@ object FileUtils {
 
             // 提取文档中嵌入的图片
             val picturesTable = doc.picturesTable
-            val allPictures = picturesTable.allPictures
+            @Suppress("UNCHECKED_CAST")
+            val allPictures = picturesTable.allPictures as List<org.apache.poi.hwpf.usermodel.Picture>
             if (allPictures.isNotEmpty()) {
                 if (text.isNotEmpty()) sb.append("\n\n---\n\n")
                 sb.append("**文档内嵌图片：**\n\n")
-                allPictures.forEach { pic ->
+                for (pic in allPictures) {
                     val imgBytes = pic.content
                     val ext = pic.suggestedFileExtension
                     val dataUri = "data:image/$ext;base64," +
