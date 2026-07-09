@@ -1,5 +1,13 @@
 # 版本记录
 
+## v1.7.1 - 2026-07-09
+
+- 修复：编译失败——新增缺失的 `poi-scratchpad:4.1.2` 依赖，`HWPFDocument` 需位于 scratchpad 模块而非 poi 核心模块。
+- 修复：`.doc` 文件图片提取调用了不存在的 `suggestedFileExtension`，改为正确的 `suggestFileExtension()`。
+- 修复：导出长图片在主线程调用 `Thread.sleep` 阻塞 UI，导致滚动截图始终重复第一屏；改为后台线程 + `CountDownLatch` + `postDelayed` 方案。
+- 修复：Android 8/9 设备导出图片或 HTML 时未请求 `WRITE_EXTERNAL_STORAGE` 运行时权限。
+- 新增：DOCX 表格渲染支持——解析 `w:tbl / w:tr / w:tc` 并转为 Markdown 表格格式。
+
 ## v1.6.4 - 2026-07-05
 
 - 新增：启动时自动恢复上次阅读的文档，无需重新手动打开；首次安装（无历史）才显示欢迎页。

@@ -122,7 +122,7 @@ object FileUtils {
     }
 
     /**
-     * 解析 word/document.xml，提取段落文本（含标题级别）并识别内嵌图片。
+     * 解析 word/document.xml，提取段落文本（含标题级别）、表格（转 Markdown 表格）并识别内嵌图片。
      * 返回 Pair(文本内容, 图片 data URI 列表)
      */
     private fun parseDocxXml(
@@ -137,18 +137,38 @@ object FileUtils {
 
         var paraBuffer = StringBuilder()
         var headingLevel = 0
+
+        // 表格状态
+        var inTable = false
+        var tableRows = ArrayList<ArrayList<String>>()   // rows → cells
+        var currentRow = ArrayList<String>()
+        var cellBuffer = StringBuilder()
+        var inCell = false
+
         var event = parser.eventType
 
         while (event != XmlPullParser.END_DOCUMENT) {
             val ns = parser.namespace ?: ""
             val localName = parser.name ?: ""
             val isWordNs = ns.contains("wordprocessingml")
-            val isDrawNs = ns.contains("drawingml") || ns.contains("wordprocessingml")
 
             when (event) {
                 XmlPullParser.START_TAG -> {
                     when {
-                        localName == "p" && isWordNs -> {
+                        // ── 表格 ──────────────────────────────────────────────
+                        localName == "tbl" && isWordNs -> {
+                            inTable = true
+                            tableRows = ArrayList()
+                        }
+                        localName == "tr" && isWordNs && inTable -> {
+                            currentRow = ArrayList()
+                        }
+                        localName == "tc" && isWordNs && inTable -> {
+                            inCell = true
+                            cellBuffer = StringBuilder()
+                        }
+                        // ── 段落（表格外）────────────────────────────────────
+                        localName == "p" && isWordNs && !inTable -> {
                             paraBuffer = StringBuilder()
                             headingLevel = 0
                         }
@@ -156,13 +176,17 @@ object FileUtils {
                             val styleVal = parser.getAttributeValue(null, "val") ?: ""
                             headingLevel = detectHeadingLevel(styleVal)
                         }
+                        // ── 文本 ──────────────────────────────────────────────
                         localName == "t" && isWordNs -> {
-                            paraBuffer.append(parser.nextText())
+                            val text = parser.nextText()
+                            if (inCell) cellBuffer.append(text)
+                            else paraBuffer.append(text)
                         }
                         localName == "br" && isWordNs -> {
-                            paraBuffer.append('\n')
+                            if (inCell) cellBuffer.append(' ')
+                            else paraBuffer.append('\n')
                         }
-                        // 识别图片引用：a:blip 中的 r:embed 属性
+                        // ── 图片（DrawingML）─────────────────────────────────
                         localName == "blip" && ns.contains("drawingml") -> {
                             val rId = parser.getAttributeValue(
                                 "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
@@ -172,7 +196,7 @@ object FileUtils {
                                 foundImages.add(images[rId]!!)
                             }
                         }
-                        // 也处理 v:imagedata（旧版VML图片）
+                        // ── 图片（旧版 VML）──────────────────────────────────
                         localName == "imagedata" -> {
                             val rId = parser.getAttributeValue(
                                 "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
@@ -185,19 +209,56 @@ object FileUtils {
                     }
                 }
                 XmlPullParser.END_TAG -> {
-                    if (localName == "p" && isWordNs) {
-                        val paraText = paraBuffer.toString()
-                        if (paraText.isNotBlank()) {
-                            if (headingLevel > 0) {
-                                sb.append("#".repeat(headingLevel)).append(' ')
-                                sb.append(paraText.trim()).append("\n\n")
-                            } else {
-                                val line = paraText.trim()
-                                val escaped = if (line.startsWith("#")) "\\$line" else line
-                                sb.append(escaped).append("\n\n")
+                    when {
+                        // ── 表格结束：转 Markdown 表格 ────────────────────────
+                        localName == "tbl" && isWordNs -> {
+                            inTable = false
+                            if (tableRows.isNotEmpty()) {
+                                val colCount = tableRows.maxOf { it.size }
+                                // 表头（第一行）
+                                val header = tableRows[0]
+                                sb.append("| ")
+                                sb.append(header.joinToString(" | ") { it.ifBlank { " " } })
+                                // 补齐列数
+                                repeat(colCount - header.size) { sb.append(" |  ") }
+                                sb.append(" |\n")
+                                // 分隔行
+                                sb.append("|")
+                                repeat(colCount) { sb.append(" --- |") }
+                                sb.append("\n")
+                                // 数据行
+                                for (row in tableRows.drop(1)) {
+                                    sb.append("| ")
+                                    sb.append(row.joinToString(" | ") { it.ifBlank { " " } })
+                                    repeat(colCount - row.size) { sb.append(" |  ") }
+                                    sb.append(" |\n")
+                                }
+                                sb.append("\n")
                             }
-                        } else {
-                            sb.append('\n')
+                        }
+                        localName == "tr" && isWordNs && inTable -> {
+                            if (currentRow.isNotEmpty()) tableRows.add(currentRow)
+                        }
+                        localName == "tc" && isWordNs && inTable -> {
+                            // 合并单元格内多段落文字，去掉换行保持单元格整洁
+                            currentRow.add(cellBuffer.toString().replace('\n', ' ').trim())
+                            inCell = false
+                        }
+                        // ── 段落结束（表格外）────────────────────────────────
+                        localName == "p" && isWordNs && !inTable -> {
+                            val paraText = paraBuffer.toString()
+                            if (paraText.isNotBlank()) {
+                                if (headingLevel > 0) {
+                                    sb.append("#".repeat(headingLevel)).append(' ')
+                                    sb.append(paraText.trim()).append("\n\n")
+                                } else {
+                                    val line = paraText.trim()
+                                    val escaped = if (line.startsWith("#")) "\\$line" else line
+                                    sb.append(escaped).append("\n\n")
+                                }
+                            } else {
+                                sb.append('\n')
+                            }
                         }
                     }
                 }
@@ -247,7 +308,7 @@ object FileUtils {
                 sb.append("**文档内嵌图片：**\n\n")
                 for (pic in allPictures) {
                     val imgBytes = pic.content
-                    val ext = pic.suggestedFileExtension
+                    val ext = pic.suggestFileExtension()
                     val dataUri = "data:image/$ext;base64," +
                         Base64.encodeToString(imgBytes, Base64.NO_WRAP)
                     sb.append("![]($dataUri)\n\n")
