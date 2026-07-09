@@ -930,57 +930,55 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             return
         }
         Toast.makeText(this, R.string.export_image_saving, Toast.LENGTH_SHORT).show()
-        webView.post {
+        // 通过 JS 获取内容实际高度
+        webView.evaluateJavascript(
+            "(function(){ return JSON.stringify({h: document.documentElement.scrollHeight, w: document.documentElement.clientWidth, vh: window.innerHeight}); })()"
+        ) { result ->
             try {
-                val contentHeight = webView.computeVerticalScrollRange()
-                val viewHeight = webView.height
+                val json = org.json.JSONObject(result.trim().removeSurrounding("\"").replace("\\\"", "\""))
+                val contentHeight = json.getInt("h")
+                val viewWidth = json.getInt("w")
+                val viewHeight = json.getInt("vh")
                 if (contentHeight <= 0 || viewHeight <= 0) {
                     Toast.makeText(this, getString(R.string.export_image_failed, "内容为空"), Toast.LENGTH_LONG).show()
-                    return@post
+                    return@evaluateJavascript
                 }
-                val width = webView.width
-                val maxBitmapHeight = 4096 // 防止内存溢出
+
+                val maxBitmapHeight = 4096
                 val scale = if (contentHeight > maxBitmapHeight) maxBitmapHeight.toFloat() / contentHeight else 1f
                 val finalHeight = (contentHeight * scale).toInt()
-                val finalWidth = (width * scale).toInt()
+                val finalWidth = (viewWidth * scale).toInt()
 
                 val bitmap = Bitmap.createBitmap(finalWidth, finalHeight, Bitmap.Config.ARGB_8888)
                 val canvas = Canvas(bitmap)
                 canvas.drawColor(if (prefs.isDark(this)) 0xFF0D1117.toInt() else 0xFFFFFFFF.toInt())
 
                 if (contentHeight <= viewHeight) {
-                    // 内容不超过一屏，直接绘制
                     webView.draw(canvas)
                 } else {
-                    // 滚动截图拼接
                     val screenshotHeight = viewHeight
                     var scrollY = 0
                     while (scrollY < contentHeight) {
-                        webView.scrollTo(0, scrollY)
-                        webView.postDelayed({
-                            // 延迟后绘制这一屏
-                            val srcTop = (scrollY * scale).toInt()
-                            val srcBottom = minOf(((scrollY + screenshotHeight) * scale).toInt(), finalHeight)
-                            val srcHeight = srcBottom - srcTop
-                            if (srcHeight > 0) {
-                                val tempBmp = Bitmap.createBitmap(width, screenshotHeight, Bitmap.Config.ARGB_8888)
-                                val tempCanvas = Canvas(tempBmp)
-                                tempCanvas.drawColor(if (prefs.isDark(this)) 0xFF0D1117.toInt() else 0xFFFFFFFF.toInt())
-                                webView.draw(tempCanvas)
-                                val srcRect = android.graphics.Rect(0, 0, width, screenshotHeight)
-                                val dstRect = android.graphics.Rect(0, srcTop, finalWidth, srcBottom)
-                                canvas.drawBitmap(tempBmp, srcRect, dstRect, null)
-                                tempBmp.recycle()
-                            }
-                        }, 150)
-                        scrollY += screenshotHeight
-                        // 等待绘制完成
+                        val sy = scrollY
+                        webView.post { webView.scrollTo(0, sy) }
                         Thread.sleep(200)
+                        val srcTop = (scrollY * scale).toInt()
+                        val srcBottom = minOf(((scrollY + screenshotHeight) * scale).toInt(), finalHeight)
+                        if (srcBottom > srcTop) {
+                            val tempBmp = Bitmap.createBitmap(viewWidth, screenshotHeight, Bitmap.Config.ARGB_8888)
+                            val tempCanvas = Canvas(tempBmp)
+                            tempCanvas.drawColor(if (prefs.isDark(this)) 0xFF0D1117.toInt() else 0xFFFFFFFF.toInt())
+                            webView.draw(tempCanvas)
+                            val srcRect = android.graphics.Rect(0, 0, viewWidth, screenshotHeight)
+                            val dstRect = android.graphics.Rect(0, srcTop, finalWidth, srcBottom)
+                            canvas.drawBitmap(tempBmp, srcRect, dstRect, null)
+                            tempBmp.recycle()
+                        }
+                        scrollY += screenshotHeight
                     }
-                    webView.scrollTo(0, 0)
+                    webView.post { webView.scrollTo(0, 0) }
                 }
 
-                // 保存到下载目录
                 val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
                 dir.mkdirs()
                 val safeName = shareFileName(currentTitle).removeSuffix(".md").replace(Regex("[^a-zA-Z0-9\\u4e00-\\u9fff_\\-]"), "_")
