@@ -53,6 +53,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
     private lateinit var history: History
     private lateinit var favorites: Favorites
     private lateinit var reading: ReadingProgress
+    private lateinit var annotations: Annotations
     private lateinit var webView: WebView
 
     @Volatile private var currentMarkdown: String = ""
@@ -64,6 +65,15 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
 
     // Edit mode state
     private var isEditing: Boolean = false
+
+    // Annotation state
+    private var isAnnotating: Boolean = false
+    private var annotationColor: String = "#FF0000"
+    private var annotationMode: String = "free"
+    private val annotationColors = listOf("#FF0000", "#0000FF", "#00AA00", "#FF8800", "#AA00FF", "#000000")
+    private val annotationModes = listOf("free", "highlight", "circle", "wavy")
+    private var colorIndex = 0
+    private var modeIndex = 0
 
     // Cancel token: increment before each new load; JS render checks if it's stale
     private val loadGeneration = AtomicInteger(0)
@@ -130,6 +140,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         history = History(this)
         favorites = Favorites(this)
         reading = ReadingProgress(this)
+        annotations = Annotations(this)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         setSupportActionBar(binding.toolbar)
@@ -520,8 +531,24 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             R.id.action_share, R.id.action_toc, R.id.action_search,
             R.id.action_toggle, R.id.action_favorite, R.id.action_edit,
             R.id.action_open, R.id.action_favorites, R.id.action_history,
-            R.id.action_export_image, R.id.action_export_html
+            R.id.action_export_image, R.id.action_export_html,
+            R.id.action_annotate
         ).forEach { menu.findItem(it)?.isVisible = normalVisible }
+
+        // 标注工具：仅在标注模式开启时显示
+        val annotateToolsVisible = isAnnotating
+        listOf(
+            R.id.action_annotate_color, R.id.action_annotate_mode,
+            R.id.action_annotate_undo, R.id.action_annotate_clear
+        ).forEach { menu.findItem(it)?.isVisible = annotateToolsVisible }
+
+        // 更新标注工具标题
+        if (annotateToolsVisible) {
+            menu.findItem(R.id.action_annotate_color)?.title =
+                getString(R.string.annotate_color, annotationColor)
+            menu.findItem(R.id.action_annotate_mode)?.title =
+                getString(R.string.annotate_mode, annotationModeName(annotationMode))
+        }
 
         if (!isEditing) {
             menu.findItem(R.id.action_toggle)?.let { item ->
@@ -563,7 +590,72 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         R.id.action_history -> { showHistory(); true }
         R.id.action_export_image -> { requestStorageAndExportImage(); true }
         R.id.action_export_html -> { exportHtml(); true }
+        R.id.action_annotate -> { toggleAnnotationMode(); true }
+        R.id.action_annotate_color -> { cycleAnnotationColor(); true }
+        R.id.action_annotate_mode -> { cycleAnnotationMode(); true }
+        R.id.action_annotate_undo -> { binding.annotationOverlay.undo(); true }
+        R.id.action_annotate_clear -> {
+            binding.annotationOverlay.clearAll()
+            Toast.makeText(this, R.string.annotate_cleared, Toast.LENGTH_SHORT).show()
+            true
+        }
         else -> super.onOptionsItemSelected(item)
+    }
+
+    // ---- 阅读标注 ----
+
+    private fun toggleAnnotationMode() {
+        isAnnotating = !isAnnotating
+        val overlay = binding.annotationOverlay
+        if (isAnnotating) {
+            overlay.visibility = View.VISIBLE
+            overlay.annotationEnabled = true
+            overlay.drawColor = annotationColor
+            overlay.drawMode = annotationMode
+            // 加载已有标注
+            currentUri?.let { uri ->
+                val strokes = annotations.load(uri)
+                if (strokes.isNotEmpty()) overlay.loadStrokes(strokes)
+            }
+            overlay.onStrokesChanged = {
+                // 自动保存标注
+                currentUri?.let { uri ->
+                    annotations.save(uri, overlay.exportStrokes())
+                }
+            }
+            Toast.makeText(this, R.string.annotate_on, Toast.LENGTH_SHORT).show()
+        } else {
+            overlay.annotationEnabled = false
+            overlay.visibility = View.GONE
+            // 保存标注
+            currentUri?.let { uri ->
+                annotations.save(uri, overlay.exportStrokes())
+                Toast.makeText(this, R.string.annotate_saved, Toast.LENGTH_SHORT).show()
+            }
+            Toast.makeText(this, R.string.annotate_off, Toast.LENGTH_SHORT).show()
+        }
+        invalidateOptionsMenu()
+    }
+
+    private fun cycleAnnotationColor() {
+        colorIndex = (colorIndex + 1) % annotationColors.size
+        annotationColor = annotationColors[colorIndex]
+        binding.annotationOverlay.drawColor = annotationColor
+        invalidateOptionsMenu()
+    }
+
+    private fun cycleAnnotationMode() {
+        modeIndex = (modeIndex + 1) % annotationModes.size
+        annotationMode = annotationModes[modeIndex]
+        binding.annotationOverlay.drawMode = annotationMode
+        invalidateOptionsMenu()
+    }
+
+    private fun annotationModeName(mode: String): String = when (mode) {
+        "highlight" -> getString(R.string.annotate_mode_highlight)
+        "circle" -> getString(R.string.annotate_mode_circle)
+        "wavy" -> getString(R.string.annotate_mode_wavy)
+        else -> getString(R.string.annotate_mode_free)
     }
 
     private fun toggleMode() {
@@ -1164,8 +1256,11 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                 return@evaluateJavascript
             }
             try {
-                // 安全解码 JS 返回的 JSON 字符串：evaluateJavascript 返回的是 JSON 编码的字符串
-                val cleanHtml = decodeJsString(htmlContent)
+                // 安全解码 JS 返回的 JSON 字符串
+                var cleanHtml = decodeJsString(htmlContent)
+
+                // 将 vault 图片 URL 转换为 base64 data URI，使导出 HTML 自包含
+                cleanHtml = convertVaultImagesToBase64(cleanHtml)
 
                 val fullHtml = buildString {
                     appendLine("<!DOCTYPE html>")
@@ -1177,7 +1272,6 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                     appendLine("<style>")
                     appendLine(EXPORT_CSS)
                     appendLine("</style>")
-                    // Mermaid CDN：使导出的 HTML 中 Mermaid SVG 可继续交互/渲染
                     appendLine("<script src=\"https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js\"></script>")
                     appendLine("</head>")
                     appendLine("<body>")
@@ -1210,13 +1304,57 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         }
     }
 
+    /** 将 HTML 中的 vault 图片 URL 替换为 base64 data URI */
+    private fun convertVaultImagesToBase64(html: String): String {
+        val vaultBase = "https://appassets.androidplatform.net/vault/"
+        val vaultUri = prefs.vaultUri ?: return html
+        if (!html.contains(vaultBase)) return html
+
+        val imgRegex = Regex("""(<img[^>]+src=")([^"]+)("[^>]*>)""")
+        return imgRegex.replace(html) { match ->
+            val prefix = match.groupValues[1]
+            val src = match.groupValues[2]
+            val suffix = match.groupValues[3]
+            if (src.startsWith(vaultBase)) {
+                val fileName = java.net.URLDecoder.decode(src.removePrefix(vaultBase), "UTF-8")
+                val dataUri = vaultImageToBase64(vaultUri, fileName)
+                if (dataUri != null) "$prefix$dataUri$suffix" else match.value
+            } else {
+                match.value
+            }
+        }
+    }
+
+    /** 从 Vault 读取图片并转为 base64 data URI */
+    private fun vaultImageToBase64(vaultUriStr: String, fileName: String): String? {
+        return try {
+            val vaultUri = Uri.parse(vaultUriStr)
+            val asset = VaultSearch.resolveRelativeAsset(this, vaultUri, currentUri?.let { Uri.parse(it) }, fileName)
+                ?: return null
+            val mimeType = when {
+                fileName.endsWith(".png", true) -> "image/png"
+                fileName.endsWith(".jpg", true) || fileName.endsWith(".jpeg", true) -> "image/jpeg"
+                fileName.endsWith(".gif", true) -> "image/gif"
+                fileName.endsWith(".webp", true) -> "image/webp"
+                fileName.endsWith(".svg", true) -> "image/svg+xml"
+                fileName.endsWith(".bmp", true) -> "image/bmp"
+                else -> "image/png"
+            }
+            val bytes = contentResolver.openInputStream(asset.uri)?.use { it.readBytes() } ?: return null
+            val b64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+            "data:$mimeType;base64,$b64"
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     /**
      * 安全解码 evaluateJavascript 返回的 JSON 字符串。
      * evaluateJavascript 返回值是一个 JSON 编码的字符串（带外层引号，内部转义）。
-     * 使用 org.json.JSONObject 来安全解码，避免手动 replace 导致的格式损坏。
+     * 特别注意：WebView 会将 < > 编码为 \u003C \u003E，必须显式还原。
      */
     private fun decodeJsString(raw: String): String {
-        return try {
+        val decoded = try {
             // raw 形如 "\"<div>...</div>\""，用 JSONArray 安全解码
             val arr = org.json.JSONArray("[$raw]")
             arr.getString(0)
@@ -1229,6 +1367,14 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                 .replace("\\n", "\n")
                 .replace("\\/", "/")
         }
+        // WebView evaluateJavascript 总是将 < > / 编码为 unicode 转义
+        // JSONArray 解码后有时仍保留这些转义，需要显式还原
+        return decoded
+            .replace("\\u003C", "<")
+            .replace("\\u003c", "<")
+            .replace("\\u003E", ">")
+            .replace("\\u003e", ">")
+            .replace("\\u0026", "&")
     }
 
     /** 获取导出目录（Android 9 及以下使用公共目录） */

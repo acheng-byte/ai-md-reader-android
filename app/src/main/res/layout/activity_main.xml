@@ -47,5 +47,11 @@
                 android:padding="16dp"
                 android:textSize="14sp" />
         </ScrollView>
+
+        <com.mdreader.app.AnnotationOverlay
+            android:id="@+id/annotationOverlay"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone" />
     </FrameLayout>
 </LinearLayout>

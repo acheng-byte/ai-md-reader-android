@@ -103,4 +103,19 @@
     <string name="export_image_failed">导出失败：%1$s</string>
     <string name="export_html_saved">HTML 已保存至 Download/MD阅读器/HTML</string>
     <string name="export_html_failed">HTML 导出失败：%1$s</string>
+
+    <!-- 标注功能 -->
+    <string name="action_annotate">阅读标注</string>
+    <string name="annotate_on">标注模式已开启（手指绘画标注）</string>
+    <string name="annotate_off">标注模式已关闭</string>
+    <string name="annotate_color">切换颜色（当前：%1$s）</string>
+    <string name="annotate_mode">切换模式（当前：%1$s）</string>
+    <string name="annotate_undo">撤销上一笔</string>
+    <string name="annotate_clear">清除所有标注</string>
+    <string name="annotate_cleared">已清除所有标注</string>
+    <string name="annotate_saved">标注已保存</string>
+    <string name="annotate_mode_free">自由画笔</string>
+    <string name="annotate_mode_highlight">荧光笔</string>
+    <string name="annotate_mode_circle">圈注</string>
+    <string name="annotate_mode_wavy">波浪线</string>
 </resources>

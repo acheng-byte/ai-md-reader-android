@@ -88,4 +88,35 @@
         android:id="@+id/action_export_html"
         android:title="@string/action_export_html"
         app:showAsAction="never" />
+
+    <!-- 标注功能 -->
+    <item
+        android:id="@+id/action_annotate"
+        android:icon="@drawable/ic_edit"
+        android:title="@string/action_annotate"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_annotate_color"
+        android:title="@string/annotate_color"
+        android:visible="false"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_annotate_mode"
+        android:title="@string/annotate_mode"
+        android:visible="false"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_annotate_undo"
+        android:title="@string/annotate_undo"
+        android:visible="false"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_annotate_clear"
+        android:title="@string/annotate_clear"
+        android:visible="false"
+        app:showAsAction="never" />
 </menu>
