@@ -620,19 +620,18 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             val saved = trySaveInPlace(currentMarkdown)
             if (saved) {
                 Toast.makeText(this, R.string.edit_saved, Toast.LENGTH_SHORT).show()
+                // 切换到预览模式
+                binding.editScroll.visibility = View.GONE
+                binding.webview.visibility = View.VISIBLE
+                currentMode = "preview"
+                prefs.viewMode = currentMode
+                renderCurrent()
+                invalidateOptionsMenu()
             } else {
                 Toast.makeText(this, R.string.edit_save_as_hint, Toast.LENGTH_LONG).show()
                 val safeName = shareFileName(currentTitle).removeSuffix(".md") + ".md"
                 saveDocLauncher.launch(safeName)
-                return true
             }
-            // 切换到预览模式
-            binding.editScroll.visibility = View.GONE
-            binding.webview.visibility = View.VISIBLE
-            currentMode = "preview"
-            prefs.viewMode = currentMode
-            renderCurrent()
-            invalidateOptionsMenu()
             true
         }
         R.id.action_cancel_edit -> {
