@@ -639,21 +639,22 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             }
             overlay.onStrokesChanged = {
                 // 异步防抖保存标注，避免文件 IO 阻塞主线程
-                settingsHandler.removeCallbacks(annotationSaveRunnable)
-                annotationSaveRunnable = Runnable {
+                annotationSaveRunnable?.let { settingsHandler.removeCallbacks(it) }
+                val r = Runnable {
                     currentUri?.let { uri ->
                         val strokesCopy = overlay.exportStrokes()
                         Thread { annotations.save(uri, strokesCopy) }.start()
                     }
                 }
-                settingsHandler.postDelayed(annotationSaveRunnable, 500)
+                annotationSaveRunnable = r
+                settingsHandler.postDelayed(r, 500)
             }
             Toast.makeText(this, R.string.annotate_on, Toast.LENGTH_SHORT).show()
         } else {
             overlay.annotationEnabled = false
             overlay.visibility = View.GONE
             // 取消待执行的防抖保存，立即异步保存最终状态
-            settingsHandler.removeCallbacks(annotationSaveRunnable)
+            annotationSaveRunnable?.let { settingsHandler.removeCallbacks(it) }
             currentUri?.let { uri ->
                 val strokesCopy = overlay.exportStrokes()
                 Thread { annotations.save(uri, strokesCopy) }.start()
