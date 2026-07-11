@@ -973,30 +973,40 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
     function _titleMatch(h1Text, fileTitle) {
         if (!h1Text) return false;
         var h = h1Text.toLowerCase().trim();
-        // 没有文件名信息：隐藏文档最开头的第一个 H1（它是正文第一个子元素）
+        if (!h) return false;
         if (!fileTitle) {
             return true;
         }
-        // 去除文件扩展名
         var t = fileTitle.replace(/\.[^.]+$/, '').toLowerCase().trim();
         if (!t) return true;
-        // 去除常见分隔符后的标准化版本（去空格、标点）
         var normalize = function (s) { return s.replace(/[\s\-_—–·.:：,，、。!！?？()（）\[\]{}<>\/\\|@#$%^&*+=~`'"]+/g, ''); };
         var hNorm = normalize(h);
         var tNorm = normalize(t);
-        // 策略1：精确匹配
         if (h === t) return true;
-        // 策略2：标准化后精确匹配（忽略空格和标点差异）
         if (hNorm === tNorm) return true;
-        // 策略3：H1 以文件名开头（如 "笔记 完整版" 匹配 "笔记"）
-        if (h.indexOf(t) === 0 && h.length < t.length + 15) return true;
-        // 策略4：文件名包含 H1 文本（如文件名 "读书笔记" H1 "笔记"，H1 至少2字符）
+        if (h.indexOf(t) === 0 && h.length < t.length + 20) return true;
         if (h.length >= 2 && t.indexOf(h) === 0) return true;
-        // 策略5：标准化后 H1 以文件名开头
-        if (hNorm.indexOf(tNorm) === 0 && hNorm.length < tNorm.length + 15) return true;
-        // 策略6：标准化后文件名包含 H1
+        if (hNorm.indexOf(tNorm) === 0 && hNorm.length < tNorm.length + 20) return true;
         if (hNorm.length >= 2 && tNorm.indexOf(hNorm) === 0) return true;
+        if (t.length >= 2 && h.indexOf(t) >= 0) return true;
+        if (tNorm.length >= 2 && hNorm.indexOf(tNorm) >= 0) return true;
+        if (hNorm.length >= 2 && tNorm.indexOf(hNorm) >= 0) return true;
         return false;
+    }
+
+    function _getHideTitle() {
+        if (currentSettings.hideTitleHeading != null) return !!currentSettings.hideTitleHeading;
+        try {
+            var b = bridge();
+            if (b && b.getSettingsJson) {
+                var raw = b.getSettingsJson();
+                if (raw) {
+                    var s = JSON.parse(raw);
+                    if (s.hideTitleHeading != null) return !!s.hideTitleHeading;
+                }
+            }
+        } catch (e) {}
+        return true;
     }
 
     /* ---------- 渲染 ---------- */
@@ -1023,22 +1033,26 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
         previewEl.innerHTML = html;
 
         // 隐藏文件名一级标题（工具栏已显示文件名，正文中重复的一级标题默认隐藏）
-        if (currentSettings.hideTitleHeading) {
+        if (_getHideTitle()) {
             try {
                 var title = '';
-                var b = bridge();
-                if (b && b.getTitle) title = b.getTitle() || '';
+                var b2 = bridge();
+                if (b2 && b2.getTitle) title = b2.getTitle() || '';
             } catch (e) { title = ''; }
-            // 遍历所有 H1，隐藏与文件名匹配的那个（通常只有第一个）
             var allH1 = previewEl.querySelectorAll('h1');
+            var matched = false;
             for (var hi = 0; hi < allH1.length; hi++) {
                 var h1 = allH1[hi];
                 var h1Text = h1.textContent.trim();
                 if (!h1Text) continue;
                 if (_titleMatch(h1Text, title)) {
                     h1.style.display = 'none';
-                    break; // 只隐藏第一个匹配的
+                    matched = true;
+                    break;
                 }
+            }
+            if (!matched && title && allH1.length > 0) {
+                allH1[0].style.display = 'none';
             }
         }
 
