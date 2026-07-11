@@ -872,6 +872,18 @@
             if (lightSheet) lightSheet.disabled = !!s.dark;
             initMermaid(!!s.dark);
         }
+        if (s.eyeProtection != null) {
+            document.body.classList.toggle('eye-protection', !!s.eyeProtection);
+        }
+        if (s.fontFamily != null) {
+            var fontMap = {
+                'default': '-apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", "Helvetica Neue", Arial, sans-serif',
+                'serif': '"Noto Serif CJK SC", "Source Han Serif SC", "SimSun", "Songti SC", Georgia, "Times New Roman", serif',
+                'mono': 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Courier New", monospace'
+            };
+            var ff = fontMap[s.fontFamily] || fontMap['default'];
+            root.style.setProperty('--font-family', ff);
+        }
         if (s.showCitations != null) {
             document.body.classList.toggle('hide-citations', !s.showCitations);
         }

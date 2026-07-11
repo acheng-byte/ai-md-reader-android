@@ -4,6 +4,8 @@
     --line-height: 1.7;
     --para-gap: 1em;
     --max-width: 880px;
+    --font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC",
+        "Helvetica Neue", Arial, sans-serif;
 
     --bg: #ffffff;
     --fg: #1f2328;
@@ -30,14 +32,39 @@ body.dark {
     --hr: #21262d;
 }
 
+/* 护眼模式：暖色羊皮纸背景 */
+body.eye-protection {
+    --bg: #f5ecd7;
+    --fg: #5b4636;
+    --muted: #8b7355;
+    --border: #d4c4a0;
+    --code-bg: #ede0c8;
+    --code-fg: #5b4636;
+    --quote-fg: #8b7355;
+    --link: #8b5e3c;
+    --table-stripe: #ede0c8;
+    --hr: #d4c4a0;
+}
+body.dark.eye-protection {
+    --bg: #1a1610;
+    --fg: #d4c4a0;
+    --muted: #a08c6a;
+    --border: #3d3528;
+    --code-bg: #231e16;
+    --code-fg: #d4c4a0;
+    --quote-fg: #a08c6a;
+    --link: #c49a6c;
+    --table-stripe: #231e16;
+    --hr: #3d3528;
+}
+
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
 
 body {
     background: var(--bg);
     color: var(--fg);
-    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC",
-        "Helvetica Neue", Arial, sans-serif;
+    font-family: var(--font-family);
     font-size: var(--font-size);
     line-height: var(--line-height);
     -webkit-text-size-adjust: 100%;

@@ -370,8 +370,12 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         if (pageReady) webView.evaluateJavascript(code, null)
     }
 
-    private fun bgColor(): Int =
-        if (prefs.isDark(this)) 0xFF0D1117.toInt() else 0xFFFFFFFF.toInt()
+    private fun bgColor(): Int {
+        if (prefs.eyeProtection) {
+            return if (prefs.isDark(this)) 0xFF1A1610.toInt() else 0xFFF5ECD7.toInt()
+        }
+        return if (prefs.isDark(this)) 0xFF0D1117.toInt() else 0xFFFFFFFF.toInt()
+    }
 
     private fun isAllowedFile(name: String?): Boolean {
         if (name == null) return true
@@ -706,6 +710,16 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             }
         )
 
+        // 护眼模式和字体选择
+        sheet.switchEyeProtection.isChecked = prefs.eyeProtection
+        sheet.toggleFontFamily.check(
+            when (prefs.fontFamily) {
+                "serif" -> R.id.btn_font_serif
+                "mono" -> R.id.btn_font_mono
+                else -> R.id.btn_font_default
+            }
+        )
+
         // Frontmatter and citations toggles
         sheet.switchFrontmatter.isChecked = prefs.showFrontmatter
         sheet.switchCitations.isChecked = prefs.showCitations
@@ -729,6 +743,20 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                     R.id.btn_theme_light -> 1
                     R.id.btn_theme_dark -> 2
                     else -> 0
+                }
+                applySettingsToWeb()
+            }
+        }
+        sheet.switchEyeProtection.setOnCheckedChangeListener { _, checked ->
+            prefs.eyeProtection = checked
+            applySettingsToWeb()
+        }
+        sheet.toggleFontFamily.addOnButtonCheckedListener { _, checkedId, isChecked ->
+            if (isChecked) {
+                prefs.fontFamily = when (checkedId) {
+                    R.id.btn_font_serif -> "serif"
+                    R.id.btn_font_mono -> "mono"
+                    else -> "default"
                 }
                 applySettingsToWeb()
             }
@@ -1055,17 +1083,17 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                             runOnUiThread { webView.scrollTo(0, 0) }
                         }
 
-                        // 保存到应用私有 Downloads 目录（Android 10+ 兼容）
-                        val dir = getExportDir()
+                        // 保存到 Pictures/MD阅读器/
                         val safeName = exportFileName(savedTitle)
-                        val file = File(dir, "$safeName.png")
-                        FileOutputStream(file).use { out ->
-                            bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
-                        }
+                        val saved = saveImageToGallery(bitmap, safeName)
                         bitmap.recycle()
 
-                        // 通知媒体扫描器以便在系统「下载」中可见
-                        scanExportedFile(file)
+                        if (saved == null) {
+                            runOnUiThread {
+                                Toast.makeText(this, getString(R.string.export_image_failed, "无法创建文件"), Toast.LENGTH_LONG).show()
+                            }
+                            return@Thread
+                        }
 
                         runOnUiThread {
                             Toast.makeText(this, getString(R.string.export_image_saved), Toast.LENGTH_LONG).show()
@@ -1123,13 +1151,15 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                     appendLine("</html>")
                 }
 
-                val dir = getExportDir()
                 val safeName = exportFileName(currentTitle)
-                val file = File(dir, "$safeName.html")
-                FileOutputStream(file).use { out ->
-                    out.write(fullHtml.toByteArray(Charsets.UTF_8))
+                val saved = saveHtmlToGallery(fullHtml, safeName)
+
+                if (saved == null) {
+                    runOnUiThread {
+                        Toast.makeText(this, getString(R.string.export_html_failed, "无法创建文件"), Toast.LENGTH_LONG).show()
+                    }
+                    return@evaluateJavascript
                 }
-                scanExportedFile(file)
 
                 runOnUiThread {
                     Toast.makeText(this, getString(R.string.export_html_saved), Toast.LENGTH_LONG).show()
@@ -1163,18 +1193,66 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         }
     }
 
-    /** 获取导出目录：优先使用应用私有 Downloads（Android 10+ 兼容），无需额外权限 */
-    private fun getExportDir(): File {
-        // Android 10+ (API 29) 使用 getExternalFilesDir 无需申请存储权限
-        // 文件保存在 /sdcard/Android/data/com.mdreader.app/files/Downloads/
-        val dir = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
-                ?: File(filesDir, "Downloads")
+    /** 获取导出目录（Android 9 及以下使用公共目录） */
+    private fun getExportDir(subDir: String): File {
+        val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        val target = File(dir, "MD阅读器/$subDir")
+        target.mkdirs()
+        return target
+    }
+
+    /** 保存长图片到 Pictures/MD阅读器/ （Android 10+ 用 MediaStore，9 及以下用 File） */
+    private fun saveImageToGallery(bitmap: Bitmap, fileName: String): File? {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // Android 10+：使用 MediaStore 保存到 Pictures/MD阅读器/
+            val resolver = contentResolver
+            val contentValues = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, "$fileName.png")
+                put(android.provider.MediaStore.Images.Media.MIME_TYPE, "image/png")
+                put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, "Pictures/MD阅读器")
+            }
+            val uri = resolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
+                ?: return null
+            resolver.openOutputStream(uri)?.use { out ->
+                bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+            }
+            return File(uri.path ?: "")
         } else {
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            // Android 9 及以下：直接写文件
+            val dir = getExportDir("Picture")
+            val file = File(dir, "$fileName.png")
+            FileOutputStream(file).use { out ->
+                bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+            }
+            scanExportedFile(file)
+            return file
         }
-        dir.mkdirs()
-        return dir
+    }
+
+    /** 保存 HTML 到 Download/MD阅读器/HTML/ （Android 10+ 用 MediaStore，9 及以下用 File） */
+    private fun saveHtmlToGallery(htmlContent: String, fileName: String): File? {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val resolver = contentResolver
+            val contentValues = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.Downloads.DISPLAY_NAME, "$fileName.html")
+                put(android.provider.MediaStore.Downloads.MIME_TYPE, "text/html")
+                put(android.provider.MediaStore.Downloads.RELATIVE_PATH, "Download/MD阅读器/HTML")
+            }
+            val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+                ?: return null
+            resolver.openOutputStream(uri, "wt")?.use { out ->
+                out.write(htmlContent.toByteArray(Charsets.UTF_8))
+            }
+            return File(uri.path ?: "")
+        } else {
+            val dir = getExportDir("HTML")
+            val file = File(dir, "$fileName.html")
+            FileOutputStream(file).use { out ->
+                out.write(htmlContent.toByteArray(Charsets.UTF_8))
+            }
+            scanExportedFile(file)
+            return file
+        }
     }
 
     /** 生成导出文件名：以笔记名命名，仅去除文件系统不允许的字符 */
@@ -1262,27 +1340,29 @@ body { background: var(--bg); color: var(--fg); font-family: -apple-system, "Pin
         private val WELCOME_MD = """
 # 欢迎使用 MD 阅读器
 
-这是一个本地 **Markdown 阅读器**（v1.7.2）。
+这是一个本地 **Markdown 阅读器**（v1.8.0）。
 
 ## 怎么用
 
 - 点击 **目录** 唤出大纲，点击标题快速跳转
 - 点击 **搜索** 在当前文档中搜索，也可切换为全库搜索
 - 点击 **源码 / 预览** 切换呈现方式；预览模式点击标题可折叠/展开
-- **点击屏幕中央** 调出「显示设置」（字号 / 行距 / 段距 / 主题 / Vault 文件夹）
+- **点击屏幕中央** 调出「显示设置」（字号 / 行距 / 段距 / 主题 / 护眼模式 / 字体 / Vault 文件夹）
 - 在设置中选择 **Vault 文件夹** 后，可使用 `[[wikilink]]` 导航与全库搜索
 - 重新打开同一文档时，会自动回到上次阅读位置
 - 启动时自动弹出打开历史，快速继续阅读
 - 点击右上角 **⋮ → 编辑**，直接在应用内编辑 Markdown，保存后立即刷新预览
 
-## v1.7.2 更新
+## v1.8.0 更新
 
-- **修复**：历史记录单条删除闪退问题
-- **修复**：导出长图不完整、代码块被截断的问题
-- **修复**：导出 HTML 丢失加粗、表格、图片、Mermaid 格式
-- **修复**：导出文件名包含无效字符、保存后在下载目录看不到
-- **修复**：编辑 DOC 文档后再打开其他 DOC 显示解析失败
-- **优化**：DOC 文档图片过滤不支持的格式（EMF/WMF），避免显示空白
+- **新增**：护眼模式 — 暖色羊皮纸背景，减轻长时间阅读的视觉疲劳
+- **新增**：字体切换 — 支持默认 / 宋体 / 等宽三种字体
+- **新增**：导出路径优化 — 长图保存至 `MD阅读器/Picture`，HTML 保存至 `MD阅读器/HTML`
+- **新增**：PDF 文件关联 — 系统文件管理器可直接用本 App 打开 PDF
+- **修复**：历史记录单条删除闪退
+- **修复**：导出长图不完整、HTML 丢失格式
+- **修复**：编辑 DOC 后再打开其他 DOC 解析失败
+- **优化**：DOC 图片过滤不支持的格式（EMF/WMF）
 
 ## 支持的格式
 

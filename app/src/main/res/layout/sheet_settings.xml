@@ -145,6 +145,64 @@
             android:text="@string/theme_dark" />
     </com.google.android.material.button.MaterialButtonToggleGroup>
 
+    <!-- 护眼模式 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginTop="12dp"
+        android:layout_marginBottom="4dp">
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/label_eye_protection"
+            android:textAppearance="@style/TextAppearance.Material3.BodyMedium" />
+        <com.google.android.material.switchmaterial.SwitchMaterial
+            android:id="@+id/switch_eye_protection"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:checked="false" />
+    </LinearLayout>
+
+    <!-- 字体 -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:layout_marginBottom="8dp"
+        android:text="@string/label_font_family"
+        android:textAppearance="@style/TextAppearance.Material3.BodyLarge" />
+    <com.google.android.material.button.MaterialButtonToggleGroup
+        android:id="@+id/toggle_font_family"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        app:singleSelection="true"
+        app:selectionRequired="true">
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_font_default"
+            style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/font_default" />
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_font_serif"
+            style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/font_serif" />
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_font_mono"
+            style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/font_mono" />
+    </com.google.android.material.button.MaterialButtonToggleGroup>
+
     <!-- 内容解析选项 -->
     <TextView
         android:layout_width="wrap_content"

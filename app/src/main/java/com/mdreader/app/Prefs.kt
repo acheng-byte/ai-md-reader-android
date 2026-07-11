@@ -63,6 +63,16 @@ class Prefs(context: Context) {
         get() = sp.getBoolean(KEY_SHOW_CITATIONS, true)
         set(v) { sp.edit().putBoolean(KEY_SHOW_CITATIONS, v).apply() }
 
+    /** 护眼模式：暖色背景减轻视觉疲劳 */
+    var eyeProtection: Boolean
+        get() = sp.getBoolean(KEY_EYE_PROTECTION, false)
+        set(v) { sp.edit().putBoolean(KEY_EYE_PROTECTION, v).apply() }
+
+    /** 字体族：default / serif / mono */
+    var fontFamily: String
+        get() = sp.getString(KEY_FONT_FAMILY, "default") ?: "default"
+        set(v) { sp.edit().putString(KEY_FONT_FAMILY, v).apply() }
+
     fun isDark(context: Context): Boolean = when (themeMode) {
         1 -> false
         2 -> true
@@ -77,6 +87,8 @@ class Prefs(context: Context) {
         put("lineHeight", round1(lineHeight))
         put("paraGap", round1(paraGap))
         put("dark", isDark(context))
+        put("eyeProtection", eyeProtection)
+        put("fontFamily", fontFamily)
         put("showFrontmatter", showFrontmatter)
         put("showCitations", showCitations)
     }.toString()
@@ -106,6 +118,8 @@ class Prefs(context: Context) {
         private const val KEY_LAST_UPDATE_CHECK = "last_update_check"
         private const val KEY_SHOW_FRONTMATTER = "show_frontmatter"
         private const val KEY_SHOW_CITATIONS = "show_citations"
+        private const val KEY_EYE_PROTECTION = "eye_protection"
+        private const val KEY_FONT_FAMILY = "font_family"
         private const val KEY_LAST_DOC_URI = "last_doc_uri"
         private const val KEY_LAST_DOC_NAME = "last_doc_name"
     }

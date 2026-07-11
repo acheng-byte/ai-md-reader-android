@@ -17,6 +17,11 @@
     <string name="theme_system">跟随系统</string>
     <string name="theme_light">浅色</string>
     <string name="theme_dark">深色</string>
+    <string name="label_eye_protection">护眼模式</string>
+    <string name="label_font_family">字体</string>
+    <string name="font_default">默认</string>
+    <string name="font_serif">宋体</string>
+    <string name="font_mono">等宽</string>
     <string name="reset_default">恢复默认</string>
     <string name="label_content_options">内容解析</string>
     <string name="label_frontmatter">自动识别元数据（Frontmatter）</string>
@@ -90,8 +95,8 @@
     <string name="action_export_image">导出长图片</string>
     <string name="action_export_html">导出 HTML</string>
     <string name="export_image_saving">正在生成长图片…</string>
-    <string name="export_image_saved">长图片已保存至下载目录</string>
+    <string name="export_image_saved">长图片已保存至 MD阅读器/Picture</string>
     <string name="export_image_failed">导出失败：%1$s</string>
-    <string name="export_html_saved">HTML 已保存至下载目录</string>
+    <string name="export_html_saved">HTML 已保存至 MD阅读器/HTML</string>
     <string name="export_html_failed">HTML 导出失败：%1$s</string>
 </resources>
