@@ -1461,7 +1461,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                         val parent = view.parent as? android.view.ViewGroup
                         parent?.removeView(view)
                         view.destroy()
-                        parent?.parent?.removeView(parent) // 移除 tempContainer
+                        (parent?.parent as? android.view.ViewGroup)?.removeView(parent) // 移除 tempContainer
                     }, 1000)
                 }
             }
