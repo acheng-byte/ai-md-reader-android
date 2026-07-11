@@ -1,5 +1,38 @@
 # 版本记录
 
+## v1.8.0 - 2026-07-12
+
+- 新增：护眼模式 — 暖色羊皮纸背景（`#f5ecd7`），浅色/深色主题下均可开启，减轻长时间阅读的视觉疲劳。
+- 新增：字体切换 — 支持默认 / 宋体（Noto Serif CJK SC）/ 等宽三种字体，通过 CSS 变量 `--font-family` 注入。
+- 新增：PDF 文件打开与阅读 — 使用 Android PdfRenderer 逐页渲染为图片，支持缩放和翻页。
+- 新增：PDF 文件关联 — AndroidManifest 新增 PDF Intent Filter，系统文件管理器可直接用本 App 打开 PDF。
+- 新增：导出长图片 — WebView 滚动截图拼接（75% 步进 + 400ms 等待），保存至 `Download/MD阅读器/Picture`（Android 10+ 使用 MediaStore）。
+- 新增：导出 HTML — 包含完整样式（代码高亮、Mermaid CDN、Callout）的独立 HTML 文件，保存至 `Download/MD阅读器/HTML`。
+- 新增：设置面板新增"检查更新"按钮，手动检查 GitHub Release 是否有新版本，绕过节流并显示 Toast 反馈。
+- 新增：设置面板显示当前版本号。
+- 修复：历史记录面板单条删除导致 `IndexOutOfBoundsException` 闪退——`HistoryAdapter` 改用 `notifyDataSetChanged()`。
+- 修复：导出 HTML 时 `evaluateJavascript` 返回的 JSON 字符串解码损坏——改用 `JSONArray` 安全解码。
+- 修复：编辑 DOC 后保存 Markdown 覆盖二进制文件导致损坏——`trySaveInPlace()` 拒绝非 MD/TXT 格式的原位保存。
+- 修复：导出文件名被过度清理，中文字符被去除——改为仅移除文件系统非法字符。
+- 修复：Android 10+ 导出路径不正确——改用 MediaStore Downloads + `RELATIVE_PATH`。
+- 修复：MediaScanner 使用了 FileProvider content:// URI 而非 file:// URI——改用 `Uri.fromFile()`。
+- 优化：DOC 图片提取过滤 EMF/WMF 等 WebView 不支持的格式，仅保留 png/jpg/gif/bmp/webp。
+- 优化：自动更新检查超时从 8s 延长至 15s，提高弱网环境下的成功率；节流从 24h 缩短至 12h。
+- 优化：欢迎页重写，列出所有支持功能及示例。
+
+## v1.7.3 - 2026-07-10
+
+- 修复：`showHistory()` 中 `adapter.removeAt(position)` 和 `entries.removeAt(position)` 操作同一列表导致双删除——移除冗余的 `entries.removeAt()`。
+- 修复：MediaScanner 使用 FileProvider 的 content:// URI 导致扫描失败——改用 `Uri.fromFile()`。
+
+## v1.7.2 - 2026-07-10
+
+- 修复：DOC 文件中 EMF/WMF 格式图片无法在 WebView 中显示——`FileUtils` 图片提取过滤非 web 兼容格式。
+- 修复：导出 HTML 时 `evaluateJavascript` 返回的 JSON 编码字符串被手动 replace 损坏——改用 `JSONArray("[$raw]").getString(0)` 安全解码。
+- 修复：导出文件名正则过于激进，去除中文字符——改为仅移除 `[/\\:*?"<>|]` 等文件系统非法字符。
+- 修复：Android 10+ 使用已弃用的 `getExternalStoragePublicDirectory` 导致导出文件不可见——改用 `getExternalFilesDir`。
+- 修复：编辑 DOC/DOCX/PDF 后保存 Markdown 覆盖二进制文件导致损坏——`trySaveInPlace()` 检测非 MD/TXT 格式时拒绝原位保存，强制使用"另存为"。
+
 ## v1.7.1 - 2026-07-09
 
 - 修复：编译失败——新增缺失的 `poi-scratchpad:4.1.2` 依赖，`HWPFDocument` 需位于 scratchpad 模块而非 poi 核心模块。

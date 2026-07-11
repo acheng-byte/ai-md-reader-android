@@ -22,8 +22,8 @@ object UpdateChecker {
         val conn = URL(RELEASES_API).openConnection() as HttpURLConnection
         conn.requestMethod = "GET"
         conn.setRequestProperty("Accept", "application/vnd.github.v3+json")
-        conn.connectTimeout = 8_000
-        conn.readTimeout = 8_000
+        conn.connectTimeout = 15_000
+        conn.readTimeout = 15_000
         if (conn.responseCode == 200) {
             val json = JSONObject(conn.inputStream.bufferedReader().readText())
             val assets: JSONArray = json.optJSONArray("assets") ?: JSONArray()

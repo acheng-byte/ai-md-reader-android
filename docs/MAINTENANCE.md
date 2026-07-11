@@ -1,6 +1,6 @@
 # AI MD Reader Android — 维护与开发手册
 
-> 版本：v1.6.0 | 更新日期：2026-07-04
+> 版本：v1.8.0 | 更新日期：2026-07-12
 > 仓库：https://github.com/acheng-byte/ai-md-reader-android
 
 ---
@@ -23,10 +23,11 @@
 
 这是一个 Android 本地 Markdown 阅读器，核心技术栈：
 
-- **前端渲染**：WebView + markdown-it（JS）
-- **原生层**：Kotlin + AndroidX
+- **前端渲染**：WebView + markdown-it（JS）+ highlight.js + Mermaid
+- **原生层**：Kotlin + AndroidX + Material Components
 - **文件访问**：Storage Access Framework (SAF)，无需危险权限
-- **iOS 同款**：仓库内含 `ios/` 目录，SwiftUI 实现，共享同一套 web 资源
+- **文档解析**：Apache POI 4.1.2（HWPF for .doc）、Android PdfRenderer（PDF）
+- **导出**：MediaStore API（Android 10+）/ File API（Android 9 及以下）
 
 **设计哲学**：所有渲染逻辑放在 Web 层（JS/CSS/HTML），原生层只做文件读写、系统调用和 UI 壳；两层通过 `MarkdownBridge` 互相通信。
 
@@ -39,20 +40,20 @@ ai-md-reader-android/
 ├── app/
 │   ├── build.gradle.kts                  # 版本号、依赖、签名配置
 │   └── src/main/
-│       ├── AndroidManifest.xml           # 权限、Intent Filter（接收 .md/.docx/.txt 文件）
+│       ├── AndroidManifest.xml           # 权限、Intent Filter（md/txt/docx/doc/pdf）
 │       ├── assets/                       # WebView 加载的前端资源
 │       │   ├── viewer.html               # 入口 HTML
 │       │   ├── app.js                    # 全部渲染逻辑（核心）
-│       │   ├── app.css                   # 全部样式
+│       │   ├── app.css                   # 全部样式（含护眼模式、字体变量）
 │       │   └── lib/
 │       │       ├── markdown-it.min.js    # Markdown 解析器
 │       │       ├── highlight.min.js      # 代码高亮
 │       │       └── mermaid.min.js        # Mermaid 图表
 │       ├── java/com/mdreader/app/
-│       │   ├── MainActivity.kt           # 主 Activity
+│       │   ├── MainActivity.kt           # 主 Activity（含导出、设置、更新检查）
 │       │   ├── MarkdownBridge.kt         # JS↔原生桥接接口定义
 │       │   ├── Prefs.kt                  # SharedPreferences 封装
-│       │   ├── FileUtils.kt              # 文件读取（支持 md/txt/docx/doc）
+│       │   ├── FileUtils.kt              # 文件读取（md/txt/docx/doc，含编码检测）
 │       │   ├── VaultSearch.kt            # Vault 搜索（异步）
 │       │   ├── UpdateChecker.kt          # GitHub Releases 更新检查
 │       │   ├── History.kt / HistoryAdapter.kt
@@ -62,7 +63,7 @@ ai-md-reader-android/
 │       └── res/
 │           ├── layout/
 │           │   ├── activity_main.xml
-│           │   ├── sheet_settings.xml    # 含 Frontmatter/Citations 开关
+│           │   ├── sheet_settings.xml    # 含护眼模式、字体、检查更新
 │           │   ├── sheet_history.xml
 │           │   └── sheet_favorites.xml
 │           ├── menu/menu_main.xml
@@ -86,7 +87,7 @@ ai-md-reader-android/
 | 标题 H1–H6 | ✅ | 含折叠/展开交互 |
 | 有序/无序列表 | ✅ | 多级嵌套 |
 | 表格 | ✅ | 自动横向滚动 |
-| 代码块（带高亮）| ✅ | highlight.js，100+ 语言 |
+| 代码块（带高亮）| ✅ | highlight.js，100+ 语言，右上角复制按钮 |
 | 任务列表 `- [ ]` | ✅ | 渲染为复选框 |
 | 引用块 | ✅ | 可通过设置关闭样式 |
 | 图片 | ✅ | 远程 + Vault 本地图片 |
@@ -97,17 +98,23 @@ ai-md-reader-android/
 | Obsidian Wikilink `[[Page]]` | ✅ | 需设置 Vault |
 | Obsidian 图片嵌入 `![[img.png]]` | ✅ | 通过 WebViewAssetLoader |
 | 引用文档展开 `![[doc.md]]` | ✅ | 点击折叠条内联展开 |
+| `==高亮==` | ✅ | Obsidian 语法 |
+| `#标签` | ✅ | 胶囊样式标签 |
+| `%%注释%%` | ✅ | 自动隐藏 |
+| 脚注 `[^1]` | ✅ | 上标链接 + 文末列表 |
+| `[[#标题]]` | ✅ | 页内锚点跳转 |
+| Callout `> [!NOTE]` | ✅ | 多种类型支持 |
 | 数学公式 KaTeX/MathJax | ❌ | 待支持 |
-| 脚注 | ❌ | 待支持 |
 
 ### 3.2 文件格式
 
 | 格式 | 状态 | 说明 |
 |---|:---:|---|
 | .md / .markdown | ✅ | 完整支持 |
-| .txt | ✅ | 包裹为代码块显示 |
-| .docx | ✅ | XML 解析，保留标题层级 |
-| .doc | ✅ | 尽力提取可读文本 |
+| .txt | ✅ | UTF-8 / GBK / GB18030 自动检测 |
+| .docx | ✅ | XML 解析，保留标题层级和表格 |
+| .doc | ✅ | Apache POI HWPF 提取文本和图片 |
+| .pdf | ✅ | Android PdfRenderer 逐页渲染为图片 |
 
 ### 3.3 阅读体验
 
@@ -115,20 +122,33 @@ ai-md-reader-android/
 |---|:---:|
 | 目录（TOC）侧滑面板 | ✅ |
 | 标题折叠/展开 | ✅ |
-| 全文搜索（当前文档）| ✅ |
+| 文内搜索（默认）| ✅ |
 | 全库搜索（Vault，异步）| ✅ |
 | 字号/行距/段距调节 | ✅ |
 | 主题浅色/深色/系统 | ✅ |
-| 阅读进度记忆 | ✅ |
+| 护眼模式 | ✅ |
+| 字体切换（默认/宋体/等宽） | ✅ |
+| 阅读进度记忆（断点续读） | ✅ |
 | Frontmatter 开关 | ✅ |
 | 引用块样式开关 | ✅ |
+| 编辑模式 | ✅ |
 
-### 3.4 系统集成
+### 3.4 导出与分享
 
 | 功能 | 状态 |
 |---|:---:|
-| 自动检查更新（每日一次）| ✅ |
+| 导出长图片 | ✅ |
+| 导出 HTML（含完整样式）| ✅ |
+| 转发分享 | ✅ |
+
+### 3.5 系统集成
+
+| 功能 | 状态 |
+|---|:---:|
+| 自动检查更新（12h 节流）| ✅ |
+| 手动检查更新按钮 | ✅ |
 | 发现新版本弹窗 + 直接下载安装 | ✅ |
+| PDF 文件关联 | ✅ |
 | CI 自动构建 | ✅ |
 | 自动发布 Release APK | ✅ |
 
@@ -143,41 +163,52 @@ ai-md-reader-android/
 ```
 app.js 职责：
 ├── markdown-it 初始化 + 任务列表规则注入
+├── ==高亮== / #标签 / %%注释%% / 脚注 预处理
 ├── parseFrontmatter()       — 解析 YAML front matter
 ├── preprocessWikilinks()    — 替换 [[Page]]、![[img]]、![[doc]]
+├── preprocessInternalLinks() — [[#标题]] 锚点
+├── preprocessImages()       — 图片路径 → Vault URL
 ├── renderFrontmatter()      — 渲染 frontmatter 为 HTML 表格
+├── postprocessCallouts()    — blockquote → Callout 样式
 ├── initMermaid()            — 初始化 Mermaid
-├── render()                 — 主渲染（立即清空旧内容，防止停留）
+├── render()                 — 主渲染
 ├── 折叠/展开逻辑
 ├── 目录构建
-├── 搜索（当前文档高亮 + 全库异步搜索）
+├── 搜索（文内高亮 + 全库异步搜索）
 ├── window._toggleEmbed()    — 引用文档展开
-├── applySettings()          — CSS 变量注入 + frontmatter/citations 开关
+├── applySettings()          — CSS 变量注入 + 护眼/字体/frontmatter/citations
 └── 暴露给原生的 API
 ```
 
-**重要 URL 约定**：Vault 内资源使用 WebViewAssetLoader 的 `/vault/` 路径：
+### `app.css`
+
+所有样式，关键 CSS 变量：
 
 ```
-const VAULT_BASE = 'https://appassets.androidplatform.net/vault/';
-// ![[img.png]] → <img src="https://appassets.androidplatform.net/vault/img.png">
+:root {
+    --font-size / --line-height / --para-gap / --max-width
+    --font-family（由设置注入）
+    --bg / --fg / --muted / --border / --code-bg / --link 等
+}
+body.dark { ... }
+body.eye-protection { ... }  /* 暖色羊皮纸 */
 ```
 
 ### `MainActivity.kt`
 
-- `loadDocument()` — 异步读文件，loadGeneration 防竞态，防止快速切换时停留在旧文档
-- `renderCurrent()` — 50ms 防抖，避免快速触发多次渲染
-- `searchVaultAsync()` — 后台线程搜索，回调 `window.appVaultSearchResult`
-- `searchVaultForEmbed()` — 按文件名查 Vault，返回 URI 供嵌入展开用
+- `loadDocument()` — 异步读文件，loadGeneration 防竞态
+- `renderCurrent()` — 50ms 防抖
+- `showSettings()` — 设置面板（字号/行距/段距/主题/护眼/字体/Vault/检查更新）
+- `exportLongImage()` — WebView 滚动截图拼接
+- `exportHtml()` — 导出完整 HTML
+- `saveImageToGallery()` / `saveHtmlToGallery()` — MediaStore 保存
+- `checkForUpdates()` / `manualCheckForUpdates()` — 自动/手动更新检查
+- `WELCOME_MD` — 欢迎页内容
 
-### `MarkdownBridge.kt`
+### `UpdateChecker.kt`
 
-新增接口：
-
-| 方法 | 说明 |
-|---|---|
-| `searchVaultAsync(query, callbackId)` | 异步全库搜索，结果通过 JS 回调返回 |
-| `searchVaultForEmbed(ref)` | 按名查 Vault 文件 URI（供 ![[doc]] 展开） |
+- `checkLatest()` — 请求 GitHub Releases API（15s 超时）
+- `isNewer()` — 版本号比较（去 v 前缀，数字段比较）
 
 ---
 
@@ -191,18 +222,29 @@ const VAULT_BASE = 'https://appassets.androidplatform.net/vault/';
 | Vault 图片/资源路径 | `app.js` | `VAULT_BASE` 常量 + `preprocessWikilinks()` |
 | Frontmatter 开关效果 | `app.js` | `render()` 中 `showFm` 检查 |
 | 引用块开关 | `app.css` | `.hide-citations blockquote` |
-| 视频/图片嵌入样式 | `app.css` | `.video-embed` |
-| 引用展开样式 | `app.css` | `.embed-block` |
+| 护眼模式颜色 | `app.css` | `body.eye-protection` |
+| 字体映射 | `app.js` | `applySettings()` 中 `fontMap` |
+| Callout 类型/图标 | `app.js` | `calloutIcon()` |
 
 ### 5.2 搜索相关
 
 | 要改的功能 | 文件 | 位置 |
 |---|---|---|
+| 文内搜索逻辑 | `app.js` | `doSearch()` |
 | 全库搜索异步回调 | `MainActivity.kt` | `searchVaultAsync()` |
 | JS 接收搜索结果 | `app.js` | `window.appVaultSearchResult` |
-| 搜索防抖延迟 | `app.js` | `setTimeout(doSearch, 150)` |
+| 搜索模式切换 | `app.js` | `search-vault-btn` onclick |
 
-### 5.3 文件格式
+### 5.3 导出相关
+
+| 要改的功能 | 文件 | 位置 |
+|---|---|---|
+| 长图片拼接逻辑 | `MainActivity.kt` | `exportLongImage()` |
+| HTML 导出模板 | `MainActivity.kt` | `exportHtml()` + `EXPORT_CSS` |
+| 保存路径 | `MainActivity.kt` | `saveImageToGallery()` / `saveHtmlToGallery()` |
+| Android 9 回退路径 | `MainActivity.kt` | `getExportDir()` |
+
+### 5.4 文件格式
 
 | 要改的功能 | 文件 | 位置 |
 |---|---|---|
@@ -210,12 +252,13 @@ const VAULT_BASE = 'https://appassets.androidplatform.net/vault/';
 | Intent Filter | `AndroidManifest.xml` | 添加 MIME 或扩展名 |
 | 文件类型检查 | `MainActivity.kt` | `isAllowedFile()` |
 
-### 5.4 发版相关
+### 5.5 发版相关
 
 | 要改的功能 | 文件 | 位置 |
 |---|---|---|
 | 修改版本号 | `app/build.gradle.kts` | `versionCode` + `versionName` |
 | 修改更新检查仓库 | `UpdateChecker.kt` | `RELEASES_API` 常量 |
+| 自动更新节流时间 | `MainActivity.kt` | `checkForUpdates()` 中的 `TimeUnit.HOURS` |
 
 ---
 
@@ -246,20 +289,6 @@ js("window.appVaultSearchResult && window.appVaultSearchResult('$id', '$json')")
 | `openVaultFile(uri)` | 打开 Vault 文件 |
 | `openWikiLink(name)` | 导航到 Wikilink |
 
-### Vault 资源加载流程（v1.6.0）
-
-```
-![[image.png]]
-    ↓ (preprocessWikilinks)
-![image.png](https://appassets.androidplatform.net/vault/image.png)
-    ↓ (WebViewAssetLoader)
-VaultPathHandler.handle("image.png")
-    ↓
-VaultSearch.resolveRelativeAsset() → InputStream
-    ↓
-图片显示
-```
-
 ---
 
 ## 7. 构建与发布流程
@@ -284,6 +313,7 @@ git push origin vX.Y.Z
 
 - **android-ci.yml**：push/PR → 构建 debug + release APK，上传 Artifacts
 - **release.yml**：tag `v*` → 构建 release APK → 创建 GitHub Release，附 APK 下载
+- 签名：keystore 存在 repo secrets 中，CI 构建签名一致
 
 ---
 
@@ -291,33 +321,41 @@ git push origin vX.Y.Z
 
 ### 8.1 .doc 解析有限
 
-旧版 `.doc`（OLE2 格式）通过字节扫描提取可读文本，内容可能不完整，建议用户转换为 `.docx`。
+旧版 `.doc`（OLE2 格式）通过 Apache POI HWPF 提取文本和图片，内容可能不完整，建议用户转换为 `.docx`。
 
-### 8.2 Vault 图片相对路径
+### 8.2 PDF 渲染为图片
+
+PDF 使用 PdfRenderer 逐页渲染为位图，不支持文字选择/搜索。内存占用较高，大文件可能卡顿。
+
+### 8.3 Vault 图片相对路径
 
 `resolveRelativeAsset()` 先在当前文档目录查找，再全库搜索文件名。同名文件在不同目录可能拿错。
 
-### 8.3 SAF DocumentFile 性能
+### 8.4 SAF DocumentFile 性能
 
 大型 Vault（数百文件）全库搜索仍有延迟（已改为异步，不阻塞 UI，但无进度提示）。
 
-### 8.4 `@JavascriptInterface` 混淆
+### 8.5 `@JavascriptInterface` 混淆
 
 已关闭 minify，未来若开启需在 ProGuard 保留 `MarkdownBridge` 类。
 
-### 8.5 微信临时 URI 授权
+### 8.6 微信临时 URI 授权
 
 从微信打开的 content:// URI 在 App 杀死后失效，属 Android 系统限制。
+
+### 8.7 自动更新检查
+
+GitHub API 在中国大陆访问可能较慢，已将超时延长至 15s。如果仍然失败，用户可通过设置中的"检查更新"按钮手动检查。
 
 ---
 
 ## 9. 未来开发建议
 
 - **数学公式**：引入 KaTeX（轻量）
-- **脚注**：markdown-it-footnote 插件
 - **全库搜索索引**：Room + SQLite FTS 提速 10x+
-- **iOS 资源同步**：CI 中 rsync `assets/` → `ios/MDReader/Resources/web/`
 - **ViewModel 重构**：将 MainActivity 业务逻辑迁移到 ViewModel
+- **PDF 文字选择**：使用 PdfRenderer 的文本层实现选择/搜索
+- **iOS 资源同步**：CI 中 rsync `assets/` → `ios/MDReader/Resources/web/`
 
 ---
 
@@ -326,14 +364,20 @@ git push origin vX.Y.Z
 | 版本 | 主要变更 |
 |---|---|
 | v1.0 | 基础 Markdown 渲染 |
-| v1.1 | 代码高亮 |
-| v1.2 | TOC 侧滑面板 |
-| v1.3 | 阅读进度记忆 |
-| v1.4 | 收藏夹、历史、分享 |
-| v1.4.1 | Bug 修复 |
-| v1.5.1 | Wikilink、Mermaid、Frontmatter、全文搜索、Vault、HTML 渲染、自动更新 |
-| **v1.6.0** | DOCX/TXT 支持、图片修复、搜索异步化、任务列表、引用展开、设置开关 |
+| v1.1 | 代码高亮、TOC、标题折叠 |
+| v1.2 | 代码块复制、收藏夹 |
+| v1.3 | 阅读进度记忆、设置中央唤出 |
+| v1.4 | 转发分享 |
+| v1.4.1 | 阅读位置记忆修复 |
+| v1.5.1 | Wikilink、Mermaid、Frontmatter、全文搜索、Vault、自动更新 |
+| v1.6.0 | DOCX/TXT 支持、图片修复、搜索异步化、任务列表、引用展开 |
+| v1.6.2 | Obsidian 兼容（高亮/标签/注释/脚注） |
+| v1.6.4 | 启动自动恢复上次阅读 |
+| v1.7.1 | 编译修复、DOC 图片、导出长图、DOCX 表格 |
+| v1.7.2 | DOC 图片过滤、导出修复、编辑保护 |
+| v1.7.3 | 历史面板双删除修复 |
+| **v1.8.0** | 护眼模式、字体切换、PDF 支持、导出长图/HTML、检查更新按钮 |
 
 ---
 
-*文档由 Capy 维护，适合开发者快速上手参与贡献。*
+*文档更新至 v1.8.0，适合开发者快速上手参与贡献。*

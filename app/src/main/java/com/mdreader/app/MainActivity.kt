@@ -390,15 +390,47 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
     private fun checkForUpdates() {
         val now = System.currentTimeMillis()
         val lastCheck = prefs.lastUpdateCheck
-        if (now - lastCheck < TimeUnit.HOURS.toMillis(24)) return
+        if (now - lastCheck < TimeUnit.HOURS.toMillis(12)) return
         prefs.lastUpdateCheck = now
         Thread {
-            val info = UpdateChecker.checkLatest() ?: return@Thread
-            val currentVersion = runCatching {
-                packageManager.getPackageInfo(packageName, 0).versionName
-            }.getOrNull() ?: return@Thread
-            if (UpdateChecker.isNewer(info.tagName, currentVersion)) {
-                runOnUiThread { showUpdateDialog(info) }
+            try {
+                val info = UpdateChecker.checkLatest() ?: return@Thread
+                val currentVersion = runCatching {
+                    packageManager.getPackageInfo(packageName, 0).versionName
+                }.getOrNull() ?: return@Thread
+                if (UpdateChecker.isNewer(info.tagName, currentVersion)) {
+                    runOnUiThread { showUpdateDialog(info) }
+                }
+            } catch (_: Exception) { /* silent for auto-check */ }
+        }.start()
+    }
+
+    /** 用户手动点击「检查更新」按钮，绕过节流，带 Toast 反馈 */
+    private fun manualCheckForUpdates() {
+        Toast.makeText(this, R.string.update_checking, Toast.LENGTH_SHORT).show()
+        Thread {
+            try {
+                val info = UpdateChecker.checkLatest()
+                if (info == null) {
+                    runOnUiThread {
+                        Toast.makeText(this, getString(R.string.update_check_failed, "网络请求失败"), Toast.LENGTH_LONG).show()
+                    }
+                    return@Thread
+                }
+                val currentVersion = runCatching {
+                    packageManager.getPackageInfo(packageName, 0).versionName
+                }.getOrNull() ?: "0.0.0"
+                if (UpdateChecker.isNewer(info.tagName, currentVersion)) {
+                    runOnUiThread { showUpdateDialog(info) }
+                } else {
+                    runOnUiThread {
+                        Toast.makeText(this, getString(R.string.update_latest, currentVersion), Toast.LENGTH_LONG).show()
+                    }
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    Toast.makeText(this, getString(R.string.update_check_failed, e.message ?: "未知错误"), Toast.LENGTH_LONG).show()
+                }
             }
         }.start()
     }
@@ -769,6 +801,12 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             prefs.showCitations = checked
             applySettingsToWeb()
         }
+
+        // 版本号显示 & 检查更新
+        val ver = runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrDefault("?")
+        sheet.tvVersionInfo.text = "v$ver"
+        sheet.btnCheckUpdate.setOnClickListener { manualCheckForUpdates() }
+
         sheet.btnReset.setOnClickListener {
             prefs.fontSize = Prefs.DEFAULT_FONT; prefs.lineHeight = Prefs.DEFAULT_LINE; prefs.paraGap = Prefs.DEFAULT_PARA
             sheet.sliderFont.value = Prefs.DEFAULT_FONT; sheet.sliderLine.value = Prefs.DEFAULT_LINE; sheet.sliderPara.value = Prefs.DEFAULT_PARA
@@ -1201,17 +1239,17 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         return target
     }
 
-    /** 保存长图片到 Pictures/MD阅读器/ （Android 10+ 用 MediaStore，9 及以下用 File） */
+    /** 保存长图片到 Download/MD阅读器/Picture/ （Android 10+ 用 MediaStore，9 及以下用 File） */
     private fun saveImageToGallery(bitmap: Bitmap, fileName: String): File? {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            // Android 10+：使用 MediaStore 保存到 Pictures/MD阅读器/
+            // Android 10+：使用 MediaStore 保存到 Download/MD阅读器/Picture/
             val resolver = contentResolver
             val contentValues = android.content.ContentValues().apply {
-                put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, "$fileName.png")
-                put(android.provider.MediaStore.Images.Media.MIME_TYPE, "image/png")
-                put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, "Pictures/MD阅读器")
+                put(android.provider.MediaStore.Downloads.DISPLAY_NAME, "$fileName.png")
+                put(android.provider.MediaStore.Downloads.MIME_TYPE, "image/png")
+                put(android.provider.MediaStore.Downloads.RELATIVE_PATH, "Download/MD阅读器/Picture")
             }
-            val uri = resolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
+            val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
                 ?: return null
             resolver.openOutputStream(uri)?.use { out ->
                 bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
@@ -1340,52 +1378,230 @@ body { background: var(--bg); color: var(--fg); font-family: -apple-system, "Pin
         private val WELCOME_MD = """
 # 欢迎使用 MD 阅读器
 
-这是一个本地 **Markdown 阅读器**（v1.8.0）。
+这是一个功能丰富的本地 **Markdown 阅读器**（v1.8.0），支持多种文档格式与 Obsidian 兼容语法。
 
-## 怎么用
+## 快速上手
 
 - 点击 **目录** 唤出大纲，点击标题快速跳转
 - 点击 **搜索** 在当前文档中搜索，也可切换为全库搜索
 - 点击 **源码 / 预览** 切换呈现方式；预览模式点击标题可折叠/展开
-- **点击屏幕中央** 调出「显示设置」（字号 / 行距 / 段距 / 主题 / 护眼模式 / 字体 / Vault 文件夹）
+- **点击屏幕中央** 调出「显示设置」
 - 在设置中选择 **Vault 文件夹** 后，可使用 `[[wikilink]]` 导航与全库搜索
-- 重新打开同一文档时，会自动回到上次阅读位置
+- 重新打开同一文档时，会自动回到上次阅读位置（断点续读）
 - 启动时自动弹出打开历史，快速继续阅读
-- 点击右上角 **⋮ → 编辑**，直接在应用内编辑 Markdown，保存后立即刷新预览
+- 点击右上角 **⋮ → 编辑**，直接在应用内编辑 Markdown
+- 设置中可手动 **检查更新**，下载最新版本
 
-## v1.8.0 更新
+## 支持的 Markdown 语法
 
-- **新增**：护眼模式 — 暖色羊皮纸背景，减轻长时间阅读的视觉疲劳
-- **新增**：字体切换 — 支持默认 / 宋体 / 等宽三种字体
-- **新增**：导出路径优化 — 长图保存至 `MD阅读器/Picture`，HTML 保存至 `MD阅读器/HTML`
-- **新增**：PDF 文件关联 — 系统文件管理器可直接用本 App 打开 PDF
-- **修复**：历史记录单条删除闪退
-- **修复**：导出长图不完整、HTML 丢失格式
-- **修复**：编辑 DOC 后再打开其他 DOC 解析失败
-- **优化**：DOC 图片过滤不支持的格式（EMF/WMF）
+### 标题
 
-## 支持的格式
+```
+# 一级标题
+## 二级标题
+### 三级标题
+```
 
-| 功能 | 是否支持 |
+支持 H1 ~ H6 六级标题，预览模式下点击标题可 **折叠/展开** 下方内容。
+
+### 列表
+
+无序列表：
+
+```
+- 苹果
+- 香蕉
+- 橘子
+```
+
+有序列表：
+
+```
+1. 第一步
+2. 第二步
+3. 第三步
+```
+
+任务列表：
+
+```
+- [x] 已完成的任务
+- [ ] 未完成的任务
+```
+
+### 表格
+
+```
+| 功能 | 状态 |
 | --- | :---: |
-| 标题 / 列表 / 表格 | ✅ |
+| Markdown 渲染 | ✅ |
 | 代码高亮 | ✅ |
-| Mermaid 图表 | ✅ |
-| Wikilinks `[[链接]]` | ✅ |
-| 路径式 Wikilinks `[[目录/文件]]` | ✅ |
-| Frontmatter 元数据 | ✅ |
-| HTML 渲染 | ✅ |
-| 任务列表 `- [ ]` | ✅ |
-| 图片 & 视频（Vault 内）| ✅ |
-| TXT（UTF-8 / GBK）/ DOCX / DOC | ✅ |
-| PDF（逐页渲染） | ✅ |
-| Callout `> [!NOTE]` | ✅ |
-| 折叠标题 | ✅ |
-| `==高亮==` | ✅ |
-| `#标签` | ✅ |
-| `%%注释%%` ✅ |
-| 脚注 `[^1]` | ✅ |
-| 导出长图片 / HTML | ✅ |
+```
+
+### 代码块
+
+````
+```kotlin
+fun main() {
+    println("Hello, MD Reader!")
+}
+```
+````
+
+支持 100+ 种编程语言的语法高亮，右上角有 **复制按钮**。
+
+### 引用块
+
+```
+> 这是一段引用文字
+> 可以多行书写
+```
+
+### 链接与图片
+
+```
+[链接文字](https://example.com)
+![图片描述](image.png)
+```
+
+### 分隔线
+
+```
+---
+```
+
+### 行内样式
+
+```
+**粗体** *斜体* ~~删除线~~ `行内代码` ==高亮标记==
+```
+
+## Obsidian 兼容语法
+
+### Wikilinks
+
+```
+[[另一篇笔记]]
+[[目录/子目录/文件|显示名称]]
+[[#某个标题]]
+```
+
+设置 Vault 文件夹后，点击 wikilink 可跳转到对应笔记。
+
+### 嵌入文件
+
+```
+![[图片.png]]
+![[视频.mp4]]
+![[另一篇笔记]]
+```
+
+图片直接显示，视频可播放，其他文档可展开查看内容。
+
+### Callout 标注
+
+```
+> [!NOTE] 提示
+> 这是一条提示信息
+
+> [!WARNING] 注意
+> 这是一条警告信息
+
+> [!TIP] 建议
+> 这是一条建议信息
+```
+
+支持的类型：`NOTE`、`TIP`、`WARNING`、`DANGER`、`ERROR`、`SUCCESS`、`QUESTION`、`ABSTRACT`、`BUG`、`QUOTE` 等。
+
+### ==高亮==
+
+```
+这是 ==高亮== 的文字
+```
+
+### #标签
+
+```
+这是一段带有 #标签 和 #阅读/笔记 的文字
+```
+
+### %%注释%%
+
+```
+这段文字 %%会被隐藏%% 不会显示
+```
+
+### 脚注
+
+```
+这是一段正文[^1]。
+
+[^1]: 这是脚注的内容。
+```
+
+### YAML Frontmatter
+
+```
+---
+title: 文档标题
+tags:
+  - 阅读
+  - 笔记
+date: 2024-01-01
+---
+```
+
+自动解析并以表格形式显示在文档顶部，可在设置中开关。
+
+## Mermaid 图表
+
+````
+```mermaid
+graph TD
+    A[开始] --> B{判断}
+    B -->|是| C[执行]
+    B -->|否| D[结束]
+```
+````
+
+支持流程图、时序图、甘特图、饼图、类图等 Mermaid 图表。
+
+## 支持的文档格式
+
+| 格式 | 说明 |
+| --- | --- |
+| `.md` / `.markdown` | Markdown 文件 |
+| `.txt` | 纯文本（UTF-8 / GBK 自动识别） |
+| `.docx` | Word 文档（OOXML 格式） |
+| `.doc` | Word 97-2003 文档（OLE2 格式） |
+| `.pdf` | PDF 文件（逐页渲染为图片） |
+
+## 阅读设置
+
+- **字号**：12px ~ 30px 自由调节
+- **行间距**：1.0 ~ 2.4 倍
+- **段间距**：0 ~ 2.0 倍
+- **主题**：跟随系统 / 浅色 / 深色
+- **护眼模式**：暖色羊皮纸背景，减轻视觉疲劳
+- **字体**：默认 / 宋体 / 等宽
+- **Frontmatter 显示**：可开关元数据表格
+- **引用块样式**：可开关引用块渲染
+
+## 导出功能
+
+- **导出长图片**：保存至 `Download/MD阅读器/Picture`
+- **导出 HTML**：保存至 `Download/MD阅读器/HTML`，包含完整样式
+
+## 其他功能
+
+- **断点续读**：自动记录阅读位置，下次打开回到原位
+- **打开历史**：记录所有打开过的文档
+- **收藏夹**：收藏常用文档，快速访问
+- **文内搜索**：在当前文档中搜索关键词
+- **全库搜索**：在 Vault 文件夹中搜索所有文档
+- **编辑模式**：内置 Markdown 编辑器
+- **转发分享**：将文档分享到其他应用
+- **自动更新**：启动时自动检查 GitHub Release 更新
 
 ---
 

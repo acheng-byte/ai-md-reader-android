@@ -86,6 +86,10 @@
     <string name="update_download">立即下载</string>
     <string name="update_downloading">正在下载 %1$s…</string>
     <string name="update_downloading_toast">开始下载更新，完成后请安装</string>
+    <string name="update_check_btn">检查更新</string>
+    <string name="update_checking">正在检查更新…</string>
+    <string name="update_latest">当前已是最新版本（v%1$s）</string>
+    <string name="update_check_failed">检查更新失败：%1$s</string>
 
     <!-- History single delete -->
     <string name="history_delete_item">删除</string>
@@ -95,8 +99,8 @@
     <string name="action_export_image">导出长图片</string>
     <string name="action_export_html">导出 HTML</string>
     <string name="export_image_saving">正在生成长图片…</string>
-    <string name="export_image_saved">长图片已保存至 MD阅读器/Picture</string>
+    <string name="export_image_saved">长图片已保存至 Download/MD阅读器/Picture</string>
     <string name="export_image_failed">导出失败：%1$s</string>
-    <string name="export_html_saved">HTML 已保存至 MD阅读器/HTML</string>
+    <string name="export_html_saved">HTML 已保存至 Download/MD阅读器/HTML</string>
     <string name="export_html_failed">HTML 导出失败：%1$s</string>
 </resources>
