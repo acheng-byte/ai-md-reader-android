@@ -4,7 +4,7 @@
 
 - 修复：表格/图表预览覆盖层背景始终为黑色 — 改为默认浅色、跟随系统主题（`body.dark` 切换深色），表格样式由 CSS 统一控制。
 - 修复：保存图表后 Toast 显示一串数字 — 改用可读文件名（如 `笔记名_table_1.png`）。
-- 修复：保存的表格/图表 PNG 为空白图片 — 离屏 WebView 增加正确的 measure/layout 流程、viewport meta、HTML 内容清理，渲染延迟提升至 1000ms 确保完整绘制。
+- 修复：Mermaid 图表保存为空白 PNG — 彻底重写保存逻辑，改由 JS 端通过 Canvas API 将 SVG 直接转为 PNG base64（`_svgToPngBase64`），完全绕过离屏 WebView 渲染；表格保存增加软件渲染模式（`LAYER_TYPE_SOFTWARE`）兜底。
 
 ## v1.9.7 - 2026-07-12
 

@@ -31,6 +31,8 @@ class MarkdownBridge(private val provider: Provider) {
         fun saveMermaidImage(svgHtml: String)
         /** 保存表格或图表元素为 PNG 图片（type="mermaid"|"table"，html 为元素 HTML） */
         fun saveElementImage(type: String, html: String)
+        /** 保存 JS 端转换的 PNG base64 数据（Mermaid SVG→Canvas→PNG） */
+        fun savePngBase64(base64: String, elementType: String)
         /** 显示字符统计对话框 */
         fun showCharCount(stats: String)
     }
@@ -71,6 +73,9 @@ class MarkdownBridge(private val provider: Provider) {
 
     @JavascriptInterface
     fun saveElementImage(type: String, html: String) = provider.saveElementImage(type, html)
+
+    @JavascriptInterface
+    fun savePngBase64(base64: String, elementType: String) = provider.savePngBase64(base64, elementType)
 
     @JavascriptInterface
     fun showCharCount(stats: String) = provider.showCharCount(stats)

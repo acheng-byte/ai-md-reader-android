@@ -235,6 +235,16 @@ final class ReaderModel: ObservableObject {
         case "saveElement", "saveMermaid":
             // iOS 暂不支持原生 WebView 截图导出，提示用户
             showToast("图表/表格导出功能仅 Android 版支持")
+        case "savePngBase64":
+            // JS 端已将 SVG 转为 PNG base64，直接解码保存
+            if let b64 = body["base64"] as? String,
+               let data = Data(base64Encoded: b64),
+               let image = UIImage(data: data) {
+                UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
+                showToast("图表已保存到相册")
+            } else {
+                showToast("保存失败：数据无效")
+            }
         case "openWiki":
             if let name = body["name"] as? String {
                 showToast("Wikilink: \(name)（Vault 功能待实现）")

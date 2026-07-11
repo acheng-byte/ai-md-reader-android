@@ -1401,6 +1401,8 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             offscreen.settings.useWideViewPort = true
             offscreen.settings.loadWithOverviewMode = true
             offscreen.setBackgroundColor(if (isDark) 0xFF0D1117.toInt() else 0xFFFFFFFF.toInt())
+            // 强制软件渲染：确保 view.draw(canvas) 能正确绘制内容（硬件加速下离屏 WebView 可能输出空白）
+            offscreen.setLayerType(View.LAYER_TYPE_SOFTWARE, null)
             // 根据内容估算宽度：表格用 1080px，mermaid 用 800px
             val renderWidth = if (type == "table") 1080 else 800
 
@@ -1467,6 +1469,49 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             tempContainer.addView(offscreen,
                 android.view.ViewGroup.LayoutParams(renderWidth, android.view.ViewGroup.LayoutParams.WRAP_CONTENT))
             offscreen.loadDataWithBaseURL(null, styledHtml, "text/html", "utf-8", null)
+        }
+    }
+
+    // ---- JS 端 SVG→PNG base64 保存 ----
+
+    /** 保存 JS 端通过 Canvas 转换的 PNG base64 数据。
+     *  Mermaid 图表在主 WebView 中已渲染为 SVG，JS 端通过 Canvas API 转为 PNG 后传回。
+     *  完全绕过离屏 WebView 渲染，解决 draw(canvas) 空白问题。 */
+    override fun savePngBase64(base64: String, elementType: String) {
+        runOnUiThread {
+            val baseName = exportFileName(currentTitle)
+            val counter = ++mermaidSaveCounter
+            val fileName = "${baseName}_${elementType}_$counter"
+
+            Thread {
+                try {
+                    val bytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
+                    val bitmap = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                    if (bitmap == null) {
+                        runOnUiThread {
+                            Toast.makeText(this, getString(R.string.element_save_failed, "base64 解码失败"),
+                                Toast.LENGTH_LONG).show()
+                        }
+                        return@Thread
+                    }
+                    val saved = saveImageToGallery(bitmap, fileName)
+                    bitmap.recycle()
+                    runOnUiThread {
+                        if (saved != null) {
+                            Toast.makeText(this, getString(R.string.element_saved, "$fileName.png"),
+                                Toast.LENGTH_LONG).show()
+                        } else {
+                            Toast.makeText(this, getString(R.string.element_save_failed, "无法创建文件"),
+                                Toast.LENGTH_LONG).show()
+                        }
+                    }
+                } catch (e: Exception) {
+                    runOnUiThread {
+                        Toast.makeText(this, getString(R.string.element_save_failed, e.message ?: ""),
+                            Toast.LENGTH_LONG).show()
+                    }
+                }
+            }.start()
         }
     }
 

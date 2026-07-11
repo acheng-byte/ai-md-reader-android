@@ -21,6 +21,7 @@ if (typeof window.Android === 'undefined') {
         onModeChanged: function (m) { _iosPost({ type: 'modeChanged', mode: m }); },
         saveScrollRatio: function (r) { _iosPost({ type: 'saveScroll', ratio: r }); },
         saveElementImage: function (t, h) { _iosPost({ type: 'saveElement', elementType: t, html: h }); },
+        savePngBase64: function (b64, t) { _iosPost({ type: 'savePngBase64', base64: b64, elementType: t }); },
         saveMermaidImage: function (h) { _iosPost({ type: 'saveMermaid', html: h }); },
         showCharCount: function (s) { _iosPost({ type: 'charCount', stats: s }); },
         searchVault: function (q) { return '[]'; },
@@ -740,19 +741,60 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
         return clone.outerHTML;
     }
 
+    /** 将 SVG 元素通过 Canvas 转换为 PNG base64（data URL）。
+     *  完全在 JS 端完成渲染，避免离屏 WebView draw(canvas) 空白问题。 */
+    function _svgToPngBase64(svgEl) {
+        var svgClone = svgEl.cloneNode(true);
+        if (!svgClone.getAttribute('xmlns')) {
+            svgClone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+        }
+        var svgStr = new XMLSerializer().serializeToString(svgClone);
+        var svgBlob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
+        var url = URL.createObjectURL(svgBlob);
+        return new Promise(function (resolve, reject) {
+            var img = new Image();
+            img.onload = function () {
+                var w = img.naturalWidth || svgEl.clientWidth || 800;
+                var h = img.naturalHeight || svgEl.clientHeight || 600;
+                var canvas = document.createElement('canvas');
+                canvas.width = w;
+                canvas.height = h;
+                var ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, w, h);
+                URL.revokeObjectURL(url);
+                resolve(canvas.toDataURL('image/png'));
+            };
+            img.onerror = function () {
+                URL.revokeObjectURL(url);
+                reject(new Error('SVG image load failed'));
+            };
+            img.src = url;
+        });
+    }
+
     /** 从预览覆盖层下载当前内容 */
     function downloadFromPreview() {
         try {
             var b = bridge();
             if (!b) return;
-            if (previewCurrentSvg && b.saveElementImage) {
-                // Mermaid: 使用原始 SVG HTML（已在 openMermaidPreview 中存储）
-                b.saveElementImage('mermaid', previewCurrentSvg);
-            } else if (!previewCurrentSvg && b.saveElementImage) {
-                // 表格：获取当前预览中的表格 HTML
-                var body = previewOverlay.querySelector('.mdreader-preview-body');
-                var table = body.querySelector('table');
-                if (table) {
+            if (previewCurrentSvg) {
+                var tmpDiv = document.createElement('div');
+                tmpDiv.innerHTML = previewCurrentSvg;
+                var svg = tmpDiv.querySelector('svg');
+                if (svg && b.savePngBase64) {
+                    _svgToPngBase64(svg).then(function (dataUrl) {
+                        var base64 = dataUrl.replace(/^data:image\/png;base64,/, '');
+                        b.savePngBase64(base64, 'mermaid');
+                    }).catch(function () {
+                        if (b.saveElementImage) b.saveElementImage('mermaid', previewCurrentSvg);
+                    });
+                } else if (b.saveElementImage) {
+                    b.saveElementImage('mermaid', previewCurrentSvg);
+                }
+            } else {
+                var tbody = previewOverlay.querySelector('.mdreader-preview-body');
+                var table = tbody.querySelector('table');
+                if (table && b.saveElementImage) {
                     b.saveElementImage('table', table.outerHTML);
                 }
             }
@@ -775,15 +817,22 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
             document.body.removeChild(overlay);
             try {
                 var b = bridge();
-                if (!b || !b.saveElementImage) return;
+                if (!b) return;
                 if (type === 'mermaid') {
-                    var containers = previewEl.querySelectorAll('.mermaid-container');
-                    // 保存最后一个被长按的 mermaid（简化：取第一个）
                     var svg = previewEl.querySelector('.mermaid-container svg');
-                    if (svg) b.saveElementImage('mermaid', svg.outerHTML);
+                    if (svg && b.savePngBase64) {
+                        _svgToPngBase64(svg).then(function (dataUrl) {
+                            var base64 = dataUrl.replace(/^data:image\/png;base64,/, '');
+                            b.savePngBase64(base64, 'mermaid');
+                        }).catch(function () {
+                            if (b.saveElementImage) b.saveElementImage('mermaid', svg.outerHTML);
+                        });
+                    } else if (svg && b.saveElementImage) {
+                        b.saveElementImage('mermaid', svg.outerHTML);
+                    }
                 } else {
                     var table = previewEl.querySelector('table');
-                    if (table) b.saveElementImage('table', table.outerHTML);
+                    if (table && b.saveElementImage) b.saveElementImage('table', table.outerHTML);
                 }
             } catch (e) { /* bridge unavailable */ }
         };
