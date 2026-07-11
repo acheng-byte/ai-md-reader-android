@@ -25,6 +25,8 @@ class MarkdownBridge(private val provider: Provider) {
         fun searchVaultForEmbed(ref: String): String
         /** 加载 wikilink 嵌入文档的内容，返回 Markdown 文本（供内联展开用）。 */
         fun loadEmbedContent(uri: String): String
+        /** 当前文档标题（文件名），供 JS 端隐藏重复的一级标题 */
+        fun docTitle(): String
     }
 
     @JavascriptInterface fun getMarkdown(): String = provider.markdown()
@@ -54,4 +56,7 @@ class MarkdownBridge(private val provider: Provider) {
     /** 同步加载嵌入文档内容（在 binder 线程执行 I/O，不阻塞 UI 线程）。 */
     @JavascriptInterface
     fun loadEmbedContent(uri: String): String = runCatching { provider.loadEmbedContent(uri) }.getOrDefault("")
+
+    @JavascriptInterface
+    fun getTitle(): String = provider.docTitle()
 }

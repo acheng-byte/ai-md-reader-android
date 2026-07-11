@@ -875,6 +875,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         // Frontmatter and citations toggles
         sheet.switchFrontmatter.isChecked = prefs.showFrontmatter
         sheet.switchCitations.isChecked = prefs.showCitations
+        sheet.switchHideTitle.isChecked = prefs.hideTitleHeading
 
         // Show current vault folder name
         val vaultStr = prefs.vaultUri
@@ -919,6 +920,10 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         }
         sheet.switchCitations.setOnCheckedChangeListener { _, checked ->
             prefs.showCitations = checked
+            applySettingsToWeb()
+        }
+        sheet.switchHideTitle.setOnCheckedChangeListener { _, checked ->
+            prefs.hideTitleHeading = checked
             applySettingsToWeb()
         }
 
@@ -1045,6 +1050,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
     override fun initialMode(): String = currentMode
     override fun readingRatio(): Double = currentUri?.let { reading.get(it) } ?: 0.0
     override fun saveReadingRatio(ratio: Double) { currentUri?.let { reading.set(it, ratio) } }
+    override fun docTitle(): String = currentTitle
 
     override fun onModeChanged(mode: String) {
         runOnUiThread {

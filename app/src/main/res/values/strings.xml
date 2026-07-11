@@ -26,6 +26,7 @@
     <string name="label_content_options">内容解析</string>
     <string name="label_frontmatter">自动识别元数据（Frontmatter）</string>
     <string name="label_citations">显示引用块样式</string>
+    <string name="label_hide_title">隐藏文件名标题</string>
 
     <string name="val_font">%1$d px</string>
     <string name="open_failed">打开失败：%1$s</string>

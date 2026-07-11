@@ -438,6 +438,9 @@
         });
     }
 
+    /* ---------- 渲染缓存 ---------- */
+    var renderCache = { source: null, html: null };
+
     /* ---------- 渲染 ---------- */
     function render() {
         var rawSource = '';
@@ -450,8 +453,36 @@
         var source = preprocessFootnotes(preprocessInternalLinks(preprocessImages(preprocessWikilinks(parsed.body))));
 
         var showFm = currentSettings.showFrontmatter !== false;
-        var html = (parsed.meta && showFm ? renderFrontmatter(parsed.meta) : '') + md.render(source);
+        var cacheKey = source + '||' + showFm;
+        var html;
+        if (renderCache.source === cacheKey && renderCache.html) {
+            html = renderCache.html;
+        } else {
+            html = (parsed.meta && showFm ? renderFrontmatter(parsed.meta) : '') + md.render(source);
+            renderCache.source = cacheKey;
+            renderCache.html = html;
+        }
         previewEl.innerHTML = html;
+
+        // 隐藏文件名一级标题（工具栏已显示文件名，正文中重复的一级标题默认隐藏）
+        if (currentSettings.hideTitleHeading) {
+            var firstH1 = previewEl.querySelector('h1');
+            if (firstH1) {
+                try {
+                    var title = '';
+                    var b = bridge();
+                    if (b && b.getTitle) title = b.getTitle() || '';
+                } catch (e) { title = ''; }
+                if (title) {
+                    // 比较时去除文件扩展名，忽略大小写
+                    var titleBase = title.replace(/\.[^.]+$/, '').toLowerCase();
+                    var h1Text = firstH1.textContent.trim().toLowerCase();
+                    if (h1Text === titleBase || h1Text === title.toLowerCase()) {
+                        firstH1.style.display = 'none';
+                    }
+                }
+            }
+        }
 
         postprocessCallouts(previewEl, showFm);
         addCopyButtons();
@@ -859,6 +890,7 @@
         if (!s) return;
         var prevFm = currentSettings.showFrontmatter;
         var prevCit = currentSettings.showCitations;
+        var prevHideTitle = currentSettings.hideTitleHeading;
         currentSettings = s;
         var root = document.documentElement;
         if (s.fontSize != null) root.style.setProperty('--font-size', s.fontSize + 'px');
@@ -887,8 +919,8 @@
         if (s.showCitations != null) {
             document.body.classList.toggle('hide-citations', !s.showCitations);
         }
-        // frontmatter 或 citations 开关变化时立即重渲染
-        if (prevFm !== s.showFrontmatter || prevCit !== s.showCitations) {
+        // frontmatter / citations / hideTitleHeading 开关变化时立即重渲染
+        if (prevFm !== s.showFrontmatter || prevCit !== s.showCitations || prevHideTitle !== s.hideTitleHeading) {
             render();
         }
     }

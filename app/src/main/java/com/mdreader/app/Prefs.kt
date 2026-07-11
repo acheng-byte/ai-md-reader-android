@@ -63,6 +63,11 @@ class Prefs(context: Context) {
         get() = sp.getBoolean(KEY_SHOW_CITATIONS, DEFAULT_SHOW_CITATIONS)
         set(v) { sp.edit().putBoolean(KEY_SHOW_CITATIONS, v).apply(); invalidateSettingsCache() }
 
+    /** 是否隐藏正文中与文件名相同的一级标题（默认开启，因为文件名已在工具栏显示） */
+    var hideTitleHeading: Boolean
+        get() = sp.getBoolean(KEY_HIDE_TITLE_HEADING, DEFAULT_HIDE_TITLE_HEADING)
+        set(v) { sp.edit().putBoolean(KEY_HIDE_TITLE_HEADING, v).apply(); invalidateSettingsCache() }
+
     /** 护眼模式：暖色背景减轻视觉疲劳 */
     var eyeProtection: Boolean
         get() = sp.getBoolean(KEY_EYE_PROTECTION, false)
@@ -101,6 +106,7 @@ class Prefs(context: Context) {
             put("fontFamily", fontFamily)
             put("showFrontmatter", showFrontmatter)
             put("showCitations", showCitations)
+            put("hideTitleHeading", hideTitleHeading)
         }.toString()
         cachedSettingsJson = json
         return json
@@ -117,6 +123,8 @@ class Prefs(context: Context) {
         /** 默认关闭 frontmatter/citations，减轻渲染负担，需要时手动开启 */
         const val DEFAULT_SHOW_FRONTMATTER = false
         const val DEFAULT_SHOW_CITATIONS = false
+        /** 默认隐藏文件名一级标题（工具栏已显示文件名） */
+        const val DEFAULT_HIDE_TITLE_HEADING = true
 
         const val FONT_MIN = 12f
         const val FONT_MAX = 30f
@@ -134,6 +142,7 @@ class Prefs(context: Context) {
         private const val KEY_LAST_UPDATE_CHECK = "last_update_check"
         private const val KEY_SHOW_FRONTMATTER = "show_frontmatter"
         private const val KEY_SHOW_CITATIONS = "show_citations"
+        private const val KEY_HIDE_TITLE_HEADING = "hide_title_heading"
         private const val KEY_EYE_PROTECTION = "eye_protection"
         private const val KEY_FONT_FAMILY = "font_family"
         private const val KEY_LAST_DOC_URI = "last_doc_uri"

@@ -252,6 +252,26 @@
             android:checked="false" />
     </LinearLayout>
 
+    <!-- 隐藏文件名一级标题 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginBottom="4dp">
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/label_hide_title"
+            android:textAppearance="@style/TextAppearance.Material3.BodyMedium" />
+        <com.google.android.material.switchmaterial.SwitchMaterial
+            android:id="@+id/switch_hide_title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:checked="true" />
+    </LinearLayout>
+
     <!-- Vault 文件夹 -->
     <TextView
         android:layout_width="wrap_content"
