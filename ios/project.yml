@@ -8,7 +8,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "1.9.9"
+    MARKETING_VERSION: "2.0.0"
     CURRENT_PROJECT_VERSION: "1"
     DEVELOPMENT_TEAM: ""          # 由发布者填入自己的 Team ID（TestFlight 阶段）
     CODE_SIGN_STYLE: Automatic
@@ -34,4 +34,4 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         CURRENT_PROJECT_VERSION: "1"
-        MARKETING_VERSION: "1.9.9"
+        MARKETING_VERSION: "2.0.0"
