@@ -40,6 +40,7 @@ final class WebEngine: NSObject {
     func setMode(_ mode: String) { eval("window.appSetMode('\(mode)')") }
     func setScrollRatio(_ ratio: Double) { eval("window.appSetScrollRatio(\(ratio))") }
     func scrollTo(_ id: String) { eval("window.appScrollTo('\(escapeSingleQuoted(id))')") }
+    func triggerCharCount() { eval("window.appShowCharCount && window.appShowCharCount()") }
 
     func getToc(_ completion: @escaping ([TocItem]) -> Void) {
         guard loaded else { completion([]); return }

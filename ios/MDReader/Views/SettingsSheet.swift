@@ -54,6 +54,12 @@ struct SettingsSheet: View {
                         Text("默认").tag("default")
                         Text("宋体").tag("serif")
                         Text("等宽").tag("mono")
+                        Text("黑体").tag("sans")
+                        Text("楷体").tag("kai")
+                        Text("仿宋").tag("fangsong")
+                        Text("小标宋").tag("xiaobiao")
+                        Text("隶书").tag("lishu")
+                        Text("微软雅黑").tag("yahei")
                     }
                     .onChange(of: prefs.fontFamily) { _, _ in onChange() }
 

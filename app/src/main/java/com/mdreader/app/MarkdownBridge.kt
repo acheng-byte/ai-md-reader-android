@@ -31,6 +31,8 @@ class MarkdownBridge(private val provider: Provider) {
         fun saveMermaidImage(svgHtml: String)
         /** 保存表格或图表元素为 PNG 图片（type="mermaid"|"table"，html 为元素 HTML） */
         fun saveElementImage(type: String, html: String)
+        /** 显示字符统计对话框 */
+        fun showCharCount(stats: String)
     }
 
     @JavascriptInterface fun getMarkdown(): String = provider.markdown()
@@ -69,4 +71,7 @@ class MarkdownBridge(private val provider: Provider) {
 
     @JavascriptInterface
     fun saveElementImage(type: String, html: String) = provider.saveElementImage(type, html)
+
+    @JavascriptInterface
+    fun showCharCount(stats: String) = provider.showCharCount(stats)
 }

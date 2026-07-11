@@ -22,6 +22,12 @@
     <string name="font_default">默认</string>
     <string name="font_serif">宋体</string>
     <string name="font_mono">等宽</string>
+    <string name="font_sans">黑体</string>
+    <string name="font_kai">楷体</string>
+    <string name="font_fangsong">仿宋</string>
+    <string name="font_xiaobiao">小标宋</string>
+    <string name="font_lishu">隶书</string>
+    <string name="font_yahei">微软雅黑</string>
     <string name="reset_default">恢复默认</string>
     <string name="advanced_settings">高级设置</string>
     <string name="label_content_options">内容解析</string>
@@ -134,4 +140,8 @@
     <string name="element_save_failed">保存失败: %1$s</string>
     <string name="source_mode_hint">在此直接编辑 Markdown…</string>
     <string name="source_auto_saved">已自动保存</string>
+
+    <!-- 字符统计 -->
+    <string name="char_count_title">字符统计</string>
+    <string name="ok">确定</string>
 </resources>

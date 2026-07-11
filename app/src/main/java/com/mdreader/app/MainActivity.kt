@@ -151,6 +151,14 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         setSupportActionBar(binding.toolbar)
+        // 标题栏点击 → 字符统计（防重复点击）
+        var lastCharCountClick = 0L
+        binding.toolbar.setOnClickListener {
+            val now = System.currentTimeMillis()
+            if (now - lastCharCountClick < 500) return@setOnClickListener
+            lastCharCountClick = now
+            if (currentMode == "preview") triggerCharCount()
+        }
         webView = binding.webview
         currentMode = prefs.viewMode
 
@@ -975,13 +983,38 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
 
         // 护眼模式和字体选择
         sheet.switchEyeProtection.isChecked = prefs.eyeProtection
-        sheet.toggleFontFamily.check(
-            when (prefs.fontFamily) {
-                "serif" -> R.id.btn_font_serif
-                "mono" -> R.id.btn_font_mono
-                else -> R.id.btn_font_default
-            }
+
+        // 字体 Spinner（9 种字体）
+        val fontKeys = arrayOf("default", "serif", "mono", "sans", "kai", "fangsong", "xiaobiao", "lishu", "yahei")
+        val fontNames = arrayOf(
+            getString(R.string.font_default),
+            getString(R.string.font_serif),
+            getString(R.string.font_mono),
+            getString(R.string.font_sans),
+            getString(R.string.font_kai),
+            getString(R.string.font_fangsong),
+            getString(R.string.font_xiaobiao),
+            getString(R.string.font_lishu),
+            getString(R.string.font_yahei)
         )
+        val fontAdapter = object : android.widget.ArrayAdapter<String>(this, android.R.layout.simple_spinner_dropdown_item, fontNames) {
+            override fun getDropDownView(position: Int, convertView: android.view.View?, parent: android.view.ViewGroup): android.view.View {
+                val v = super.getDropDownView(position, convertView, parent)
+                val tv = v.findViewById<android.widget.TextView>(android.R.id.text1)
+                tv.setTypeface(getFontTypeface(fontKeys[position]))
+                return v
+            }
+        }
+        sheet.spinnerFontFamily.adapter = fontAdapter
+        val currentFontIdx = fontKeys.indexOf(prefs.fontFamily).coerceAtLeast(0)
+        sheet.spinnerFontFamily.setSelection(currentFontIdx)
+        sheet.spinnerFontFamily.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: android.view.View?, position: Int, id: Long) {
+                prefs.fontFamily = fontKeys[position]
+                applySettingsToWeb()
+            }
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+        }
 
         // Frontmatter and citations toggles
         sheet.switchFrontmatter.isChecked = prefs.showFrontmatter
@@ -1014,16 +1047,6 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         sheet.switchEyeProtection.setOnCheckedChangeListener { _, checked ->
             prefs.eyeProtection = checked
             applySettingsToWeb()
-        }
-        sheet.toggleFontFamily.addOnButtonCheckedListener { _, checkedId, isChecked ->
-            if (isChecked) {
-                prefs.fontFamily = when (checkedId) {
-                    R.id.btn_font_serif -> "serif"
-                    R.id.btn_font_mono -> "mono"
-                    else -> "default"
-                }
-                applySettingsToWeb()
-            }
         }
         sheet.switchFrontmatter.setOnCheckedChangeListener { _, checked ->
             prefs.showFrontmatter = checked
@@ -1399,6 +1422,40 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             tempContainer.addView(offscreen,
                 android.view.ViewGroup.LayoutParams(renderWidth, android.view.ViewGroup.LayoutParams.WRAP_CONTENT))
             offscreen.loadDataWithBaseURL(null, styledHtml, "text/html", "utf-8", null)
+        }
+    }
+
+    // ---- 字符统计 ----
+
+    override fun showCharCount(stats: String) {
+        runOnUiThread {
+            AlertDialog.Builder(this)
+                .setTitle(R.string.char_count_title)
+                .setMessage(stats)
+                .setPositiveButton(R.string.ok, null)
+                .show()
+        }
+    }
+
+    /** 显示字符统计（由标题栏点击触发） */
+    fun triggerCharCount() {
+        webView.evaluateJavascript("window.appShowCharCount && window.appShowCharCount()") {}
+    }
+
+    // ---- 字体辅助 ----
+
+    /** 根据字体 key 返回对应的 Typeface（用于 Spinner 预览） */
+    private fun getFontTypeface(key: String): android.graphics.Typeface {
+        return when (key) {
+            "serif" -> android.graphics.Typeface.SERIF
+            "mono" -> android.graphics.Typeface.MONOSPACE
+            "kai" -> runCatching { android.graphics.Typeface.create("KaiTi", android.graphics.Typeface.NORMAL) }.getOrDefault(android.graphics.Typeface.DEFAULT)
+            "fangsong" -> runCatching { android.graphics.Typeface.create("FangSong", android.graphics.Typeface.NORMAL) }.getOrDefault(android.graphics.Typeface.DEFAULT)
+            "xiaobiao" -> runCatching { android.graphics.Typeface.create("FZXiaoBiaoSong-B05S", android.graphics.Typeface.NORMAL) }.getOrDefault(android.graphics.Typeface.DEFAULT)
+            "lishu" -> runCatching { android.graphics.Typeface.create("LiSu", android.graphics.Typeface.NORMAL) }.getOrDefault(android.graphics.Typeface.DEFAULT)
+            "yahei" -> runCatching { android.graphics.Typeface.create("Microsoft YaHei", android.graphics.Typeface.NORMAL) }.getOrDefault(android.graphics.Typeface.DEFAULT)
+            "sans" -> android.graphics.Typeface.SANS_SERIF
+            else -> android.graphics.Typeface.DEFAULT
         }
     }
 

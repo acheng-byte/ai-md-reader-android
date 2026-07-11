@@ -26,6 +26,8 @@ final class ReaderModel: ObservableObject {
     @Published var showFavorites = false
     @Published var toc: [TocItem] = []
     @Published var toastText: String?
+    @Published var charCountStats: String = ""
+    @Published var showCharCount: Bool = false
 
     /// 源码模式编辑内容
     @Published var sourceText: String = ""
@@ -245,6 +247,11 @@ final class ReaderModel: ObservableObject {
         case "ready":
             // 页面就绪：推送设置和内容
             onWebReady()
+        case "charCount":
+            if let stats = body["stats"] as? String {
+                charCountStats = stats
+                showCharCount = true
+            }
         default:
             break
         }

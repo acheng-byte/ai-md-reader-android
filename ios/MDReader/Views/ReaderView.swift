@@ -6,6 +6,7 @@ struct ReaderView: View {
     @EnvironmentObject var prefs: Prefs
     @Environment(\.colorScheme) private var colorScheme
     @State private var showImporter = false
+    @State private var lastCharCountClick: Date = .distantPast
 
     private var importTypes: [UTType] {
         var types: [UTType] = [.plainText, .text]
@@ -32,9 +33,24 @@ struct ReaderView: View {
                         }
                 }
             }
-            .navigationTitle(model.currentTitle)
+            .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Button {
+                        let now = Date()
+                        if now.timeIntervalSince(lastCharCountClick) < 0.5 { return }
+                        lastCharCountClick = now
+                        if model.currentMode == "preview" {
+                            model.engine.triggerCharCount()
+                        }
+                    } label: {
+                        Text(model.currentTitle)
+                            .font(.headline)
+                            .lineLimit(1)
+                    }
+                    .buttonStyle(.plain)
+                }
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Button { model.requestOutline() } label: {
                         Image(systemName: "list.bullet")
@@ -94,6 +110,11 @@ struct ReaderView: View {
             FavoritesSheet().environmentObject(model)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
+        }
+        .alert("字符统计", isPresented: $model.showCharCount) {
+            Button("确定", role: .cancel) { }
+        } message: {
+            Text(model.charCountStats)
         }
         .onAppear { model.updateSystemDark(colorScheme == .dark) }
         .onChange(of: colorScheme) { _, newValue in model.updateSystemDark(newValue == .dark) }

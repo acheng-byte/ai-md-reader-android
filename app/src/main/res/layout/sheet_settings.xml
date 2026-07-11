@@ -174,34 +174,11 @@
         android:layout_marginBottom="8dp"
         android:text="@string/label_font_family"
         android:textAppearance="@style/TextAppearance.Material3.BodyLarge" />
-    <com.google.android.material.button.MaterialButtonToggleGroup
-        android:id="@+id/toggle_font_family"
+    <Spinner
+        android:id="@+id/spinner_font_family"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        app:singleSelection="true"
-        app:selectionRequired="true">
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btn_font_default"
-            style="?attr/materialButtonOutlinedStyle"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="@string/font_default" />
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btn_font_serif"
-            style="?attr/materialButtonOutlinedStyle"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="@string/font_serif" />
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btn_font_mono"
-            style="?attr/materialButtonOutlinedStyle"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="@string/font_mono" />
-    </com.google.android.material.button.MaterialButtonToggleGroup>
+        android:layout_height="48dp"
+        android:background="?attr/colorSurfaceVariant" />
 
     <!-- 高级设置分隔线 -->
     <View

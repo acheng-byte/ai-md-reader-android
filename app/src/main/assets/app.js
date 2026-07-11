@@ -432,8 +432,27 @@
                         var pressTimer = null;
                         var LONG_PRESS_MS = 500;
                         var longPressFired = false;
+                        var startX = 0, startY = 0;
+                        var lastTapTime = 0;
+                        var MOVE_THRESHOLD = 15;
+
+                        function getTouchPos(e) {
+                            if (e.touches && e.touches.length > 0) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+                            if (e.changedTouches && e.changedTouches.length > 0) return { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
+                            return { x: e.clientX || 0, y: e.clientY || 0 };
+                        }
+
+                        function isMoved(e) {
+                            var pos = getTouchPos(e);
+                            var dx = Math.abs(pos.x - startX);
+                            var dy = Math.abs(pos.y - startY);
+                            return (dx > MOVE_THRESHOLD || dy > MOVE_THRESHOLD);
+                        }
 
                         function startPress(e) {
+                            var pos = getTouchPos(e);
+                            startX = pos.x;
+                            startY = pos.y;
                             longPressFired = false;
                             pressTimer = setTimeout(function () {
                                 pressTimer = null;
@@ -452,19 +471,25 @@
                         c.addEventListener('touchstart', startPress, { passive: true });
                         c.addEventListener('touchend', function (e) {
                             cancelPress();
-                            if (!longPressFired) {
+                            var nowTap = Date.now();
+                            if (nowTap - lastTapTime < 400) return;
+                            if (!longPressFired && !isMoved(e)) {
                                 var svg = c.querySelector('svg');
-                                if (svg) openMermaidPreview(svg);
+                                if (svg) { lastTapTime = nowTap; openMermaidPreview(svg); }
                             }
                         });
-                        c.addEventListener('touchmove', cancelPress);
+                        c.addEventListener('touchmove', function (e) {
+                            if (isMoved(e)) cancelPress();
+                        });
                         c.addEventListener('touchcancel', cancelPress);
                         c.addEventListener('mousedown', startPress);
                         c.addEventListener('mouseup', function (e) {
                             cancelPress();
-                            if (!longPressFired) {
+                            var nowTap = Date.now();
+                            if (nowTap - lastTapTime < 400) return;
+                            if (!longPressFired && !isMoved(e)) {
                                 var svg = c.querySelector('svg');
-                                if (svg) openMermaidPreview(svg);
+                                if (svg) { lastTapTime = nowTap; openMermaidPreview(svg); }
                             }
                         });
                         c.addEventListener('mouseleave', cancelPress);
@@ -548,8 +573,9 @@
         var body = overlay.querySelector('.mdreader-preview-body');
         body.innerHTML = '';
         body.scrollTop = 0;
+        // 存储内联样式后的 SVG，确保 offscreen WebView 渲染正确
         var svgHtml = svgEl.outerHTML;
-        previewCurrentSvg = svgHtml;
+        previewCurrentSvg = inlineSvgStyles(svgEl);
         var img = new Image();
         img.onload = function () {
             body.appendChild(img);
@@ -604,12 +630,64 @@
         }
     }
 
+    /** 将 SVG 元素的计算样式内联到属性中（用于 offscreen WebView 渲染） */
+    function inlineSvgStyles(svgEl) {
+        var clone = svgEl.cloneNode(true);
+        // 需要内联样式的 SVG 属性映射
+        var styleProps = [
+            'fill', 'stroke', 'stroke-width', 'stroke-dasharray', 'stroke-dashoffset',
+            'font-family', 'font-size', 'font-weight', 'font-style',
+            'opacity', 'transform', 'transform-origin',
+            'text-anchor', 'dominant-baseline',
+            'background-color', 'background',
+            'border', 'border-radius'
+        ];
+        var allEls = [clone].concat(Array.prototype.slice.call(clone.querySelectorAll('*')));
+        for (var i = 0; i < allEls.length; i++) {
+            var el = allEls[i];
+            if (el.nodeType !== 1) continue;
+            try {
+                var cs = window.getComputedStyle(el);
+                for (var j = 0; j < styleProps.length; j++) {
+                    var prop = styleProps[j];
+                    var val = cs.getPropertyValue(prop);
+                    if (val && val !== 'none' && val !== 'normal' && val !== '0px') {
+                        // SVG 属性用驼峰命名
+                        var attrName = prop.replace(/-([a-z])/g, function (_, c) { return c.toUpperCase(); });
+                        // fill/stroke 特殊处理
+                        if (prop === 'background-color' || prop === 'background') {
+                            if (el.tagName === 'rect' || el.tagName === 'path' || el.tagName === 'polygon') {
+                                el.setAttribute('fill', val);
+                            }
+                        } else if (prop === 'font-family') {
+                            el.setAttribute('font-family', val);
+                        } else if (prop === 'font-size') {
+                            el.setAttribute('font-size', val);
+                        } else if (prop === 'font-weight') {
+                            el.setAttribute('font-weight', val);
+                        } else if (prop === 'stroke-width') {
+                            el.setAttribute('stroke-width', parseFloat(val));
+                        } else if (prop === 'stroke-dasharray') {
+                            el.setAttribute('stroke-dasharray', val);
+                        } else {
+                            el.setAttribute(attrName, val);
+                        }
+                    }
+                }
+                // 移除 class 属性（样式已内联）
+                el.removeAttribute('class');
+            } catch (e) { /* skip */ }
+        }
+        return clone.outerHTML;
+    }
+
     /** 从预览覆盖层下载当前内容 */
     function downloadFromPreview() {
         try {
             var b = bridge();
             if (!b) return;
             if (previewCurrentSvg && b.saveElementImage) {
+                // Mermaid: 使用原始 SVG HTML（已在 openMermaidPreview 中存储）
                 b.saveElementImage('mermaid', previewCurrentSvg);
             } else if (!previewCurrentSvg && b.saveElementImage) {
                 // 表格：获取当前预览中的表格 HTML
@@ -713,8 +791,27 @@
                 if (table.closest && table.closest('.frontmatter')) return;
                 var pressTimer = null;
                 var longPressFired = false;
+                var startX = 0, startY = 0;
+                var lastTapTime = 0;
+                var MOVE_THRESHOLD = 15; // 滑动超过此距离视为滚动，不触发预览
+
+                function getTouchPos(e) {
+                    if (e.touches && e.touches.length > 0) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+                    if (e.changedTouches && e.changedTouches.length > 0) return { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
+                    return { x: e.clientX || 0, y: e.clientY || 0 };
+                }
+
+                function isMoved(e) {
+                    var pos = getTouchPos(e);
+                    var dx = Math.abs(pos.x - startX);
+                    var dy = Math.abs(pos.y - startY);
+                    return (dx > MOVE_THRESHOLD || dy > MOVE_THRESHOLD);
+                }
 
                 function startPress(e) {
+                    var pos = getTouchPos(e);
+                    startX = pos.x;
+                    startY = pos.y;
                     longPressFired = false;
                     pressTimer = setTimeout(function () {
                         pressTimer = null;
@@ -733,14 +830,28 @@
                 table.addEventListener('touchstart', startPress, { passive: true });
                 table.addEventListener('touchend', function (e) {
                     cancelPress();
-                    if (!longPressFired) openTablePreview(table);
+                    // 防重复点击
+                    var nowTap = Date.now();
+                    if (nowTap - lastTapTime < 400) return;
+                    // 滑动过程中不触发预览
+                    if (!longPressFired && !isMoved(e)) {
+                        lastTapTime = nowTap;
+                        openTablePreview(table);
+                    }
                 });
-                table.addEventListener('touchmove', cancelPress);
+                table.addEventListener('touchmove', function (e) {
+                    if (isMoved(e)) cancelPress();
+                });
                 table.addEventListener('touchcancel', cancelPress);
                 table.addEventListener('mousedown', startPress);
                 table.addEventListener('mouseup', function (e) {
                     cancelPress();
-                    if (!longPressFired) openTablePreview(table);
+                    var nowTap = Date.now();
+                    if (nowTap - lastTapTime < 400) return;
+                    if (!longPressFired && !isMoved(e)) {
+                        lastTapTime = nowTap;
+                        openTablePreview(table);
+                    }
                 });
                 table.addEventListener('mouseleave', cancelPress);
             })(tables[i]);
@@ -1174,23 +1285,112 @@
         if (searchInput.value.trim()) doSearch();
     };
 
+    /* ---------- 字符统计 ---------- */
+    function countChars() {
+        var md = '';
+        try { var b = bridge(); if (b && b.getMarkdown) md = b.getMarkdown() || ''; } catch (e) { md = ''; }
+        if (!md) return { total: 0, noPunct: 0, lines: 0, codeChars: 0 };
+
+        var totalChars = md.length;
+        var lines = md.split('\n').length;
+
+        // 提取代码块和 Mermaid 内容（单独计数）
+        var codeBlocks = [];
+        var codeTotal = 0;
+        md.replace(/```(\w*)\n([\s\S]*?)```/g, function (_, lang, code) {
+            codeTotal += code.trim().length;
+            return '';
+        });
+
+        // 去除 Markdown 语法，只保留纯文本内容
+        var text = md;
+        // 1. 去除 YAML frontmatter
+        text = text.replace(/^---[\s\S]*?---\n?/, '');
+        // 2. 去除代码块和 Mermaid（已单独计数）
+        text = text.replace(/```[\s\S]*?```/g, '');
+        // 3. 去除 HTML 标签（保留标签内文字）
+        text = text.replace(/<[^>]*>/g, '');
+        // 4. 去除标题标记
+        text = text.replace(/^#{1,6}\s+/gm, '');
+        // 5. 去除列表标记
+        text = text.replace(/^[\s]*[-*+]\s+/gm, '');
+        text = text.replace(/^[\s]*\d+\.\s+/gm, '');
+        // 6. 去除表格语法（管道符和分隔行）
+        text = text.replace(/^\|[\s\-:|]+\|\s*$/gm, '');
+        text = text.replace(/\|/g, '');
+        // 7. 去除粗体/斜体标记
+        text = text.replace(/(\*\*|__)(.*?)\1/g, '$2');
+        text = text.replace(/(\*|_)(.*?)\1/g, '$2');
+        // 8. 去除链接语法 [text](url) → text
+        text = text.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1');
+        // 9. 去除图片语法
+        text = text.replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1');
+        // 10. 去除引用标记
+        text = text.replace(/^>\s+/gm, '');
+        // 11. 去除水平线
+        text = text.replace(/^[-*_]{3,}\s*$/gm, '');
+        // 12. 去除 Obsidian 语法标记
+        text = text.replace(/==([^=]+)==/g, '$1');
+        text = text.replace(/%%[^%]*%%/g, '');
+        text = text.replace(/\[\[([^\]|]*)[^\]]*\]\]/g, '$1');
+        text = text.replace(/\[\^([^\]]+)\]/g, '[$1]');
+        // 13. 去除脚注定义
+        text = text.replace(/^\[\^[^\]]+\]:\s*.+$/gm, '');
+        // 14. 去除 callout 标记
+        text = text.replace(/^\[![^\]]*\]\s*/gm, '');
+
+        // 去除所有空白字符后计算纯文字数
+        var noWhitespace = text.replace(/\s+/g, '');
+        // 去除标点符号（中英文标点）
+        var noPunct = noWhitespace.replace(/[，。、；：""''（）【】《》！？…—\-\.,;:\'"()\[\]{}<>\/\\!?@#$%^&*+=~`]/g, '');
+
+        return {
+            total: totalChars,
+            noPunct: noPunct.length,
+            lines: lines,
+            codeChars: codeTotal
+        };
+    }
+
+    function showCharCount() {
+        var stats = countChars();
+        try {
+            var b = bridge();
+            if (b && b.showCharCount) {
+                b.showCharCount('总字符: ' + stats.total + '\n纯文字: ' + stats.noPunct + '\n总行数: ' + stats.lines + '\n代码字符: ' + stats.codeChars);
+            }
+        } catch (e) { /* bridge unavailable */ }
+    }
+
     /* ---------- 中央点击 → 显示设置 ---------- */
+    var lastCenterTapTime = 0;
     function setupCenterTap() {
         document.addEventListener('click', function (ev) {
             if (tocOverlay.classList.contains('open')) return;
             if (searchOverlay.style.display !== 'none') return;
             if (typeof previewOverlay !== 'undefined' && previewOverlay && previewOverlay.style.display !== 'none') return;
+            // 防重复点击（300ms 内忽略）
+            var now = Date.now();
+            if (now - lastCenterTapTime < 300) return;
             var t = ev.target;
             while (t && t !== document.body) {
                 var tag = t.tagName;
-                if (tag === 'A' || tag === 'BUTTON' || tag === 'INPUT') return;
-                if (t.classList && t.classList.contains('md-h')) return;
-                if (t.classList && (t.classList.contains('embed-header') || t.classList.contains('embed-block'))) return;
+                // 排除所有可交互元素：链接、按钮、输入框、图片、表格、Mermaid、视频、代码块、嵌入块
+                if (tag === 'A' || tag === 'BUTTON' || tag === 'INPUT' || tag === 'IMG' || tag === 'VIDEO' || tag === 'TABLE' || tag === 'TH' || tag === 'TD' || tag === 'THEAD' || tag === 'TBODY' || tag === 'TR') return;
+                if (t.classList && (
+                    t.classList.contains('md-h') ||
+                    t.classList.contains('embed-header') || t.classList.contains('embed-block') ||
+                    t.classList.contains('mermaid-container') || t.classList.contains('mermaid-block') ||
+                    t.classList.contains('copy-btn') || t.classList.contains('task-checkbox') ||
+                    t.classList.contains('footnote-ref') || t.classList.contains('footnote-backref') ||
+                    t.closest && (t.closest('.mermaid-container') || t.closest('table') || t.closest('pre') || t.closest('img') || t.closest('video') || t.closest('.embed-block'))
+                )) return;
                 t = t.parentNode;
             }
             var w = window.innerWidth, h = window.innerHeight;
             if (ev.clientX > w * 0.25 && ev.clientX < w * 0.75 &&
                 ev.clientY > h * 0.28 && ev.clientY < h * 0.72) {
+                lastCenterTapTime = now;
                 try { if (window.Android && window.Android.onCenterTap) window.Android.onCenterTap(); } catch (e) { }
             }
         }, false);
@@ -1222,7 +1422,13 @@
             var fontMap = {
                 'default': '-apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", "Helvetica Neue", Arial, sans-serif',
                 'serif': '"Noto Serif CJK SC", "Source Han Serif SC", "SimSun", "Songti SC", Georgia, "Times New Roman", serif',
-                'mono': 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Courier New", monospace'
+                'mono': 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Courier New", monospace',
+                'sans': '"Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei", "PingFang SC", sans-serif',
+                'kai': '"KaiTi", "STKaiti", "AR PL UKai CN", "楷体", cursive',
+                'fangsong': '"FangSong", "STFangsong", "仿宋", serif',
+                'xiaobiao': '"FZXiaoBiaoSong-B05S", "方正小标宋简体", "SimSun", "宋体", serif',
+                'lishu': '"LiSu", "STLiti", "隶书", cursive',
+                'yahei': '"Microsoft YaHei", "微软雅黑", "PingFang SC", "Noto Sans CJK SC", sans-serif'
             };
             var ff = fontMap[s.fontFamily] || fontMap['default'];
             root.style.setProperty('--font-family', ff);
@@ -1303,6 +1509,7 @@
     window.appToggleToc = toggleToc;
     window.appRestoreScroll = restoreScroll;
     window.appOpenSearch = openSearch;
+    window.appShowCharCount = showCharCount;
 
     /* ---------- 首屏初始化 ---------- */
     try {
