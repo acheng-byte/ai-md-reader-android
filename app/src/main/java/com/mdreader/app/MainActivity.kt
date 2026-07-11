@@ -787,9 +787,8 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                 onDelete = { entry, position ->
                     // 从持久化存储中删除
                     history.remove(entry.uri)
-                    // 从列表中移除
+                    // 从列表中移除（adapter.removeAt 内部已同时移除 items 引用中的元素）
                     adapter.removeAt(position)
-                    entries.removeAt(position)
                     Toast.makeText(this, R.string.history_deleted_confirm, Toast.LENGTH_SHORT).show()
                     // 如果列表空了，显示空状态
                     if (entries.isEmpty()) {
@@ -1194,9 +1193,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
     /** 通知系统媒体扫描器，使导出文件在「下载」中可见 */
     private fun scanExportedFile(file: File) {
         try {
-            val uri = androidx.core.content.FileProvider.getUriForFile(
-                this, "$packageName.fileprovider", file
-            )
+            val uri = Uri.fromFile(file)
             val intent = Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, uri)
             sendBroadcast(intent)
         } catch (_: Exception) {

@@ -111,6 +111,31 @@
                 <data android:pathPattern=".*\\.txt" />
                 <data android:pathPattern=".*\\..*\\.txt" />
             </intent-filter>
+
+            <!-- F. PDF MIME 匹配 -->
+            <intent-filter
+                android:label="@string/open_with_label"
+                tools:ignore="AppLinkUrlError">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/pdf" />
+            </intent-filter>
+
+            <!-- G. PDF 按扩展名匹配 -->
+            <intent-filter
+                android:label="@string/open_with_label"
+                tools:ignore="AppLinkUrlError">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="file" />
+                <data android:scheme="content" />
+                <data android:host="*" />
+                <data android:mimeType="*/*" />
+                <data android:pathPattern=".*\\.pdf" />
+                <data android:pathPattern=".*\\..*\\.pdf" />
+                <data android:pathPattern=".*\\..*\\..*\\.pdf" />
+            </intent-filter>
         </activity>
 
         <!-- 用于把当前 md 文档以文件形式分享/转发给微信等应用 -->
