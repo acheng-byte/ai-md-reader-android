@@ -34,8 +34,9 @@ class HistoryAdapter(
     fun removeAt(position: Int) {
         if (position in items.indices) {
             items.removeAt(position)
-            notifyItemRemoved(position)
-            notifyItemRangeChanged(position, items.size)
+            // 使用 notifyDataSetChanged 避免 notifyItemRemoved + notifyItemRangeChanged
+            // 在 BottomSheetDialog 的 RecyclerView 中引发 IndexOutOfBoundsException 闪退
+            notifyDataSetChanged()
         }
     }
 

@@ -299,23 +299,32 @@ object FileUtils {
                 sb.append(text)
             }
 
-            // 提取文档中嵌入的图片
+            // 提取文档中嵌入的图片（仅保留浏览器可渲染的格式：png/jpg/gif/bmp/webp）
+            // EMF/WMF 是 Windows 矢量格式，WebView 无法显示，需过滤掉
             val picturesTable = doc.picturesTable
             @Suppress("UNCHECKED_CAST")
             val allPictures = picturesTable.allPictures as List<org.apache.poi.hwpf.usermodel.Picture>
-            if (allPictures.isNotEmpty()) {
+            val webCompatibleExts = setOf("png", "jpg", "jpeg", "gif", "bmp", "webp")
+            val displayablePics = allPictures.filter {
+                it.suggestFileExtension().lowercase() in webCompatibleExts
+            }
+            if (displayablePics.isNotEmpty()) {
                 if (text.isNotEmpty()) sb.append("\n\n---\n\n")
                 sb.append("**文档内嵌图片：**\n\n")
-                for (pic in allPictures) {
+                for (pic in displayablePics) {
                     val imgBytes = pic.content
-                    val ext = pic.suggestFileExtension()
-                    val dataUri = "data:image/$ext;base64," +
+                    val ext = pic.suggestFileExtension().lowercase()
+                    val mime = when (ext) {
+                        "jpg" -> "jpeg"
+                        else -> ext
+                    }
+                    val dataUri = "data:image/$mime;base64," +
                         Base64.encodeToString(imgBytes, Base64.NO_WRAP)
                     sb.append("![]($dataUri)\n\n")
                 }
             }
 
-            if (text.isEmpty() && allPictures.isEmpty())
+            if (text.isEmpty() && displayablePics.isEmpty())
                 "# $title\n\n（文档内容为空）"
             else sb.toString().trimEnd()
         }.getOrElse { e ->

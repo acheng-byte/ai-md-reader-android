@@ -584,9 +584,16 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             .show()
     }
 
-    /** Try to write [text] back to the current URI in-place. Returns true on success. */
+    /** Try to write [text] back to the current URI in-place. Returns true on success.
+     *  Refuses for binary formats (DOC/DOCX/PDF) — writing markdown into them would corrupt the file. */
     private fun trySaveInPlace(text: String): Boolean {
         val uri = currentDocumentUri ?: return false
+        // 检查当前文件是否为二进制格式（DOC/DOCX/PDF），这些格式不支持原地保存
+        val ext = currentTitle.substringAfterLast('.', "").lowercase()
+        val name = FileUtils.displayName(this, uri)?.lowercase() ?: ""
+        val isBinaryFormat = name.endsWith(".doc") || name.endsWith(".docx") ||
+            name.endsWith(".pdf") || ext == "doc" || ext == "docx" || ext == "pdf"
+        if (isBinaryFormat) return false  // 强制走「另存为」流程
         if (uri.scheme == "file") {
             return runCatching {
                 val path = uri.path ?: return false
@@ -968,15 +975,14 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                     return@evaluateJavascript
                 }
 
-                val maxBitmapHeight = 4096
+                // 限制最大高度防止 OOM，使用 2x 密度保证清晰度
+                val maxBitmapHeight = 8192
                 val scale = if (contentHeight > maxBitmapHeight) maxBitmapHeight.toFloat() / contentHeight else 1f
                 val finalHeight = (contentHeight * scale).toInt()
                 val finalWidth = (viewWidth * scale).toInt()
                 val bgColor = if (prefs.isDark(this)) 0xFF0D1117.toInt() else 0xFFFFFFFF.toInt()
                 val savedTitle = currentTitle
 
-                // 在后台线程执行截图拼接，避免阻塞主线程
-                // webView.draw() 必须在主线程调用，通过 CountDownLatch 同步
                 Thread {
                     try {
                         val bitmap = Bitmap.createBitmap(finalWidth, finalHeight, Bitmap.Config.ARGB_8888)
@@ -984,13 +990,19 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                         canvas.drawColor(bgColor)
 
                         if (contentHeight <= viewHeight) {
+                            // 内容不超过一屏，直接截图
                             val latch = CountDownLatch(1)
                             runOnUiThread {
-                                webView.draw(canvas)
-                                latch.countDown()
+                                webView.scrollTo(0, 0)
+                                webView.postDelayed({
+                                    webView.draw(canvas)
+                                    latch.countDown()
+                                }, 300)
                             }
-                            latch.await(3, TimeUnit.SECONDS)
+                            latch.await(5, TimeUnit.SECONDS)
                         } else {
+                            // 滚动截图拼接：使用 75% 视口高度作为步长，避免拼接缝隙
+                            val step = (viewHeight * 0.75).toInt()
                             var scrollY = 0
                             while (scrollY < contentHeight) {
                                 val currentScroll = scrollY
@@ -1002,7 +1014,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                                     val latch = CountDownLatch(1)
                                     runOnUiThread {
                                         webView.scrollTo(0, currentScroll)
-                                        // postDelayed 等待 WebView 在下一帧完成重绘后再截图
+                                        // 等待 400ms 让 WebView 完成重绘（含图片/代码块等复杂内容）
                                         webView.postDelayed({
                                             tempCanvas.drawColor(bgColor)
                                             webView.draw(tempCanvas)
@@ -1011,23 +1023,50 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                                             canvas.drawBitmap(tempBmp, srcRect, dstRect, null)
                                             tempBmp.recycle()
                                             latch.countDown()
-                                        }, 200)
+                                        }, 400)
                                     }
-                                    latch.await(5, TimeUnit.SECONDS)
+                                    latch.await(6, TimeUnit.SECONDS)
                                 }
-                                scrollY += viewHeight
+                                scrollY += step
+                            }
+                            // 确保最后一屏也被完整捕获
+                            if (scrollY - step < contentHeight - viewHeight) {
+                                val lastScroll = contentHeight - viewHeight
+                                val srcTop = (lastScroll * scale).toInt()
+                                val srcBottom = finalHeight
+                                if (srcBottom > srcTop) {
+                                    val tempBmp = Bitmap.createBitmap(viewWidth, viewHeight, Bitmap.Config.ARGB_8888)
+                                    val tempCanvas = Canvas(tempBmp)
+                                    val latch = CountDownLatch(1)
+                                    runOnUiThread {
+                                        webView.scrollTo(0, lastScroll)
+                                        webView.postDelayed({
+                                            tempCanvas.drawColor(bgColor)
+                                            webView.draw(tempCanvas)
+                                            val srcRect = android.graphics.Rect(0, 0, viewWidth, viewHeight)
+                                            val dstRect = android.graphics.Rect(0, srcTop, finalWidth, srcBottom)
+                                            canvas.drawBitmap(tempBmp, srcRect, dstRect, null)
+                                            tempBmp.recycle()
+                                            latch.countDown()
+                                        }, 400)
+                                    }
+                                    latch.await(6, TimeUnit.SECONDS)
+                                }
                             }
                             runOnUiThread { webView.scrollTo(0, 0) }
                         }
 
-                        val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-                        dir.mkdirs()
-                        val safeName = shareFileName(savedTitle).removeSuffix(".md").replace(Regex("[^a-zA-Z0-9\\u4e00-\\u9fff_\\-]"), "_")
+                        // 保存到应用私有 Downloads 目录（Android 10+ 兼容）
+                        val dir = getExportDir()
+                        val safeName = exportFileName(savedTitle)
                         val file = File(dir, "$safeName.png")
                         FileOutputStream(file).use { out ->
                             bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
                         }
                         bitmap.recycle()
+
+                        // 通知媒体扫描器以便在系统「下载」中可见
+                        scanExportedFile(file)
 
                         runOnUiThread {
                             Toast.makeText(this, getString(R.string.export_image_saved), Toast.LENGTH_LONG).show()
@@ -1044,23 +1083,24 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         }
     }
 
-    /** 导出当前渲染结果为独立 HTML 文件 */
+    /** 导出当前渲染结果为独立 HTML 文件（保留加粗、表格、图片、Mermaid 等格式） */
     private fun exportHtml() {
         if (currentMode != "preview") {
             toggleMode()
             webView.postDelayed({ exportHtml() }, 300)
             return
         }
-        webView.evaluateJavascript("document.getElementById('preview').innerHTML") { htmlContent ->
-            if (htmlContent.isNullOrBlank() || htmlContent == "null") {
+        // 获取 preview 的完整 innerHTML，通过 JSON 编码安全传回
+        webView.evaluateJavascript(
+            "(function(){ var el = document.getElementById('preview'); return el ? el.innerHTML : ''; })()"
+        ) { htmlContent ->
+            if (htmlContent.isNullOrBlank() || htmlContent == "null" || htmlContent == "\"\"") {
                 Toast.makeText(this, getString(R.string.export_html_failed, "内容为空"), Toast.LENGTH_LONG).show()
                 return@evaluateJavascript
             }
             try {
-                // 去除 JS 返回的外层引号
-                val cleanHtml = htmlContent.trim().removeSurrounding("\"")
-                    .replace("\\\"", "\"")
-                    .replace("\\n", "\n")
+                // 安全解码 JS 返回的 JSON 字符串：evaluateJavascript 返回的是 JSON 编码的字符串
+                val cleanHtml = decodeJsString(htmlContent)
 
                 val fullHtml = buildString {
                     appendLine("<!DOCTYPE html>")
@@ -1072,22 +1112,26 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                     appendLine("<style>")
                     appendLine(EXPORT_CSS)
                     appendLine("</style>")
+                    // Mermaid CDN：使导出的 HTML 中 Mermaid SVG 可继续交互/渲染
+                    appendLine("<script src=\"https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js\"></script>")
                     appendLine("</head>")
                     appendLine("<body>")
                     appendLine("<div class=\"markdown-body\">")
                     appendLine(cleanHtml)
                     appendLine("</div>")
+                    appendLine("<script>if(window.mermaid)mermaid.init();</script>")
                     appendLine("</body>")
                     appendLine("</html>")
                 }
 
-                val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-                dir.mkdirs()
-                val safeName = shareFileName(currentTitle).removeSuffix(".md").replace(Regex("[^a-zA-Z0-9\\u4e00-\\u9fff_\\-]"), "_")
+                val dir = getExportDir()
+                val safeName = exportFileName(currentTitle)
                 val file = File(dir, "$safeName.html")
                 FileOutputStream(file).use { out ->
                     out.write(fullHtml.toByteArray(Charsets.UTF_8))
                 }
+                scanExportedFile(file)
+
                 runOnUiThread {
                     Toast.makeText(this, getString(R.string.export_html_saved), Toast.LENGTH_LONG).show()
                 }
@@ -1096,6 +1140,67 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                     Toast.makeText(this, getString(R.string.export_html_failed, e.message ?: ""), Toast.LENGTH_LONG).show()
                 }
             }
+        }
+    }
+
+    /**
+     * 安全解码 evaluateJavascript 返回的 JSON 字符串。
+     * evaluateJavascript 返回值是一个 JSON 编码的字符串（带外层引号，内部转义）。
+     * 使用 org.json.JSONObject 来安全解码，避免手动 replace 导致的格式损坏。
+     */
+    private fun decodeJsString(raw: String): String {
+        return try {
+            // raw 形如 "\"<div>...</div>\""，用 JSONArray 安全解码
+            val arr = org.json.JSONArray("[$raw]")
+            arr.getString(0)
+        } catch (e: Exception) {
+            // 降级：手动去除外层引号和转义
+            raw.trim()
+                .removeSurrounding("\"")
+                .replace("\\\"", "\"")
+                .replace("\\\\", "\\")
+                .replace("\\n", "\n")
+                .replace("\\/", "/")
+        }
+    }
+
+    /** 获取导出目录：优先使用应用私有 Downloads（Android 10+ 兼容），无需额外权限 */
+    private fun getExportDir(): File {
+        // Android 10+ (API 29) 使用 getExternalFilesDir 无需申请存储权限
+        // 文件保存在 /sdcard/Android/data/com.mdreader.app/files/Downloads/
+        val dir = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+                ?: File(filesDir, "Downloads")
+        } else {
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        }
+        dir.mkdirs()
+        return dir
+    }
+
+    /** 生成导出文件名：以笔记名命名，仅去除文件系统不允许的字符 */
+    private fun exportFileName(title: String): String {
+        var name = title.trim().ifEmpty { "document" }
+        // 仅去除文件系统禁止的字符：\ / : * ? " < > | 和换行
+        name = name.replace(Regex("[\\\\/:*?\"<>|\\r\\n]"), "")
+        // 去除首尾空格和点（Windows 不允许）
+        name = name.trim(' ', '.')
+        if (name.isEmpty()) name = "document"
+        // 限制长度防止文件名过长
+        if (name.length > 100) name = name.substring(0, 100)
+        return name
+    }
+
+    /** 通知系统媒体扫描器，使导出文件在「下载」中可见 */
+    private fun scanExportedFile(file: File) {
+        try {
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                this, "$packageName.fileprovider", file
+            )
+            val intent = Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, uri)
+            sendBroadcast(intent)
+        } catch (_: Exception) {
+            // 忽略扫描失败，文件已成功保存
         }
     }
 
@@ -1146,12 +1251,21 @@ body { background: var(--bg); color: var(--fg); font-family: -apple-system, "Pin
 .frontmatter .fm-key { font-weight: 600; color: var(--muted); font-size: 0.85em; padding: 5px 12px; border: 1px solid var(--border); width: 30%; }
 .frontmatter .fm-val { padding: 5px 12px; font-size: 0.88em; border: 1px solid var(--border); }
 .frontmatter .fm-tag { display: inline-block; background: var(--link); color: #fff; border-radius: 4px; padding: 1px 7px; font-size: 0.8em; margin: 2px 3px; }
+.markdown-body mark { background: #fff176; border-radius: 2px; padding: 0 2px; }
+.markdown-body .ob-highlight { background: #fff176; border-radius: 2px; padding: 0 2px; }
+.mermaid-container { text-align: center; margin: var(--para-gap) 0; overflow: auto; }
+.mermaid-container svg { max-width: 100%; height: auto; }
+.markdown-body details { margin-bottom: var(--para-gap); border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; }
+.markdown-body details summary { cursor: pointer; font-weight: 600; }
+.markdown-body details[open] summary { margin-bottom: 8px; }
+.footnotes { font-size: 0.88em; color: var(--muted); border-top: 1px solid var(--border); margin-top: 2em; padding-top: 1em; }
+.footnotes ol { padding-left: 1.5em; }
         """.trimIndent()
 
         private val WELCOME_MD = """
 # 欢迎使用 MD 阅读器
 
-这是一个本地 **Markdown 阅读器**（v1.7.0）。
+这是一个本地 **Markdown 阅读器**（v1.7.2）。
 
 ## 怎么用
 
@@ -1164,15 +1278,14 @@ body { background: var(--bg); color: var(--fg); font-family: -apple-system, "Pin
 - 启动时自动弹出打开历史，快速继续阅读
 - 点击右上角 **⋮ → 编辑**，直接在应用内编辑 Markdown，保存后立即刷新预览
 
-## v1.7.0 更新
+## v1.7.2 更新
 
-- **新增**：PDF 文件阅读支持（逐页渲染为图片查看）
-- **新增**：导出长图片功能（渲染好的文档一键保存为 PNG）
-- **新增**：导出 HTML 功能（生成独立 HTML 文件，可在任何浏览器打开）
-- **新增**：历史记录支持单条删除（不再只能全部清空）
-- **修复**：旧版 .doc 文档打开乱码（改用 Apache POI OLE2 解析）
-- **修复**：DOC/DOCX 文档中的内嵌图片无法查看（现在提取并显示）
-- **优化**：增强 WebView 渲染稳定性与内存管理
+- **修复**：历史记录单条删除闪退问题
+- **修复**：导出长图不完整、代码块被截断的问题
+- **修复**：导出 HTML 丢失加粗、表格、图片、Mermaid 格式
+- **修复**：导出文件名包含无效字符、保存后在下载目录看不到
+- **修复**：编辑 DOC 文档后再打开其他 DOC 显示解析失败
+- **优化**：DOC 文档图片过滤不支持的格式（EMF/WMF），避免显示空白
 
 ## 支持的格式
 
