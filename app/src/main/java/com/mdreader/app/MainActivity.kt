@@ -62,6 +62,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
     @Volatile private var currentUri: String? = null
     @Volatile private var currentDocumentUri: Uri? = null
     private var pageReady: Boolean = false
+    private var mermaidSaveCounter: Int = 0
 
     // Edit mode state
     private var isEditing: Boolean = false
@@ -343,6 +344,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                     currentTitle = name
                     currentUri = identityUri
                     currentDocumentUri = readUri
+                    mermaidSaveCounter = 0
                     supportActionBar?.title = name
                     prefs.lastDocUri = identityUri
                     prefs.lastDocName = name
@@ -1124,6 +1126,65 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         }.getOrDefault("")
     }
 
+    override fun saveMermaidImage(svgHtml: String) {
+        // 在 binder 线程被调用，切换到主线程获取计数器后再切回后台线程做 I/O
+        runOnUiThread {
+            mermaidSaveCounter++
+            val index = mermaidSaveCounter
+            val baseName = exportFileName(currentTitle)
+            val fileName = "${baseName}_mermaid_$index.svg"
+
+            Thread {
+                try {
+                    // 确保 SVG 有完整的 xml 声明头
+                    val svgContent = if (svgHtml.trimStart().startsWith("<?xml")) {
+                        svgHtml
+                    } else {
+                        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n$svgHtml"
+                    }
+
+                    val savedFile: File? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        // Android 10+：使用 MediaStore
+                        val resolver = contentResolver
+                        val contentValues = android.content.ContentValues().apply {
+                            put(android.provider.MediaStore.Downloads.DISPLAY_NAME, fileName)
+                            put(android.provider.MediaStore.Downloads.MIME_TYPE, "image/svg+xml")
+                            put(android.provider.MediaStore.Downloads.RELATIVE_PATH, "Download/MD阅读器/Picture")
+                        }
+                        val uri = resolver.insert(
+                            android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues
+                        ) ?: throw Exception("无法创建文件")
+                        resolver.openOutputStream(uri, "wt")?.use { out ->
+                            out.write(svgContent.toByteArray(Charsets.UTF_8))
+                        } ?: throw Exception("无法写入文件")
+                        File(uri.path ?: "")
+                    } else {
+                        // Android 9 及以下：直接写文件
+                        val dir = getExportDir("Picture")
+                        val file = File(dir, fileName)
+                        FileOutputStream(file).use { out ->
+                            out.write(svgContent.toByteArray(Charsets.UTF_8))
+                        }
+                        scanExportedFile(file)
+                        file
+                    }
+
+                    runOnUiThread {
+                        Toast.makeText(this, getString(R.string.mermaid_saved, fileName), Toast.LENGTH_LONG).show()
+                    }
+                } catch (e: Exception) {
+                    runOnUiThread {
+                        Toast.makeText(
+                            this,
+                            getString(R.string.mermaid_save_failed, e.message ?: "未知错误"),
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                }
+            }.start()
+        }
+    }
+
     private fun escapeJs(s: String): String = s.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n")
 
     // ---- 导出功能 ----
@@ -1173,8 +1234,9 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                     return@evaluateJavascript
                 }
 
-                // 限制最大高度防止 OOM，使用 2x 密度保证清晰度
-                val maxBitmapHeight = 8192
+                // 限制最大高度防止 OOM（32768px ≈ 128MB @1080px，现代设备可承受）
+                // 正常长文档（<32768px）使用 scale=1.0 保证完整清晰度
+                val maxBitmapHeight = 32768
                 val scale = if (contentHeight > maxBitmapHeight) maxBitmapHeight.toFloat() / contentHeight else 1f
                 val finalHeight = (contentHeight * scale).toInt()
                 val finalWidth = (viewWidth * scale).toInt()

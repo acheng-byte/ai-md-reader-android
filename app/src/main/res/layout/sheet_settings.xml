@@ -203,11 +203,26 @@
             android:text="@string/font_mono" />
     </com.google.android.material.button.MaterialButtonToggleGroup>
 
+    <!-- 高级设置分隔线 -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:layout_marginTop="16dp"
+        android:layout_marginBottom="12dp"
+        android:background="?attr/colorOutlineVariant" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="8dp"
+        android:text="@string/advanced_settings"
+        android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+        android:textColor="?attr/colorPrimary" />
+
     <!-- 内容解析选项 -->
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
         android:layout_marginBottom="4dp"
         android:text="@string/label_content_options"
         android:textAppearance="@style/TextAppearance.Material3.BodyLarge" />

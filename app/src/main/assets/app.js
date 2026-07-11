@@ -427,6 +427,40 @@
             try {
                 window.mermaid.render(divId + '-svg', graphDef).then(function (result) {
                     container.innerHTML = result.svg;
+                    // 长按保存 Mermaid 图表为 SVG
+                    (function (c) {
+                        var pressTimer = null;
+                        var LONG_PRESS_MS = 500;
+                        function startPress(e) {
+                            pressTimer = setTimeout(function () {
+                                pressTimer = null;
+                                var svg = c.querySelector('svg');
+                                if (!svg) return;
+                                // 视觉反馈：短暂高亮
+                                c.style.transition = 'background-color 0.15s';
+                                c.style.backgroundColor = 'rgba(9,105,218,0.15)';
+                                setTimeout(function () {
+                                    c.style.backgroundColor = '';
+                                }, 300);
+                                try {
+                                    var svgHtml = svg.outerHTML;
+                                    if (window.Android && window.Android.saveMermaidImage) {
+                                        window.Android.saveMermaidImage(svgHtml);
+                                    }
+                                } catch (ex) { /* bridge unavailable */ }
+                            }, LONG_PRESS_MS);
+                        }
+                        function cancelPress() {
+                            if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+                        }
+                        c.addEventListener('touchstart', startPress, { passive: true });
+                        c.addEventListener('touchend', cancelPress);
+                        c.addEventListener('touchmove', cancelPress);
+                        c.addEventListener('touchcancel', cancelPress);
+                        c.addEventListener('mousedown', startPress);
+                        c.addEventListener('mouseup', cancelPress);
+                        c.addEventListener('mouseleave', cancelPress);
+                    })(container);
                 }).catch(function (e) {
                     container.textContent = graphDef;
                     container.classList.add('mermaid-error');
