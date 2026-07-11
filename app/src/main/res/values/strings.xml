@@ -124,4 +124,14 @@
     <string name="annotate_mode_highlight">荧光笔</string>
     <string name="annotate_mode_circle">圈注</string>
     <string name="annotate_mode_wavy">波浪线</string>
+    <string name="preview_download">保存图片</string>
+    <string name="preview_close">关闭</string>
+    <string name="confirm_download_title">确认保存</string>
+    <string name="confirm_download_mermaid">确定保存此图表为图片？</string>
+    <string name="confirm_download_table">确定保存此表格为图片？</string>
+    <string name="confirm_download_yes">确定保存</string>
+    <string name="element_saved">图片已保存: %1$s</string>
+    <string name="element_save_failed">保存失败: %1$s</string>
+    <string name="source_mode_hint">在此直接编辑 Markdown…</string>
+    <string name="source_auto_saved">已自动保存</string>
 </resources>

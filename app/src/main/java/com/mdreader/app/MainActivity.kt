@@ -116,7 +116,8 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                     currentUri = uri.toString()
                     currentDocumentUri = uri
                     supportActionBar?.title = currentTitle
-                    isEditing = false
+                    currentMode = "preview"
+                    prefs.viewMode = currentMode
                     binding.editScroll.visibility = View.GONE
                     binding.webview.visibility = View.VISIBLE
                     invalidateOptionsMenu()
@@ -179,16 +180,21 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         webView.setBackgroundColor(bgColor())
         webView.loadUrl(VIEWER_URL)
 
-        // Back press: prompt if editing with unsaved changes
+        // Back press: in source mode, check for unsaved changes
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (isEditing) {
-                    val original = currentMarkdown
+                if (currentMode == "code") {
                     val edited = binding.editText.text.toString()
-                    if (edited != original) {
+                    if (edited != currentMarkdown) {
                         confirmDiscardEdit()
                     } else {
-                        exitEditMode(save = false)
+                        // 无修改，切换到预览模式
+                        binding.editScroll.visibility = View.GONE
+                        binding.webview.visibility = View.VISIBLE
+                        currentMode = "preview"
+                        prefs.viewMode = currentMode
+                        renderCurrent()
+                        invalidateOptionsMenu()
                     }
                 } else {
                     isEnabled = false
@@ -223,7 +229,18 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
 
             override fun onPageFinished(view: WebView, url: String) {
                 pageReady = true
+                // 如果保存的模式是源码模式，显示 editText
+                if (currentMode == "code") {
+                    binding.editText.setText(currentMarkdown)
+                    binding.editText.setTextColor(if (prefs.isDark(this@MainActivity)) Color.WHITE else Color.BLACK)
+                    binding.editText.setBackgroundColor(bgColor())
+                    binding.editScroll.setBackgroundColor(bgColor())
+                    binding.webview.visibility = View.GONE
+                    binding.editScroll.visibility = View.VISIBLE
+                    setupSourceAutoSave()
+                }
                 renderCurrent()
+                invalidateOptionsMenu()
             }
 
             override fun shouldOverrideUrlLoading(
@@ -318,11 +335,13 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         displayNameOverride: String? = null,
         identityUri: String = readUri.toString()
     ) {
-        // Exit edit mode silently when opening a different document
-        if (isEditing) {
-            isEditing = false
+        // Exit source/edit mode when opening a different document
+        if (currentMode == "code") {
+            syncSourceContent()
             binding.editScroll.visibility = View.GONE
             binding.webview.visibility = View.VISIBLE
+            currentMode = "preview"
+            prefs.viewMode = currentMode
             invalidateOptionsMenu()
         }
         // Increment generation to cancel any in-flight load
@@ -377,7 +396,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         js("window.appApplySettings && window.appApplySettings(${prefs.settingsJson(this)})")
         val bg = bgColor()
         webView.setBackgroundColor(bg)
-        if (isEditing) {
+        if (currentMode == "code") {
             binding.editText.setTextColor(if (prefs.isDark(this)) Color.WHITE else Color.BLACK)
             binding.editText.setBackgroundColor(bg)
             binding.editScroll.setBackgroundColor(bg)
@@ -545,34 +564,23 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
     }
 
     override fun onPrepareOptionsMenu(menu: Menu): Boolean {
-        // Edit mode: show save/cancel, hide normal actions
-        menu.findItem(R.id.action_save)?.isVisible = isEditing
-        menu.findItem(R.id.action_cancel_edit)?.isVisible = isEditing
-        val normalVisible = !isEditing
+        val inSource = currentMode == "code"
+        // 源码模式：显示保存/取消，隐藏其他操作
+        menu.findItem(R.id.action_save)?.isVisible = inSource
+        menu.findItem(R.id.action_cancel_edit)?.isVisible = inSource
+        val normalVisible = !inSource
         listOf(
             R.id.action_share, R.id.action_toc, R.id.action_search,
-            R.id.action_toggle, R.id.action_favorite, R.id.action_edit,
+            R.id.action_toggle, R.id.action_favorite,
             R.id.action_open, R.id.action_favorites, R.id.action_history,
             R.id.action_export_image, R.id.action_export_html,
             R.id.action_annotate
         ).forEach { menu.findItem(it)?.isVisible = normalVisible }
+        // edit 按钮不再需要（源码模式即可编辑），但保留 toggle 按钮
+        menu.findItem(R.id.action_edit)?.isVisible = false
 
-        // 标注工具：仅在标注模式开启时显示
-        val annotateToolsVisible = isAnnotating
-        listOf(
-            R.id.action_annotate_color, R.id.action_annotate_mode,
-            R.id.action_annotate_undo, R.id.action_annotate_clear
-        ).forEach { menu.findItem(it)?.isVisible = annotateToolsVisible }
-
-        // 更新标注工具标题
-        if (annotateToolsVisible) {
-            menu.findItem(R.id.action_annotate_color)?.title =
-                getString(R.string.annotate_color, annotationColor)
-            menu.findItem(R.id.action_annotate_mode)?.title =
-                getString(R.string.annotate_mode, annotationModeName(annotationMode))
-        }
-
-        if (!isEditing) {
+        // 更新 toggle 按钮图标/标题
+        if (!inSource) {
             menu.findItem(R.id.action_toggle)?.let { item ->
                 if (currentMode == "preview") {
                     item.setTitle(R.string.action_view_code)
@@ -588,17 +596,61 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                 item.setTitle(if (fav) R.string.action_unfavorite else R.string.action_favorite)
             }
         }
+
+        // 标注工具：仅在标注模式开启时显示
+        val annotateToolsVisible = isAnnotating
+        listOf(
+            R.id.action_annotate_color, R.id.action_annotate_mode,
+            R.id.action_annotate_undo, R.id.action_annotate_clear
+        ).forEach { menu.findItem(it)?.isVisible = annotateToolsVisible }
+
+        if (annotateToolsVisible) {
+            menu.findItem(R.id.action_annotate_color)?.title =
+                getString(R.string.annotate_color, annotationColor)
+            menu.findItem(R.id.action_annotate_mode)?.title =
+                getString(R.string.annotate_mode, annotationModeName(annotationMode))
+        }
         return super.onPrepareOptionsMenu(menu)
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean = when (item.itemId) {
-        R.id.action_save -> { exitEditMode(save = true); true }
-        R.id.action_cancel_edit -> {
-            val edited = binding.editText.text.toString()
-            if (edited != currentMarkdown) confirmDiscardEdit() else exitEditMode(save = false)
+        R.id.action_save -> {
+            // 源码模式保存：同步内容并尝试原地保存
+            syncSourceContent()
+            val saved = trySaveInPlace(currentMarkdown)
+            if (saved) {
+                Toast.makeText(this, R.string.edit_saved, Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this, R.string.edit_save_as_hint, Toast.LENGTH_LONG).show()
+                val safeName = shareFileName(currentTitle).removeSuffix(".md") + ".md"
+                saveDocLauncher.launch(safeName)
+                return true
+            }
+            // 切换到预览模式
+            binding.editScroll.visibility = View.GONE
+            binding.webview.visibility = View.VISIBLE
+            currentMode = "preview"
+            prefs.viewMode = currentMode
+            renderCurrent()
+            invalidateOptionsMenu()
             true
         }
-        R.id.action_edit -> { enterEditMode(); true }
+        R.id.action_cancel_edit -> {
+            // 取消编辑：检查是否有未保存修改
+            val edited = binding.editText.text.toString()
+            if (edited != currentMarkdown) {
+                confirmDiscardEdit()
+            } else {
+                // 无修改，直接切换到预览
+                binding.editScroll.visibility = View.GONE
+                binding.webview.visibility = View.VISIBLE
+                currentMode = "preview"
+                prefs.viewMode = currentMode
+                renderCurrent()
+                invalidateOptionsMenu()
+            }
+            true
+        }
         R.id.action_share -> { shareCurrentDocument(); true }
         R.id.action_open -> {
             openPicker.launch(arrayOf("*/*"))
@@ -689,10 +741,60 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
     }
 
     private fun toggleMode() {
-        currentMode = if (currentMode == "preview") "code" else "preview"
-        prefs.viewMode = currentMode
-        js("window.appSetMode && window.appSetMode('$currentMode')")
+        if (currentMode == "preview") {
+            // 切换到源码模式：显示可编辑的 editText
+            currentMode = "code"
+            prefs.viewMode = currentMode
+            binding.editText.setText(currentMarkdown)
+            binding.editText.setTextColor(if (prefs.isDark(this)) Color.WHITE else Color.BLACK)
+            binding.editText.setBackgroundColor(bgColor())
+            binding.editScroll.setBackgroundColor(bgColor())
+            binding.webview.visibility = View.GONE
+            binding.editScroll.visibility = View.VISIBLE
+            binding.editText.requestFocus()
+            setupSourceAutoSave()
+        } else {
+            // 切换到预览模式：保存编辑内容并渲染
+            syncSourceContent()
+            binding.editScroll.visibility = View.GONE
+            binding.webview.visibility = View.VISIBLE
+            currentMode = "preview"
+            prefs.viewMode = currentMode
+            renderCurrent()
+        }
         invalidateOptionsMenu()
+    }
+
+    /** 防抖自动保存：源码模式下停止输入 2 秒后自动保存 */
+    private var sourceSaveRunnable: Runnable? = null
+    private fun setupSourceAutoSave() {
+        sourceSaveRunnable?.let { settingsHandler.removeCallbacks(it) }
+        binding.editText.removeTextChangedListener(sourceTextWatcher)
+        binding.editText.addTextChangedListener(sourceTextWatcher)
+    }
+
+    private val sourceTextWatcher = object : android.text.TextWatcher {
+        override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+        override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+        override fun afterTextChanged(s: android.text.Editable) {
+            sourceSaveRunnable?.let { settingsHandler.removeCallbacks(it) }
+            val r = Runnable {
+                currentMarkdown = binding.editText.text.toString()
+                // 异步尝试原地保存
+                currentUri?.let { uri ->
+                    Thread { trySaveInPlace(currentMarkdown) }.start()
+                }
+            }
+            sourceSaveRunnable = r
+            settingsHandler.postDelayed(r, 2000)
+        }
+    }
+
+    /** 同步源码编辑内容到 currentMarkdown */
+    private fun syncSourceContent() {
+        sourceSaveRunnable?.let { settingsHandler.removeCallbacks(it) }
+        binding.editText.removeTextChangedListener(sourceTextWatcher)
+        currentMarkdown = binding.editText.text.toString()
     }
 
     // ---- 编辑模式 ----
@@ -737,7 +839,15 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         AlertDialog.Builder(this)
             .setTitle(R.string.edit_discard_title)
             .setMessage(R.string.edit_discard_msg)
-            .setPositiveButton(R.string.edit_discard_confirm) { _, _ -> exitEditMode(save = false) }
+            .setPositiveButton(R.string.edit_discard_confirm) { _, _ ->
+                // 放弃修改，切换到预览模式
+                binding.editScroll.visibility = View.GONE
+                binding.webview.visibility = View.VISIBLE
+                currentMode = "preview"
+                prefs.viewMode = currentMode
+                renderCurrent()
+                invalidateOptionsMenu()
+            }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
     }
@@ -1040,6 +1150,9 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
     override fun onDestroy() {
         pendingRender?.let { renderHandler.removeCallbacks(it) }
         pendingSettings?.let { settingsHandler.removeCallbacks(it) }
+        sourceSaveRunnable?.let { settingsHandler.removeCallbacks(it) }
+        // 源码模式下退出时同步内容
+        if (currentMode == "code") syncSourceContent()
         reading.flush()
         binding.webview.apply { (parent as? android.view.ViewGroup)?.removeView(this); destroy() }
         super.onDestroy()
@@ -1186,6 +1299,110 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
     }
 
     private fun escapeJs(s: String): String = s.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n")
+
+    // ---- 表格/图表保存为图片 ----
+
+    /** 保存表格或 Mermaid 图表元素为 PNG 图片。
+     *  创建离屏 WebView 渲染 HTML 内容，然后截图保存。 */
+    override fun saveElementImage(type: String, html: String) {
+        runOnUiThread {
+            val baseName = exportFileName(currentTitle)
+            val counter = ++mermaidSaveCounter
+            val fileName = "${baseName}_${type}_$counter.png"
+
+            // 构建带样式的 HTML，确保渲染效果与正文一致
+            val isDark = prefs.isDark(this)
+            val bgColor = if (isDark) "#0d1117" else "#ffffff"
+            val fgColor = if (isDark) "#e6edf3" else "#1f2328"
+            val borderColor = if (isDark) "#30363d" else "#d0d7de"
+            val stripeBg = if (isDark) "#161b22" else "#f6f8fa"
+
+            val styledHtml = """
+                <!DOCTYPE html><html><head><meta charset="utf-8">
+                <style>
+                * { box-sizing: border-box; margin: 0; padding: 0; }
+                body { background: $bgColor; color: $fgColor; padding: 24px;
+                  font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+                  font-size: 15px; line-height: 1.6; }
+                table { border-collapse: collapse; width: 100%; margin: 0; }
+                th, td { border: 1px solid $borderColor; padding: 8px 14px; text-align: left; color: $fgColor; }
+                th { font-weight: 600; background: $stripeBg; }
+                tr:nth-child(2n) td { background: $stripeBg; }
+                svg { max-width: 100%; height: auto; }
+                .mermaid-container { text-align: center; }
+                </style></head><body>
+                ${if (type == "mermaid") "<div class=\"mermaid-container\">$html</div>" else html}
+                </body></html>
+            """.trimIndent()
+
+            // 创建离屏 WebView 渲染内容
+            val offscreen = WebView(this)
+            offscreen.settings.javaScriptEnabled = true
+            // 根据内容估算宽度：表格用 1080px，mermaid 用 800px
+            val renderWidth = if (type == "table") 1080 else 800
+            offscreen.layout(0, 0, renderWidth, 0)
+
+            offscreen.webViewClient = object : androidx.webkit.WebViewClientCompat() {
+                override fun onPageFinished(view: WebView, url: String) {
+                    // 等待布局完成后截图
+                    view.postDelayed({
+                        try {
+                            // 获取内容实际高度
+                            val contentHeight = view.computeVerticalScrollRange()
+                            val contentWidth = view.computeHorizontalScrollRange()
+                            val h = if (contentHeight > 0) contentHeight else 600
+                            val w = if (contentWidth > 0) minOf(contentWidth, renderWidth) else renderWidth
+
+                            val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                            val canvas = Canvas(bitmap)
+                            canvas.drawColor(if (isDark) 0xFF0D1117.toInt() else 0xFFFFFFFF.toInt())
+                            view.layout(0, 0, w, h)
+                            view.draw(canvas)
+
+                            // 异步保存
+                            Thread {
+                                try {
+                                    val saved = saveImageToGallery(bitmap, exportFileName(currentTitle) + "_${type}_$counter")
+                                    bitmap.recycle()
+                                    runOnUiThread {
+                                        if (saved != null) {
+                                            Toast.makeText(this@MainActivity,
+                                                getString(R.string.element_saved, saved.name), Toast.LENGTH_LONG).show()
+                                        } else {
+                                            Toast.makeText(this@MainActivity,
+                                                getString(R.string.element_save_failed, "无法创建文件"), Toast.LENGTH_LONG).show()
+                                        }
+                                    }
+                                } catch (e: Exception) {
+                                    bitmap.recycle()
+                                    runOnUiThread {
+                                        Toast.makeText(this@MainActivity,
+                                            getString(R.string.element_save_failed, e.message ?: ""), Toast.LENGTH_LONG).show()
+                                    }
+                                }
+                            }.start()
+                        } catch (e: Exception) {
+                            runOnUiThread {
+                                Toast.makeText(this@MainActivity,
+                                    getString(R.string.element_save_failed, e.message ?: ""), Toast.LENGTH_LONG).show()
+                            }
+                        }
+                        // 清理离屏 WebView
+                        (view.parent as? android.view.ViewGroup)?.removeView(view)
+                        view.destroy()
+                    }, 600)
+                }
+            }
+            // 添加到临时 ViewGroup 以触发 WebView 内部初始化（不替换 Activity 布局）
+            val tempContainer = android.widget.FrameLayout(this)
+            tempContainer.visibility = View.GONE
+            (window.decorView as android.view.ViewGroup).addView(tempContainer,
+                android.view.ViewGroup.LayoutParams(0, 0))
+            tempContainer.addView(offscreen,
+                android.view.ViewGroup.LayoutParams(renderWidth, android.view.ViewGroup.LayoutParams.WRAP_CONTENT))
+            offscreen.loadDataWithBaseURL(null, styledHtml, "text/html", "utf-8", null)
+        }
+    }
 
     // ---- 导出功能 ----
 
@@ -1541,17 +1758,18 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         }
     }
 
-    /** 生成导出文件名：以笔记名命名，仅去除文件系统不允许的字符 */
+    /** 生成导出文件名：日期前缀 + 笔记名，仅保留文件系统允许的字符 */
     private fun exportFileName(title: String): String {
+        val datePrefix = java.text.SimpleDateFormat("yyyyMMdd", Locale.ROOT).format(java.util.Date())
         var name = title.trim().ifEmpty { "document" }
         // 仅去除文件系统禁止的字符：\ / : * ? " < > | 和换行
         name = name.replace(FILENAME_UNSAFE_REGEX, "")
         // 去除首尾空格和点（Windows 不允许）
         name = name.trim(' ', '.')
         if (name.isEmpty()) name = "document"
-        // 限制长度防止文件名过长
-        if (name.length > 100) name = name.substring(0, 100)
-        return name
+        // 限制长度防止文件名过长（日期前缀8字符 + 下划线 + 名称）
+        if (name.length > 80) name = name.substring(0, 80)
+        return "${datePrefix}_${name}"
     }
 
     /** 通知系统媒体扫描器，使导出文件在「下载」中可见 */

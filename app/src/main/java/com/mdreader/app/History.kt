@@ -75,6 +75,6 @@ class History(context: Context) {
 
     companion object {
         private const val KEY = "items"
-        private const val MAX = 50
+        private const val MAX = 200
     }
 }

@@ -29,6 +29,8 @@ class MarkdownBridge(private val provider: Provider) {
         fun docTitle(): String
         /** 保存 Mermaid 图表 SVG 到本地文件 */
         fun saveMermaidImage(svgHtml: String)
+        /** 保存表格或图表元素为 PNG 图片（type="mermaid"|"table"，html 为元素 HTML） */
+        fun saveElementImage(type: String, html: String)
     }
 
     @JavascriptInterface fun getMarkdown(): String = provider.markdown()
@@ -64,4 +66,7 @@ class MarkdownBridge(private val provider: Provider) {
 
     @JavascriptInterface
     fun saveMermaidImage(svgHtml: String) = provider.saveMermaidImage(svgHtml)
+
+    @JavascriptInterface
+    fun saveElementImage(type: String, html: String) = provider.saveElementImage(type, html)
 }

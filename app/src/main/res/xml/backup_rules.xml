@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Backup rules for Android 12+ (API 31+): include SharedPreferences to persist settings across updates -->
+<data-extraction-rules>
+    <cloud-backup>
+        <include domain="sharedpref" path="mdreader_prefs.xml"/>
+        <include domain="sharedpref" path="mdreader_history.xml"/>
+        <include domain="sharedpref" path="mdreader_favorites.xml"/>
+        <include domain="sharedpref" path="mdreader_reading.xml"/>
+        <include domain="sharedpref" path="mdreader_annotations.xml"/>
+    </cloud-backup>
+    <device-transfer>
+        <include domain="sharedpref" path="mdreader_prefs.xml"/>
+        <include domain="sharedpref" path="mdreader_history.xml"/>
+        <include domain="sharedpref" path="mdreader_favorites.xml"/>
+        <include domain="sharedpref" path="mdreader_reading.xml"/>
+        <include domain="sharedpref" path="mdreader_annotations.xml"/>
+    </device-transfer>
+</data-extraction-rules>

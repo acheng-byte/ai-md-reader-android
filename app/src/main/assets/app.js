@@ -427,38 +427,46 @@
             try {
                 window.mermaid.render(divId + '-svg', graphDef).then(function (result) {
                     container.innerHTML = result.svg;
-                    // 长按保存 Mermaid 图表为 SVG
+                    // 单击预览 + 长按确认下载 Mermaid 图表
                     (function (c) {
                         var pressTimer = null;
                         var LONG_PRESS_MS = 500;
+                        var longPressFired = false;
+
                         function startPress(e) {
+                            longPressFired = false;
                             pressTimer = setTimeout(function () {
                                 pressTimer = null;
+                                longPressFired = true;
                                 var svg = c.querySelector('svg');
                                 if (!svg) return;
-                                // 视觉反馈：短暂高亮
                                 c.style.transition = 'background-color 0.15s';
                                 c.style.backgroundColor = 'rgba(9,105,218,0.15)';
-                                setTimeout(function () {
-                                    c.style.backgroundColor = '';
-                                }, 300);
-                                try {
-                                    var svgHtml = svg.outerHTML;
-                                    if (window.Android && window.Android.saveMermaidImage) {
-                                        window.Android.saveMermaidImage(svgHtml);
-                                    }
-                                } catch (ex) { /* bridge unavailable */ }
+                                setTimeout(function () { c.style.backgroundColor = ''; }, 300);
+                                showDownloadConfirm('mermaid');
                             }, LONG_PRESS_MS);
                         }
                         function cancelPress() {
                             if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
                         }
                         c.addEventListener('touchstart', startPress, { passive: true });
-                        c.addEventListener('touchend', cancelPress);
+                        c.addEventListener('touchend', function (e) {
+                            cancelPress();
+                            if (!longPressFired) {
+                                var svg = c.querySelector('svg');
+                                if (svg) openMermaidPreview(svg);
+                            }
+                        });
                         c.addEventListener('touchmove', cancelPress);
                         c.addEventListener('touchcancel', cancelPress);
                         c.addEventListener('mousedown', startPress);
-                        c.addEventListener('mouseup', cancelPress);
+                        c.addEventListener('mouseup', function (e) {
+                            cancelPress();
+                            if (!longPressFired) {
+                                var svg = c.querySelector('svg');
+                                if (svg) openMermaidPreview(svg);
+                            }
+                        });
                         c.addEventListener('mouseleave', cancelPress);
                     })(container);
                 }).catch(function (e) {
@@ -470,6 +478,273 @@
                 container.classList.add('mermaid-error');
             }
         });
+    }
+
+    /* ---------- 表格/图表预览与下载 ---------- */
+
+    /** 为预览覆盖层注入样式 */
+    (function injectPreviewCss() {
+        var css = [
+            '.mdreader-preview-overlay{position:fixed;top:0;left:0;right:0;bottom:0;z-index:9999;background:rgba(0,0,0,0.92);display:flex;flex-direction:column;}',
+            '.mdreader-preview-toolbar{display:flex;justify-content:flex-end;align-items:center;padding:8px 12px;gap:10px;background:rgba(0,0,0,0.5);}',
+            '.mdreader-preview-toolbar button{color:#fff;border:none;border-radius:6px;padding:8px 16px;font-size:14px;cursor:pointer;}',
+            '.mdreader-preview-dl-btn{background:#0969da;}',
+            '.mdreader-preview-close-btn{background:rgba(255,255,255,0.15);}',
+            '.mdreader-preview-body{flex:1;overflow:auto;display:flex;align-items:center;justify-content:center;padding:12px;}',
+            '.mdreader-preview-body img{max-width:100%;height:auto;transform-origin:center center;touch-action:none;}',
+            '.mdreader-confirm-overlay{position:fixed;top:0;left:0;right:0;bottom:0;z-index:10000;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;}',
+            '.mdreader-confirm-box{background:#fff;border-radius:12px;padding:24px;max-width:300px;width:85%;text-align:center;}',
+            '.mdreader-confirm-box p{margin:0 0 18px;font-size:16px;color:#333;}',
+            '.mdreader-confirm-box button{border:none;border-radius:8px;padding:10px 20px;font-size:14px;cursor:pointer;margin:0 6px;}',
+            '.mdreader-confirm-yes{background:#0969da;color:#fff;}',
+            '.mdreader-confirm-no{background:#e5e5e5;color:#333;}'
+        ].join('\n');
+        var style = document.createElement('style');
+        style.textContent = css;
+        document.head.appendChild(style);
+    })();
+
+    var previewOverlay = null;
+    var previewCurrentSvg = null;
+
+    /** 创建预览覆盖层 DOM（惰性创建，复用） */
+    function ensurePreviewOverlay() {
+        if (previewOverlay) return previewOverlay;
+        previewOverlay = document.createElement('div');
+        previewOverlay.className = 'mdreader-preview-overlay';
+
+        // 工具栏
+        var toolbar = document.createElement('div');
+        toolbar.className = 'mdreader-preview-toolbar';
+        var dlBtn = document.createElement('button');
+        dlBtn.className = 'mdreader-preview-dl-btn';
+        dlBtn.textContent = '保存图片';
+        dlBtn.onclick = function (e) { e.stopPropagation(); downloadFromPreview(); };
+        var closeBtn = document.createElement('button');
+        closeBtn.className = 'mdreader-preview-close-btn';
+        closeBtn.textContent = '关闭';
+        closeBtn.onclick = function (e) { e.stopPropagation(); closePreviewOverlay(); };
+        toolbar.appendChild(dlBtn);
+        toolbar.appendChild(closeBtn);
+        previewOverlay.appendChild(toolbar);
+
+        // 内容区
+        var body = document.createElement('div');
+        body.className = 'mdreader-preview-body';
+        previewOverlay.appendChild(body);
+
+        // 点击背景关闭
+        previewOverlay.addEventListener('click', function (e) {
+            if (e.target === previewOverlay || e.target === body) closePreviewOverlay();
+        });
+
+        document.body.appendChild(previewOverlay);
+        return previewOverlay;
+    }
+
+    /** 打开 Mermaid 预览 */
+    function openMermaidPreview(svgEl) {
+        var overlay = ensurePreviewOverlay();
+        var body = overlay.querySelector('.mdreader-preview-body');
+        body.innerHTML = '';
+        body.scrollTop = 0;
+        var svgHtml = svgEl.outerHTML;
+        previewCurrentSvg = svgHtml;
+        var img = new Image();
+        img.onload = function () {
+            body.appendChild(img);
+            setupPinchZoom(img);
+        };
+        img.onerror = function () {
+            // SVG 加载失败，直接显示 SVG HTML
+            var wrapper = document.createElement('div');
+            wrapper.innerHTML = svgHtml;
+            wrapper.style.textAlign = 'center';
+            body.appendChild(wrapper);
+        };
+        var blob = new Blob([svgHtml], { type: 'image/svg+xml;charset=utf-8' });
+        var url = URL.createObjectURL(blob);
+        img.src = url;
+        overlay.style.display = 'flex';
+    }
+
+    /** 打开表格预览 */
+    function openTablePreview(tableEl) {
+        var overlay = ensurePreviewOverlay();
+        var body = overlay.querySelector('.mdreader-preview-body');
+        body.innerHTML = '';
+        body.scrollTop = 0;
+        previewCurrentSvg = null;
+        // 克隆表格并添加样式
+        var clone = tableEl.cloneNode(true);
+        clone.style.cssText = 'border-collapse:collapse;width:auto;min-width:300px;max-width:95vw;margin:0 auto;font-size:14px;';
+        var cells = clone.querySelectorAll('th, td');
+        for (var i = 0; i < cells.length; i++) {
+            cells[i].style.border = '1px solid #555';
+            cells[i].style.padding = '8px 14px';
+            cells[i].style.color = '#e6edf3';
+        }
+        var ths = clone.querySelectorAll('th');
+        for (var j = 0; j < ths.length; j++) {
+            ths[j].style.background = 'rgba(255,255,255,0.1)';
+            ths[j].style.fontWeight = '600';
+        }
+        var wrapper = document.createElement('div');
+        wrapper.style.cssText = 'overflow:auto;max-width:95vw;max-height:85vh;';
+        wrapper.appendChild(clone);
+        body.appendChild(wrapper);
+        overlay.style.display = 'flex';
+    }
+
+    /** 关闭预览覆盖层 */
+    function closePreviewOverlay() {
+        if (previewOverlay) {
+            previewOverlay.style.display = 'none';
+            previewCurrentSvg = null;
+        }
+    }
+
+    /** 从预览覆盖层下载当前内容 */
+    function downloadFromPreview() {
+        try {
+            var b = bridge();
+            if (!b) return;
+            if (previewCurrentSvg && b.saveElementImage) {
+                b.saveElementImage('mermaid', previewCurrentSvg);
+            } else if (!previewCurrentSvg && b.saveElementImage) {
+                // 表格：获取当前预览中的表格 HTML
+                var body = previewOverlay.querySelector('.mdreader-preview-body');
+                var table = body.querySelector('table');
+                if (table) {
+                    b.saveElementImage('table', table.outerHTML);
+                }
+            }
+        } catch (e) { /* bridge unavailable */ }
+    }
+
+    /** 显示下载确认弹窗 */
+    function showDownloadConfirm(type) {
+        var msg = type === 'mermaid' ? '确定保存此图表为图片？' : '确定保存此表格为图片？';
+        var overlay = document.createElement('div');
+        overlay.className = 'mdreader-confirm-overlay';
+        overlay.innerHTML = '<div class="mdreader-confirm-box">' +
+            '<p>' + msg + '</p>' +
+            '<button class="mdreader-confirm-yes">确定保存</button>' +
+            '<button class="mdreader-confirm-no">取消</button></div>';
+        overlay.querySelector('.mdreader-confirm-no').onclick = function () {
+            document.body.removeChild(overlay);
+        };
+        overlay.querySelector('.mdreader-confirm-yes').onclick = function () {
+            document.body.removeChild(overlay);
+            try {
+                var b = bridge();
+                if (!b || !b.saveElementImage) return;
+                if (type === 'mermaid') {
+                    var containers = previewEl.querySelectorAll('.mermaid-container');
+                    // 保存最后一个被长按的 mermaid（简化：取第一个）
+                    var svg = previewEl.querySelector('.mermaid-container svg');
+                    if (svg) b.saveElementImage('mermaid', svg.outerHTML);
+                } else {
+                    var table = previewEl.querySelector('table');
+                    if (table) b.saveElementImage('table', table.outerHTML);
+                }
+            } catch (e) { /* bridge unavailable */ }
+        };
+        // 点击背景关闭
+        overlay.addEventListener('click', function (e) {
+            if (e.target === overlay) document.body.removeChild(overlay);
+        });
+        document.body.appendChild(overlay);
+    }
+
+    /** 为预览图片设置双指缩放 */
+    function setupPinchZoom(img) {
+        var scale = 1;
+        var startDist = 0;
+        var startScale = 1;
+
+        function getDist(t1, t2) {
+            var dx = t1.clientX - t2.clientX;
+            var dy = t1.clientY - t2.clientY;
+            return Math.sqrt(dx * dx + dy * dy);
+        }
+
+        img.addEventListener('touchstart', function (e) {
+            if (e.touches.length === 2) {
+                e.preventDefault();
+                startDist = getDist(e.touches[0], e.touches[1]);
+                startScale = scale;
+            }
+        }, { passive: false });
+
+        img.addEventListener('touchmove', function (e) {
+            if (e.touches.length === 2) {
+                e.preventDefault();
+                var dist = getDist(e.touches[0], e.touches[1]);
+                scale = Math.max(0.5, Math.min(5, startScale * (dist / startDist)));
+                img.style.transform = 'scale(' + scale + ')';
+            }
+        }, { passive: false });
+
+        img.addEventListener('touchend', function (e) {
+            if (e.touches.length < 2) {
+                if (scale < 1) { scale = 1; img.style.transform = 'scale(1)'; }
+            }
+        });
+
+        // 双击重置缩放
+        var lastTap = 0;
+        img.addEventListener('touchend', function (e) {
+            var now = Date.now();
+            if (now - lastTap < 300 && e.touches.length < 2) {
+                scale = 1;
+                img.style.transform = 'scale(1)';
+            }
+            lastTap = now;
+        });
+    }
+
+    /** 为预览区域内的表格添加单击预览 + 长按下载 */
+    function setupTableInteractions() {
+        var tables = previewEl.querySelectorAll('table');
+        for (var i = 0; i < tables.length; i++) {
+            (function (table) {
+                // 跳过 frontmatter 表格（不交互）
+                if (table.closest && table.closest('.frontmatter')) return;
+                var pressTimer = null;
+                var longPressFired = false;
+
+                function startPress(e) {
+                    longPressFired = false;
+                    pressTimer = setTimeout(function () {
+                        pressTimer = null;
+                        longPressFired = true;
+                        table.style.transition = 'background-color 0.15s';
+                        table.style.backgroundColor = 'rgba(9,105,218,0.1)';
+                        setTimeout(function () { table.style.backgroundColor = ''; }, 300);
+                        showDownloadConfirm('table');
+                    }, 500);
+                }
+                function cancelPress() {
+                    if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+                }
+
+                table.style.cursor = 'pointer';
+                table.addEventListener('touchstart', startPress, { passive: true });
+                table.addEventListener('touchend', function (e) {
+                    cancelPress();
+                    if (!longPressFired) openTablePreview(table);
+                });
+                table.addEventListener('touchmove', cancelPress);
+                table.addEventListener('touchcancel', cancelPress);
+                table.addEventListener('mousedown', startPress);
+                table.addEventListener('mouseup', function (e) {
+                    cancelPress();
+                    if (!longPressFired) openTablePreview(table);
+                });
+                table.addEventListener('mouseleave', cancelPress);
+            })(tables[i]);
+        }
     }
 
     /* ---------- 渲染缓存 ---------- */
@@ -521,6 +796,7 @@
         postprocessCallouts(previewEl, showFm);
         addCopyButtons();
         renderMermaid();
+        setupTableInteractions();
 
         codeBlockEl.removeAttribute('data-highlighted');
         codeBlockEl.className = 'language-markdown';
@@ -903,6 +1179,7 @@
         document.addEventListener('click', function (ev) {
             if (tocOverlay.classList.contains('open')) return;
             if (searchOverlay.style.display !== 'none') return;
+            if (typeof previewOverlay !== 'undefined' && previewOverlay && previewOverlay.style.display !== 'none') return;
             var t = ev.target;
             while (t && t !== document.body) {
                 var tag = t.tagName;
