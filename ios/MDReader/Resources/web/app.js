@@ -1,29 +1,14 @@
 /* MD 阅读器 iOS 前端 v1.9.7
-   基于 Android 版 app.js，添加 iOS WKWebView 桥接兼容层。
-   与 Android 的区别：
-   - 内容由原生 push：appSetContent(md) 注入
-   - JS→原生：window.webkit.messageHandlers.bridge.postMessage()
-   - 无同步 JavascriptInterface，用全局变量模拟 bridge() 返回值
-   - 目录/搜索由原生 SwiftUI 呈现，JS 中的 TOC/Search DOM 仅占位
-   支持：markdown-it、highlight.js、Mermaid、Obsidian 语法、
-   表格/图表预览、下载、脚注、Callout、Wikilink、字符统计等全部功能。 */
+   基于 Android 版 app.js，添加 iOS WKWebView 桥接兼容层。 */
 
 // ===== iOS Bridge 兼容层 =====
-var _iosMarkdown = '';
-var _iosTitle = '';
-var _iosSettings = {};
-var _iosScrollRatio = 0;
-var _iosMode = 'preview';
+var _iosMarkdown = '', _iosTitle = '', _iosSettings = {}, _iosScrollRatio = 0, _iosMode = 'preview';
 
 function _iosPost(msg) {
-    try {
-        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.bridge) {
-            window.webkit.messageHandlers.bridge.postMessage(msg);
-        }
-    } catch (e) { /* ignore */ }
+    try { if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.bridge)
+        window.webkit.messageHandlers.bridge.postMessage(msg); } catch (e) {}
 }
 
-// 仅 iOS：注入 Android bridge 模拟对象
 if (typeof window.Android === 'undefined') {
     window.Android = {
         getMarkdown: function () { return _iosMarkdown; },
@@ -47,33 +32,16 @@ if (typeof window.Android === 'undefined') {
     };
 }
 
-// iOS 原生调用入口
-window.appSetContent = function (text) {
-    _iosMarkdown = text || '';
-    if (typeof window.appRender === 'function') window.appRender();
-};
-window.appApplySettings = function (s) {
-    if (typeof s === 'string') { try { s = JSON.parse(s); } catch (e) { return; } }
-    _iosSettings = s || {};
-    if (typeof window._iosApplySettingsNow === 'function') window._iosApplySettingsNow(s);
-};
-window.appSetMode = function (mode) {
-    _iosMode = mode || 'preview';
-};
-window.appSetScrollRatio = function (ratio) {
-    _iosScrollRatio = ratio || 0;
-};
-window.appSetTitle = function (title) {
-    _iosTitle = title || '';
-};
+window.appSetContent = function (text) { _iosMarkdown = text || ''; if (typeof window.appRender === 'function') window.appRender(); };
+window.appApplySettings = function (s) { if (typeof s === 'string') { try { s = JSON.parse(s); } catch (e) { return; } } _iosSettings = s || {}; if (typeof window._iosApplySettingsNow === 'function') window._iosApplySettingsNow(s); };
+window.appSetMode = function (mode) { _iosMode = mode || 'preview'; };
+window.appSetScrollRatio = function (ratio) { _iosScrollRatio = ratio || 0; };
+window.appSetTitle = function (title) { _iosTitle = title || ''; };
 
 (function () {
     'use strict';
 
-    // iOS 无 Android WebViewAssetLoader，使用相对路径
-    var VAULT_BASE = (typeof window.webkit !== 'undefined' && window.webkit.messageHandlers)
-        ? 'vault/'
-        : 'https://appassets.androidplatform.net/vault/';
+    var VAULT_BASE = (typeof window.webkit !== 'undefined' && window.webkit.messageHandlers) ? 'vault/' : 'https://appassets.androidplatform.net/vault/';
 
     /* ---------- 任务列表渲染规则 ---------- */
     function patchTaskLists(mdInstance) {
@@ -952,6 +920,36 @@ window.appSetTitle = function (title) {
     /* ---------- 渲染缓存 ---------- */
     var renderCache = { source: null, html: null };
 
+    /* ---------- 标题匹配（用于隐藏文件名 H1）---------- */
+    function _titleMatch(h1Text, fileTitle) {
+        if (!h1Text) return false;
+        var h = h1Text.toLowerCase().trim();
+        // 没有文件名信息：隐藏文档最开头的第一个 H1（它是正文第一个子元素）
+        if (!fileTitle) {
+            return true;
+        }
+        // 去除文件扩展名
+        var t = fileTitle.replace(/\.[^.]+$/, '').toLowerCase().trim();
+        if (!t) return true;
+        // 去除常见分隔符后的标准化版本（去空格、标点）
+        var normalize = function (s) { return s.replace(/[\s\-_—–·.:：,，、。!！?？()（）\[\]{}<>\/\\|@#$%^&*+=~`'"]+/g, ''); };
+        var hNorm = normalize(h);
+        var tNorm = normalize(t);
+        // 策略1：精确匹配
+        if (h === t) return true;
+        // 策略2：标准化后精确匹配（忽略空格和标点差异）
+        if (hNorm === tNorm) return true;
+        // 策略3：H1 以文件名开头（如 "笔记 完整版" 匹配 "笔记"）
+        if (h.indexOf(t) === 0 && h.length < t.length + 15) return true;
+        // 策略4：文件名包含 H1 文本（如文件名 "读书笔记" H1 "笔记"，H1 至少2字符）
+        if (h.length >= 2 && t.indexOf(h) === 0) return true;
+        // 策略5：标准化后 H1 以文件名开头
+        if (hNorm.indexOf(tNorm) === 0 && hNorm.length < tNorm.length + 15) return true;
+        // 策略6：标准化后文件名包含 H1
+        if (hNorm.length >= 2 && tNorm.indexOf(hNorm) === 0) return true;
+        return false;
+    }
+
     /* ---------- 渲染 ---------- */
     function render() {
         var rawSource = '';
@@ -977,38 +975,20 @@ window.appSetTitle = function (title) {
 
         // 隐藏文件名一级标题（工具栏已显示文件名，正文中重复的一级标题默认隐藏）
         if (currentSettings.hideTitleHeading) {
-            var firstH1 = previewEl.querySelector('h1');
-            if (firstH1) {
-                var shouldHide = false;
-                try {
-                    var title = '';
-                    var b = bridge();
-                    if (b && b.getTitle) title = b.getTitle() || '';
-                } catch (e) { title = ''; }
-                var h1Text = firstH1.textContent.trim();
-                if (title) {
-                    // 比较时去除文件扩展名，忽略大小写
-                    var titleBase = title.replace(/\.[^.]+$/, '');
-                    var h1Lower = h1Text.toLowerCase();
-                    var titleLower = titleBase.toLowerCase();
-                    // 策略1：精确匹配（去扩展名）
-                    if (h1Lower === titleLower) {
-                        shouldHide = true;
-                    }
-                    // 策略2：H1 以文件名开头（如 "笔记 - 完整版" 匹配 "笔记"）
-                    else if (h1Lower.indexOf(titleLower) === 0 && h1Text.length < titleBase.length + 20) {
-                        shouldHide = true;
-                    }
-                    // 策略3：文件名包含 H1 文本（如文件名 "读书笔记整理" H1 "读书笔记"）
-                    else if (titleLower.indexOf(h1Lower) === 0 && h1Text.length >= 2) {
-                        shouldHide = true;
-                    }
-                } else {
-                    // 没有标题信息时，默认隐藏第一个 H1（工具栏已显示文件名）
-                    shouldHide = true;
-                }
-                if (shouldHide) {
-                    firstH1.style.display = 'none';
+            try {
+                var title = '';
+                var b = bridge();
+                if (b && b.getTitle) title = b.getTitle() || '';
+            } catch (e) { title = ''; }
+            // 遍历所有 H1，隐藏与文件名匹配的那个（通常只有第一个）
+            var allH1 = previewEl.querySelectorAll('h1');
+            for (var hi = 0; hi < allH1.length; hi++) {
+                var h1 = allH1[hi];
+                var h1Text = h1.textContent.trim();
+                if (!h1Text) continue;
+                if (_titleMatch(h1Text, title)) {
+                    h1.style.display = 'none';
+                    break; // 只隐藏第一个匹配的
                 }
             }
         }
@@ -1621,37 +1601,12 @@ window.appSetTitle = function (title) {
     window.appShowCharCount = showCharCount;
 
     /* ---------- 首屏初始化 ---------- */
-    try {
-        var b0 = bridge();
-        if (b0) {
-            var settingsStr = b0.getSettingsJson ? b0.getSettingsJson() : null;
-            if (settingsStr) {
-                var s0 = JSON.parse(settingsStr);
-                applySettings(s0);
-                initMermaid(!!s0.dark);
-            } else {
-                initMermaid(false);
-            }
-            if (b0.getInitialMode) setMode(b0.getInitialMode());
-        } else {
-            initMermaid(false);
-        }
-    } catch (e) { initMermaid(false); }
-
+    try { var b0 = bridge(); if (b0) { var ss = b0.getSettingsJson ? b0.getSettingsJson() : null; if (ss) { var s0 = JSON.parse(ss); applySettings(s0); initMermaid(!!s0.dark); } else { initMermaid(false); } if (b0.getInitialMode) setMode(b0.getInitialMode()); } else { initMermaid(false); } } catch (e) { initMermaid(false); }
     setupCenterTap();
     window.addEventListener('scroll', onScroll, { passive: true });
-    document.addEventListener('visibilitychange', function () {
-        if (document.visibilityState === 'hidden') flushSave();
-    });
+    document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden') flushSave(); });
     window.addEventListener('pagehide', flushSave);
-
     var isIos = (typeof window.webkit !== 'undefined' && window.webkit.messageHandlers);
-    if (!isIos) {
-        render();
-    } else {
-        window._iosBridgeActive = true;
-        if (_iosMarkdown) render();
-    }
-
+    if (!isIos) { render(); } else { window._iosBridgeActive = true; if (_iosMarkdown) render(); }
     _iosPost({ type: 'ready' });
 })();
