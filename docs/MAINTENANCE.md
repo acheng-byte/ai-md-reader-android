@@ -1,6 +1,6 @@
 # AI MD Reader Android — 维护与开发手册
 
-> 版本：v1.9.7 | 更新日期：2026-07-12
+> 版本：v1.9.8 | 更新日期：2026-07-12
 > 仓库：https://github.com/acheng-byte/ai-md-reader-android
 
 ---

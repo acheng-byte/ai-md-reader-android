@@ -1,4 +1,4 @@
-/* MD 阅读器前端 v1.7.0：markdown-it 渲染、highlight.js 高亮、目录/标题折叠、
+/* MD 阅读器前端 v1.9.8：markdown-it 渲染、highlight.js 高亮、目录/标题折叠、
    Obsidian wikilink 兼容、Mermaid 图表、YAML frontmatter、全文/全库搜索、
    任务列表、视频/图片嵌入、引用文档内联展开、异步全库搜索、
    ==高亮==、#标签、脚注、更多 Obsidian 格式。 */
@@ -533,13 +533,25 @@
     /** 为预览覆盖层注入样式 */
     (function injectPreviewCss() {
         var css = [
-            '.mdreader-preview-overlay{position:fixed;top:0;left:0;right:0;bottom:0;z-index:9999;background:rgba(0,0,0,0.92);display:flex;flex-direction:column;}',
-            '.mdreader-preview-toolbar{display:flex;justify-content:flex-end;align-items:center;padding:8px 12px;gap:10px;background:rgba(0,0,0,0.5);}',
-            '.mdreader-preview-toolbar button{color:#fff;border:none;border-radius:6px;padding:8px 16px;font-size:14px;cursor:pointer;}',
-            '.mdreader-preview-dl-btn{background:#0969da;}',
-            '.mdreader-preview-close-btn{background:rgba(255,255,255,0.15);}',
-            '.mdreader-preview-body{flex:1;overflow:auto;display:flex;align-items:center;justify-content:center;padding:12px;}',
+            /* 预览覆盖层 — 默认浅色，跟随 body.dark 切换深色 */
+            '.mdreader-preview-overlay{position:fixed;top:0;left:0;right:0;bottom:0;z-index:9999;background:rgba(245,245,247,0.96);display:flex;flex-direction:column;}',
+            '.mdreader-preview-toolbar{display:flex;justify-content:flex-end;align-items:center;padding:8px 12px;gap:10px;background:rgba(0,0,0,0.06);}',
+            '.mdreader-preview-toolbar button{color:#333;border:none;border-radius:6px;padding:8px 16px;font-size:14px;cursor:pointer;}',
+            '.mdreader-preview-dl-btn{background:#0969da;color:#fff;}',
+            '.mdreader-preview-close-btn{background:rgba(0,0,0,0.1);}',
+            '.mdreader-preview-body{flex:1;overflow:auto;display:flex;align-items:center;justify-content:center;padding:12px;background:#fff;border-radius:8px;margin:8px;box-shadow:0 2px 12px rgba(0,0,0,0.12);}',
             '.mdreader-preview-body img{max-width:100%;height:auto;transform-origin:center center;touch-action:none;}',
+            '.mdreader-preview-body table{border-collapse:collapse;width:auto;min-width:300px;max-width:95vw;margin:0 auto;font-size:14px;}',
+            '.mdreader-preview-body table th,.mdreader-preview-body table td{border:1px solid #ccc;padding:8px 14px;color:#333;}',
+            '.mdreader-preview-body table th{background:#f5f5f5;font-weight:600;}',
+            'body.dark .mdreader-preview-overlay{background:rgba(20,20,22,0.96);}',
+            'body.dark .mdreader-preview-toolbar{background:rgba(255,255,255,0.06);}',
+            'body.dark .mdreader-preview-toolbar button{color:#e6edf3;}',
+            'body.dark .mdreader-preview-close-btn{background:rgba(255,255,255,0.12);}',
+            'body.dark .mdreader-preview-body{background:#1e1e20;box-shadow:0 2px 12px rgba(0,0,0,0.4);}',
+            'body.dark .mdreader-preview-body table th,body.dark .mdreader-preview-body table td{border:1px solid #555;color:#e6edf3;}',
+            'body.dark .mdreader-preview-body table th{background:#2a2a2e;}',
+            /* 确认弹窗 */
             '.mdreader-confirm-overlay{position:fixed;top:0;left:0;right:0;bottom:0;z-index:10000;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;}',
             '.mdreader-confirm-box{background:#fff;border-radius:12px;padding:24px;max-width:300px;width:85%;text-align:center;}',
             '.mdreader-confirm-box p{margin:0 0 18px;font-size:16px;color:#333;}',
@@ -624,20 +636,8 @@
         body.innerHTML = '';
         body.scrollTop = 0;
         previewCurrentSvg = null;
-        // 克隆表格并添加样式
+        // 克隆表格（样式由 CSS 控制，跟随主题）
         var clone = tableEl.cloneNode(true);
-        clone.style.cssText = 'border-collapse:collapse;width:auto;min-width:300px;max-width:95vw;margin:0 auto;font-size:14px;';
-        var cells = clone.querySelectorAll('th, td');
-        for (var i = 0; i < cells.length; i++) {
-            cells[i].style.border = '1px solid #555';
-            cells[i].style.padding = '8px 14px';
-            cells[i].style.color = '#e6edf3';
-        }
-        var ths = clone.querySelectorAll('th');
-        for (var j = 0; j < ths.length; j++) {
-            ths[j].style.background = 'rgba(255,255,255,0.1)';
-            ths[j].style.fontWeight = '600';
-        }
         var wrapper = document.createElement('div');
         wrapper.style.cssText = 'overflow:auto;max-width:95vw;max-height:85vh;';
         wrapper.appendChild(clone);

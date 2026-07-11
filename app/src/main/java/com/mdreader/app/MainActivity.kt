@@ -1361,7 +1361,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         runOnUiThread {
             val baseName = exportFileName(currentTitle)
             val counter = ++mermaidSaveCounter
-            val fileName = "${baseName}_${type}_$counter.png"
+            val fileName = "${baseName}_${type}_$counter"
 
             // 构建带样式的 HTML，确保渲染效果与正文一致
             val isDark = prefs.isDark(this)
@@ -1370,8 +1370,15 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             val borderColor = if (isDark) "#30363d" else "#d0d7de"
             val stripeBg = if (isDark) "#161b22" else "#f6f8fa"
 
+            // 清理 HTML 内容，移除可能导致渲染问题的字符
+            val cleanHtml = html.replace("</body>", "").replace("</html>", "")
+                .replace("<!DOCTYPE html>", "").replace("<html>", "").replace("<head>", "")
+                .replace("</head>", "").replace("<body>", "")
+
             val styledHtml = """
-                <!DOCTYPE html><html><head><meta charset="utf-8">
+                <!DOCTYPE html>
+                <html><head><meta charset="utf-8">
+                <meta name="viewport" content="width=${if (type == "table") 1080 else 800}, initial-scale=1">
                 <style>
                 * { box-sizing: border-box; margin: 0; padding: 0; }
                 body { background: $bgColor; color: $fgColor; padding: 24px;
@@ -1384,46 +1391,53 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                 svg { max-width: 100%; height: auto; }
                 .mermaid-container { text-align: center; }
                 </style></head><body>
-                ${if (type == "mermaid") "<div class=\"mermaid-container\">$html</div>" else html}
+                ${if (type == "mermaid") "<div class=\"mermaid-container\">$cleanHtml</div>" else cleanHtml}
                 </body></html>
             """.trimIndent()
 
             // 创建离屏 WebView 渲染内容
             val offscreen = WebView(this)
             offscreen.settings.javaScriptEnabled = true
+            offscreen.settings.useWideViewPort = true
+            offscreen.settings.loadWithOverviewMode = true
+            offscreen.setBackgroundColor(if (isDark) 0xFF0D1117.toInt() else 0xFFFFFFFF.toInt())
             // 根据内容估算宽度：表格用 1080px，mermaid 用 800px
             val renderWidth = if (type == "table") 1080 else 800
-            offscreen.layout(0, 0, renderWidth, 0)
 
             offscreen.webViewClient = object : androidx.webkit.WebViewClientCompat() {
                 override fun onPageFinished(view: WebView, url: String) {
-                    // 等待布局完成后截图
+                    // 等待布局完成后截图（增加延迟确保渲染完成）
                     view.postDelayed({
                         try {
-                            // 使用 WebView 的 contentHeight（WebView 专有 API）获取内容高度
+                            // 强制测量和布局
+                            view.measure(
+                                android.view.View.MeasureSpec.makeMeasureSpec(renderWidth, android.view.View.MeasureSpec.EXACTLY),
+                                android.view.View.MeasureSpec.makeMeasureSpec(0, android.view.View.MeasureSpec.UNSPECIFIED)
+                            )
+                            view.layout(0, 0, view.measuredWidth, view.measuredHeight)
+
+                            // 获取内容高度，确保不为 0
                             val contentHeight = view.contentHeight
-                            val h = if (contentHeight > 0) contentHeight else 600
-                            val w = renderWidth
+                            val h = if (contentHeight > 0) {
+                                (contentHeight * view.scale).toInt().coerceAtLeast(view.measuredHeight)
+                            } else {
+                                view.measuredHeight.coerceAtLeast(600)
+                            }
+                            val w = view.measuredWidth
 
                             val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
                             val canvas = Canvas(bitmap)
                             canvas.drawColor(if (isDark) 0xFF0D1117.toInt() else 0xFFFFFFFF.toInt())
-                            view.layout(0, 0, w, h)
                             view.draw(canvas)
 
                             // 异步保存
                             Thread {
                                 try {
-                                    val saved = saveImageToGallery(bitmap, exportFileName(currentTitle) + "_${type}_$counter")
+                                    saveImageToGallery(bitmap, fileName)
                                     bitmap.recycle()
                                     runOnUiThread {
-                                        if (saved != null) {
-                                            Toast.makeText(this@MainActivity,
-                                                getString(R.string.element_saved, saved.name), Toast.LENGTH_LONG).show()
-                                        } else {
-                                            Toast.makeText(this@MainActivity,
-                                                getString(R.string.element_save_failed, "无法创建文件"), Toast.LENGTH_LONG).show()
-                                        }
+                                        Toast.makeText(this@MainActivity,
+                                            getString(R.string.element_saved, "$fileName.png"), Toast.LENGTH_LONG).show()
                                     }
                                 } catch (e: Exception) {
                                     bitmap.recycle()
@@ -1442,7 +1456,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                         // 清理离屏 WebView
                         (view.parent as? android.view.ViewGroup)?.removeView(view)
                         view.destroy()
-                    }, 600)
+                    }, 1000)
                 }
             }
             // 添加到临时 ViewGroup 以触发 WebView 内部初始化（不替换 Activity 布局）
