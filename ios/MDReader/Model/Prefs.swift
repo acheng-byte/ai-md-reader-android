@@ -1,7 +1,7 @@
 import Foundation
 import SwiftUI
 
-/// 阅读显示设置（字号 / 行间距 / 段间距 / 主题 / 视图模式），持久化到 UserDefaults。
+/// 阅读显示设置（字号 / 行间距 / 段间距 / 主题 / 护眼 / 字体 / 视图模式等），持久化到 UserDefaults。
 /// 与 Android 端 Prefs 对齐。作为 ObservableObject 供设置面板绑定。
 @MainActor
 final class Prefs: ObservableObject {
@@ -22,6 +22,16 @@ final class Prefs: ObservableObject {
     @Published var themeMode: Int { didSet { d.set(themeMode, forKey: K.theme) } }
     /// "preview" / "code"
     @Published var viewMode: String { didSet { d.set(viewMode, forKey: K.mode) } }
+    /// 护眼模式
+    @Published var eyeProtection: Bool { didSet { d.set(eyeProtection, forKey: K.eyeProtection) } }
+    /// 字体: "default" / "serif" / "mono"
+    @Published var fontFamily: String { didSet { d.set(fontFamily, forKey: K.fontFamily) } }
+    /// 显示 Frontmatter
+    @Published var showFrontmatter: Bool { didSet { d.set(showFrontmatter, forKey: K.showFrontmatter) } }
+    /// 显示引用块样式
+    @Published var showCitations: Bool { didSet { d.set(showCitations, forKey: K.showCitations) } }
+    /// 隐藏文件名一级标题
+    @Published var hideTitleHeading: Bool { didSet { d.set(hideTitleHeading, forKey: K.hideTitleHeading) } }
 
     init() {
         fontSize = d.object(forKey: K.font) as? Double ?? Self.defaultFont
@@ -29,6 +39,11 @@ final class Prefs: ObservableObject {
         paraGap = d.object(forKey: K.para) as? Double ?? Self.defaultPara
         themeMode = d.object(forKey: K.theme) as? Int ?? 0
         viewMode = d.string(forKey: K.mode) ?? "preview"
+        eyeProtection = d.object(forKey: K.eyeProtection) as? Bool ?? false
+        fontFamily = d.string(forKey: K.fontFamily) ?? "default"
+        showFrontmatter = d.object(forKey: K.showFrontmatter) as? Bool ?? true
+        showCitations = d.object(forKey: K.showCitations) as? Bool ?? true
+        hideTitleHeading = d.object(forKey: K.hideTitleHeading) as? Bool ?? true
     }
 
     func isDark(systemDark: Bool) -> Bool {
@@ -46,8 +61,14 @@ final class Prefs: ObservableObject {
         let lh = (lineHeight * 10).rounded() / 10
         let pg = (paraGap * 10).rounded() / 10
         return String(
-            format: "{\"fontSize\":%d,\"lineHeight\":%.1f,\"paraGap\":%.1f,\"dark\":%@}",
-            f, lh, pg, dark ? "true" : "false"
+            format: "{\"fontSize\":%d,\"lineHeight\":%.1f,\"paraGap\":%.1f,\"dark\":%@,\"eyeProtection\":%@,\"fontFamily\":\"%@\",\"showFrontmatter\":%@,\"showCitations\":%@,\"hideTitleHeading\":%@}",
+            f, lh, pg,
+            dark ? "true" : "false",
+            eyeProtection ? "true" : "false",
+            fontFamily,
+            showFrontmatter ? "true" : "false",
+            showCitations ? "true" : "false",
+            hideTitleHeading ? "true" : "false"
         )
     }
 
@@ -57,11 +78,26 @@ final class Prefs: ObservableObject {
         paraGap = Self.defaultPara
     }
 
+    func resetAll() {
+        resetTypography()
+        themeMode = 0
+        eyeProtection = false
+        fontFamily = "default"
+        showFrontmatter = true
+        showCitations = true
+        hideTitleHeading = true
+    }
+
     private enum K {
         static let font = "font_size"
         static let line = "line_height"
         static let para = "para_gap"
         static let theme = "theme_mode"
         static let mode = "view_mode"
+        static let eyeProtection = "eye_protection"
+        static let fontFamily = "font_family"
+        static let showFrontmatter = "show_frontmatter"
+        static let showCitations = "show_citations"
+        static let hideTitleHeading = "hide_title_heading"
     }
 }

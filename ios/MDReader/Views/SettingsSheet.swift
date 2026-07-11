@@ -8,7 +8,7 @@ struct SettingsSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("字号") {
+                Section("排版") {
                     HStack(spacing: 12) {
                         Image(systemName: "textformat.size.smaller").foregroundStyle(.secondary)
                         Slider(value: $prefs.fontSize, in: Prefs.fontRange, step: 1)
@@ -45,6 +45,26 @@ struct SettingsSheet: View {
                     }
                     .pickerStyle(.segmented)
                     .onChange(of: prefs.themeMode) { _, _ in onChange() }
+                }
+                Section("显示") {
+                    Toggle("护眼模式", isOn: $prefs.eyeProtection)
+                        .onChange(of: prefs.eyeProtection) { _, _ in onChange() }
+
+                    Picker("字体", selection: $prefs.fontFamily) {
+                        Text("默认").tag("default")
+                        Text("宋体").tag("serif")
+                        Text("等宽").tag("mono")
+                    }
+                    .onChange(of: prefs.fontFamily) { _, _ in onChange() }
+
+                    Toggle("显示 Frontmatter", isOn: $prefs.showFrontmatter)
+                        .onChange(of: prefs.showFrontmatter) { _, _ in onChange() }
+
+                    Toggle("显示引用块样式", isOn: $prefs.showCitations)
+                        .onChange(of: prefs.showCitations) { _, _ in onChange() }
+
+                    Toggle("隐藏文件名标题", isOn: $prefs.hideTitleHeading)
+                        .onChange(of: prefs.hideTitleHeading) { _, _ in onChange() }
                 }
                 Section {
                     Button("恢复默认排版") {

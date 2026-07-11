@@ -4,6 +4,8 @@
     --line-height: 1.7;
     --para-gap: 1em;
     --max-width: 880px;
+    --font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC",
+        "Helvetica Neue", Arial, sans-serif;
 
     --bg: #ffffff;
     --fg: #1f2328;
@@ -30,14 +32,39 @@ body.dark {
     --hr: #21262d;
 }
 
+/* 护眼模式：暖色羊皮纸背景 */
+body.eye-protection {
+    --bg: #f5ecd7;
+    --fg: #5b4636;
+    --muted: #8b7355;
+    --border: #d4c4a0;
+    --code-bg: #ede0c8;
+    --code-fg: #5b4636;
+    --quote-fg: #8b7355;
+    --link: #8b5e3c;
+    --table-stripe: #ede0c8;
+    --hr: #d4c4a0;
+}
+body.dark.eye-protection {
+    --bg: #1a1610;
+    --fg: #d4c4a0;
+    --muted: #a08c6a;
+    --border: #3d3528;
+    --code-bg: #231e16;
+    --code-fg: #d4c4a0;
+    --quote-fg: #a08c6a;
+    --link: #c49a6c;
+    --table-stripe: #231e16;
+    --hr: #3d3528;
+}
+
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
 
 body {
     background: var(--bg);
     color: var(--fg);
-    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC",
-        "Helvetica Neue", Arial, sans-serif;
+    font-family: var(--font-family);
     font-size: var(--font-size);
     line-height: var(--line-height);
     -webkit-text-size-adjust: 100%;
@@ -278,3 +305,335 @@ body[data-mode="code"] #code { display: block; }
 .toc-item.lvl-4 { padding-left: 64px; }
 .toc-item.lvl-5 { padding-left: 80px; }
 .toc-item.lvl-6 { padding-left: 96px; }
+
+/* ============ Frontmatter 元数据 ============ */
+.frontmatter {
+    margin-bottom: var(--para-gap);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--code-bg);
+}
+.frontmatter table {
+    width: 100%;
+    border-collapse: collapse;
+    display: table;
+    margin: 0;
+}
+.frontmatter .fm-key {
+    font-weight: 600;
+    color: var(--muted);
+    font-size: 0.85em;
+    white-space: nowrap;
+    padding: 5px 12px;
+    border: 1px solid var(--border);
+    width: 30%;
+}
+.frontmatter .fm-val {
+    padding: 5px 12px;
+    font-size: 0.88em;
+    border: 1px solid var(--border);
+    word-break: break-word;
+}
+.frontmatter .fm-tag {
+    display: inline-block;
+    background: var(--link);
+    color: #fff;
+    border-radius: 4px;
+    padding: 1px 7px;
+    font-size: 0.8em;
+    margin: 2px 3px 2px 0;
+    opacity: 0.85;
+}
+
+/* ============ Mermaid ============ */
+.mermaid-container {
+    overflow-x: auto;
+    text-align: center;
+    padding: 12px 0;
+    margin-bottom: var(--para-gap);
+}
+.mermaid-container svg { max-width: 100%; height: auto; }
+.mermaid-error {
+    color: var(--muted);
+    font-size: 0.85em;
+    padding: 8px 12px;
+    border: 1px dashed var(--border);
+    border-radius: 6px;
+    white-space: pre-wrap;
+}
+
+/* ============ Wikilinks ============ */
+.markdown-body a[href^="mdreader://"] {
+    color: var(--link);
+    text-decoration: none;
+    border-bottom: 1px dotted var(--link);
+}
+.markdown-body a[href^="mdreader://"]:active { opacity: 0.7; }
+
+/* ============ 搜索覆层 ============ */
+.search-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 2000;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    box-shadow: 0 2px 12px rgba(0,0,0,0.18);
+}
+.search-bar {
+    display: flex;
+    align-items: center;
+    padding: 8px 10px;
+    gap: 4px;
+}
+.search-bar input {
+    flex: 1;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 0.95em;
+    background: var(--code-bg);
+    color: var(--fg);
+    outline: none;
+}
+.search-bar input:focus { border-color: var(--link); }
+.search-count {
+    font-size: 0.82em;
+    color: var(--muted);
+    min-width: 3em;
+    text-align: center;
+}
+.search-btn {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--fg);
+    font-size: 1em;
+    padding: 5px 8px;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    line-height: 1;
+}
+.search-btn:active { background: var(--code-bg); }
+.search-btn.active { background: var(--link); color: #fff; border-color: var(--link); }
+.search-vault-toggle { font-size: 0.9em; }
+
+/* Search highlight marks */
+mark.search-mark {
+    background: #ffea82;
+    color: inherit;
+    padding: 0;
+    border-radius: 2px;
+}
+body.dark mark.search-mark { background: #5a4a00; color: #ffe580; }
+mark.search-mark-active {
+    background: #ff9d1a;
+    outline: 2px solid #ff9d1a;
+}
+body.dark mark.search-mark-active { background: #b36e00; outline-color: #b36e00; }
+
+/* Vault search results */
+.vault-results {
+    max-height: 45vh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    border-top: 1px solid var(--border);
+}
+.vault-result-item {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+.vault-result-item:active { background: var(--code-bg); }
+.vault-result-name {
+    font-weight: 600;
+    font-size: 0.92em;
+    color: var(--fg);
+    margin-bottom: 2px;
+}
+.vault-result-excerpt {
+    font-size: 0.82em;
+    color: var(--muted);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+.vault-searching, .vault-no-results, .vault-no-vault {
+    padding: 16px;
+    color: var(--muted);
+    font-size: 0.9em;
+    text-align: center;
+}
+
+/* ============ 视频嵌入 ============ */
+.video-embed {
+    margin: 1em 0;
+    text-align: center;
+}
+.video-embed video {
+    max-width: 100%;
+    max-height: 60vh;
+    border-radius: 8px;
+    background: #000;
+}
+.video-caption {
+    font-size: 0.82em;
+    color: var(--muted);
+    margin-top: 4px;
+}
+
+/* ============ 任务列表 ============ */
+.task-list-item {
+    list-style: none;
+    margin-left: -1.4em;
+}
+.task-checkbox {
+    margin-right: 0.4em;
+    cursor: default;
+    accent-color: var(--link);
+    width: 14px;
+    height: 14px;
+    vertical-align: middle;
+    position: relative;
+    top: -1px;
+}
+
+/* ============ 引用文档展开块 ============ */
+.embed-block {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin: 1em 0;
+    overflow: hidden;
+}
+.embed-header {
+    display: flex;
+    align-items: center;
+    padding: 10px 14px;
+    background: var(--code-bg);
+    cursor: pointer;
+    gap: 8px;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+}
+.embed-header:active { opacity: 0.75; }
+.embed-icon { font-size: 1em; }
+.embed-name {
+    flex: 1;
+    font-size: 0.9em;
+    font-weight: 600;
+    color: var(--fg);
+}
+.embed-toggle {
+    color: var(--muted);
+    font-size: 1.2em;
+    line-height: 1;
+}
+.embed-content {
+    border-top: 1px solid var(--border);
+    padding: 12px 16px;
+    background: var(--bg);
+}
+.embed-inner {
+    font-size: 0.92em;
+}
+.embed-loading, .embed-error {
+    padding: 12px;
+    color: var(--muted);
+    font-size: 0.88em;
+    text-align: center;
+}
+.embed-error { color: #e05252; }
+
+/* ============ Obsidian Callout ============ */
+.markdown-body .callout {
+    border-left: 4px solid var(--link);
+    border-radius: 6px;
+    background: var(--code-bg);
+    padding: 0;
+    margin-bottom: var(--para-gap);
+    color: inherit;
+    overflow: hidden;
+}
+.markdown-body .callout-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    font-weight: 600;
+    font-size: 0.9em;
+    background: rgba(0,0,0,0.06);
+    border-bottom: 1px solid var(--border);
+}
+body.dark .markdown-body .callout-title {
+    background: rgba(255,255,255,0.06);
+}
+.markdown-body .callout-icon {
+    font-style: normal;
+    font-size: 1em;
+    min-width: 1.2em;
+    text-align: center;
+}
+.markdown-body .callout > *:not(.callout-title) {
+    padding: 8px 14px;
+    margin: 0;
+}
+.markdown-body .callout > *:not(.callout-title):last-child {
+    padding-bottom: 10px;
+}
+.markdown-body .callout-warning, .markdown-body .callout-caution { border-left-color: #e8a000; }
+.markdown-body .callout-danger,  .markdown-body .callout-error   { border-left-color: #e05252; }
+.markdown-body .callout-success, .markdown-body .callout-check,
+.markdown-body .callout-done                                      { border-left-color: #3cb978; }
+.markdown-body .callout-tip,     .markdown-body .callout-hint    { border-left-color: #7c6af7; }
+.markdown-body .callout-note                                      { border-left-color: #4a9eff; }
+
+/* ============ 引用块隐藏开关（callout 不受影响）============ */
+body.hide-citations .markdown-body blockquote:not(.callout) {
+    border-left: none;
+    padding: 0;
+    margin: 0;
+    color: inherit;
+    background: none;
+    font-style: normal;
+}
+
+/* ============ Obsidian ==高亮== ============ */
+.ob-highlight {
+    background: #fff176;
+    color: #1f2328;
+    border-radius: 2px;
+    padding: 0 2px;
+}
+body.dark .ob-highlight {
+    background: #5a5200;
+    color: #e6edf3;
+}
+
+/* ============ Obsidian #标签 ============ */
+.ob-tag {
+    display: inline-block;
+    font-size: 0.82em;
+    color: var(--link);
+    background: color-mix(in srgb, var(--link) 12%, transparent);
+    border-radius: 10px;
+    padding: 1px 7px;
+    margin: 0 1px;
+    vertical-align: middle;
+    white-space: nowrap;
+}
+
+/* ============ 脚注 ============ */
+.footnote-ref sup, .footnote-ref a {
+    font-size: 0.75em;
+    color: var(--link);
+    text-decoration: none;
+}
+.footnotes-sep { margin: 2em 0 1em; }
+.footnotes { font-size: 0.88em; color: var(--muted); }
+.footnotes ol { padding-left: 1.5em; }
+.footnote-item { margin: 0.4em 0; }
+.footnote-backref { color: var(--link); text-decoration: none; margin-left: 4px; }

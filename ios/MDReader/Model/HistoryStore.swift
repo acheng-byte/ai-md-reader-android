@@ -13,7 +13,7 @@ final class HistoryStore {
 
     private let d = UserDefaults.standard
     private let key = "history_items_v1"
-    private let maxItems = 50
+    private let maxItems = 200
 
     func all() -> [HistoryEntry] {
         guard let data = d.data(forKey: key),

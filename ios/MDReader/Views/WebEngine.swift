@@ -2,7 +2,7 @@ import WebKit
 import UIKit
 
 /// 包装 WKWebView：加载本地 viewer.html，提供 push 内容/设置/模式、目录拉取、滚动定位，
-/// 并通过 messageHandlers 接收 JS 消息（复制 / 中央点击 / 模式变化 / ready）。
+/// 并通过 messageHandlers 接收 JS 消息（复制 / 中央点击 / 模式变化 / 保存元素图片 / ready 等）。
 @MainActor
 final class WebEngine: NSObject {
 
@@ -35,8 +35,10 @@ final class WebEngine: NSObject {
     }
 
     func setContent(_ markdown: String) { eval("window.appSetContent(\(jsString(markdown)))") }
+    func setTitle(_ title: String) { eval("window.appSetTitle(\(jsString(title)))") }
     func applySettings(_ json: String) { eval("window.appApplySettings(\(json))") }
     func setMode(_ mode: String) { eval("window.appSetMode('\(mode)')") }
+    func setScrollRatio(_ ratio: Double) { eval("window.appSetScrollRatio(\(ratio))") }
     func scrollTo(_ id: String) { eval("window.appScrollTo('\(escapeSingleQuoted(id))')") }
 
     func getToc(_ completion: @escaping ([TocItem]) -> Void) {
@@ -47,6 +49,14 @@ final class WebEngine: NSObject {
                 completion([]); return
             }
             completion(items)
+        }
+    }
+
+    /// 获取当前 Markdown 内容（从 JS 全局变量读取）
+    func getMarkdown(_ completion: @escaping (String) -> Void) {
+        guard loaded else { completion(""); return }
+        webView.evaluateJavaScript("window._iosMarkdown") { result, _ in
+            completion(result as? String ?? "")
         }
     }
 
@@ -81,6 +91,15 @@ extension WebEngine: WKNavigationDelegate {
                  decidePolicyFor navigationAction: WKNavigationAction,
                  decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         guard let url = navigationAction.request.url else { decisionHandler(.allow); return }
+
+        // mdreader:// wikilink 处理
+        if url.scheme == "mdreader" {
+            let name = url.host ?? url.lastPathComponent
+            onMessage?(["type": "openWiki", "name": name])
+            decisionHandler(.cancel)
+            return
+        }
+
         if url.isFileURL { decisionHandler(.allow); return }   // 本地 viewer / 资源
         // 外部链接交给系统打开
         if let scheme = url.scheme, ["http", "https", "mailto", "tel"].contains(scheme) {
