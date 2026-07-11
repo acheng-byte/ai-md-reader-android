@@ -1347,11 +1347,10 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                     // 等待布局完成后截图
                     view.postDelayed({
                         try {
-                            // 获取内容实际高度
-                            val contentHeight = view.computeVerticalScrollRange()
-                            val contentWidth = view.computeHorizontalScrollRange()
+                            // 使用 WebView 的 contentHeight（WebView 专有 API）获取内容高度
+                            val contentHeight = view.contentHeight
                             val h = if (contentHeight > 0) contentHeight else 600
-                            val w = if (contentWidth > 0) minOf(contentWidth, renderWidth) else renderWidth
+                            val w = renderWidth
 
                             val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
                             val canvas = Canvas(bitmap)
