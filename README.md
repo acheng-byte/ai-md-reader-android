@@ -8,22 +8,15 @@
 
 现在越来越多内容从 AI 对话、代码助手、知识库、会议纪要和自动化工作流里直接产出为 Markdown。电脑上阅读很方便，但手机上常常缺一个足够轻、足够直接、能从微信和文件管理器顺手打开 `.md` 的本地阅读器。**MD阅读器**解决的就是这个小而高频的痛点：把 Markdown 文件在手机上安静、清楚、离线地读起来。
 
-## 最新版本 v1.8.0
+## 最新版本 v1.9.4
 
-v1.8.0 是功能最完善的版本，新增了护眼模式、字体切换、PDF 支持、导出功能等：
+v1.9.4 是功能最完善的版本，涵盖 v1.9.0 至 v1.9.4 的完整更新：
 
-- **新增**：护眼模式 — 暖色羊皮纸背景，减轻长时间阅读的视觉疲劳
-- **新增**：字体切换 — 支持默认 / 宋体 / 等宽三种字体
-- **新增**：PDF 文件打开与阅读（逐页渲染为图片）
-- **新增**：导出长图片（保存至 `Download/MD阅读器/Picture`）
-- **新增**：导出 HTML（保存至 `Download/MD阅读器/HTML`，包含完整样式）
-- **新增**：PDF 文件关联 — 系统文件管理器可直接用本 App 打开 PDF
-- **新增**：设置中手动检查更新按钮
-- **修复**：历史记录单条删除闪退
-- **修复**：导出长图不完整、HTML 丢失格式
-- **修复**：编辑 DOC 后再打开其他 DOC 解析失败
-- **优化**：DOC 图片过滤不支持的格式（EMF/WMF）
-- **优化**：自动更新检查超时时间延长，提高成功率
+- **v1.9.4**：表格/图表全屏预览 + 双指缩放、预览内下载、长按确认下载、源码模式直接编辑 + 自动保存、设置持久化（更新不丢失）、历史 200 条
+- **v1.9.3**：Mermaid 图表长按下载、长图导出优化（32768px）、设置面板分区
+- **v1.9.2**：隐藏文件名标题、渲染缓存、设置开关
+- **v1.9.1**：全面性能优化（防抖、异步保存、内存缓存）
+- **v1.9.0**：阅读标注、HTML 导出修复、Vault 图片嵌入
 
 [下载最新 APK](https://github.com/acheng-byte/ai-md-reader-android/releases/latest) · [查看 GitHub Releases](https://github.com/acheng-byte/ai-md-reader-android/releases)
 
@@ -48,13 +41,17 @@ v1.8.0 是功能最完善的版本，新增了护眼模式、字体切换、PDF 
 | 明暗主题 | 支持跟随系统、浅色、深色 |
 | 文档目录 | 自动生成标题目录，点击后平滑跳转 |
 | 标题折叠 | 预览模式下点击标题即可折叠或展开对应章节 |
-| 打开历史 | 记录最近打开文件，支持单条删除和清空 |
+| 打开历史 | 记录最近 200 条打开文件，支持单条删除和清空 |
 | 收藏夹 | 收藏会把文档复制到应用目录，原文件被删除后仍可打开 |
 | 断点续读 | 自动记录阅读位置，下次打开回到原位 |
 | 文内搜索 | 在当前文档中搜索关键词，高亮显示并逐个定位 |
 | 全库搜索 | 在 Vault 文件夹中搜索所有文档（需先设置 Vault） |
 | 转发分享 | 一键把完整文档经系统分享转发到微信等应用 |
-| 编辑模式 | 内置 Markdown 编辑器，保存后立即刷新预览 |
+| 表格/图表预览 | 单击表格或 Mermaid 图表全屏预览，支持双指缩放 |
+| 图表/表格下载 | 预览内下载或长按确认保存为 PNG |
+| 源码直接编辑 | 源码模式即可编辑，自动保存 |
+| 阅读标注 | 手指绘画标注，多色多模式 |
+| 编辑模式 | 已合并至源码模式，源码模式下可直接编辑并自动保存 |
 | 导出长图片 | 滚动截图拼接，保存至 `Download/MD阅读器/Picture` |
 | 导出 HTML | 包含完整样式的独立 HTML 文件，保存至 `Download/MD阅读器/HTML` |
 | 自动更新 | 启动时自动检查 GitHub Release 更新，也可手动检查 |
@@ -93,7 +90,12 @@ adb install -r app/build/outputs/apk/release/app-release.apk
 
 | 版本 | 类型 | 更新重点 |
 | --- | --- | --- |
-| [v1.8.0](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v1.8.0) | 最新版本 | 护眼模式、字体切换、PDF 支持、导出长图/HTML、检查更新按钮、PDF 文件关联 |
+| [v1.9.4](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v1.9.4) | 最新版本 | 表格/图表预览下载、源码直接编辑、设置持久化、历史 200 条 |
+| [v1.9.3](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v1.9.3) | 功能增强 | Mermaid 下载、长图导出优化、设置面板分区 |
+| [v1.9.2](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v1.9.2) | 功能增强 | 隐藏文件名标题、渲染缓存、设置开关 |
+| [v1.9.1](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v1.9.1) | 性能优化 | 全面性能优化（防抖/异步/缓存） |
+| [v1.9.0](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v1.9.0) | 功能增强 | 阅读标注、HTML 导出、Vault 嵌入 |
+| [v1.8.0](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v1.8.0) | 功能增强 | 护眼模式、字体切换、PDF 支持、导出长图/HTML、检查更新按钮、PDF 文件关联 |
 | [v1.7.3](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v1.7.3) | Bug 修复 | 修复历史面板双删除 bug、MediaScanner URI 修复 |
 | [v1.7.2](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v1.7.2) | Bug 修复 | DOC 图片过滤、导出 HTML 修复、导出路径优化、编辑 DOC 保护 |
 | [v1.7.1](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v1.7.1) | Bug 修复 | 编译依赖修复、DOC 图片提取、导出长图线程修复、DOCX 表格渲染 |
@@ -111,13 +113,14 @@ adb install -r app/build/outputs/apk/release/app-release.apk
 1. 工具栏常显五项：转发、目录、源码 / 预览切换、收藏切换、更多菜单（⋮）。
 2. 从"更多菜单 ⋮ → 打开"用系统文件选择器选择文档文件。
 3. 点击"目录"，从左侧目录快速跳转到标题位置。
-4. 在预览模式下点击标题，可折叠或展开该章节内容；代码块右上角可一键复制。
+4. 在预览模式下点击标题，可折叠或展开该章节内容；代码块右上角可一键复制。单击表格或 Mermaid 图表可全屏预览，支持双指缩放。
 5. 点击屏幕中央区域，调出"显示设置"（字号、行间距、段间距、主题、护眼模式、字体、Vault 文件夹、检查更新）。
 6. 点击搜索图标，在当前文档中搜索关键词；也可切换为全库搜索。
 7. 点击工具栏星形图标"收藏"当前文档；在"更多菜单 ⋮ → 收藏夹 / 打开历史"中管理。
 8. 通过"更多菜单 ⋮ → 导出长图片 / 导出 HTML"导出文档。
 9. 下次重新打开同一文档时，会自动回到上次阅读位置。
-10. 在微信收到 `.md` 文件时，选择"用其他应用打开"，再选择"MD阅读器"。
+10. 源码模式下可直接编辑 Markdown 内容，退出时自动保存，无需单独的编辑模式。
+11. 在微信收到 `.md` 文件时，选择"用其他应用打开"，再选择"MD阅读器"。
 
 ## 从源码构建
 
@@ -169,13 +172,17 @@ adb install -r app/build/outputs/apk/release/app-release.apk
 │     │   ├─ History.kt / HistoryAdapter.kt
 │     │   ├─ Favorites.kt
 │     │   ├─ ReadingProgress.kt
-│     │   └─ DocStatus.kt
+│     │   ├─ DocStatus.kt
+│     │   └─ AnnotationOverlay.kt
 │     ├─ res/
+│     │  └─ xml/
+│     │     └─ backup_rules.xml
 │     └─ assets/
 │        ├─ viewer.html
 │        ├─ app.js
 │        ├─ app.css
 │        └─ lib/
+├─ ios/
 ├─ .github/workflows/
 │  ├─ android-ci.yml
 │  └─ release.yml
