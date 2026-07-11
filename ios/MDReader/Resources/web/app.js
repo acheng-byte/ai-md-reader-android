@@ -738,6 +738,81 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
         return clone.outerHTML;
     }
 
+    /** 将表格元素直接渲染为 PNG data URL（纯 JS Canvas 绘制） */
+    function _captureTableToPng(tableEl) {
+        var dpr = window.devicePixelRatio || 1;
+        var isDark = document.body.classList.contains('dark');
+        var bg = isDark ? '#0d1117' : '#ffffff';
+        var fg = isDark ? '#e6edf3' : '#1f2328';
+        var border = isDark ? '#30363d' : '#d0d7de';
+        var hdrBg = isDark ? '#161b22' : '#f6f8fa';
+        var padX = 14, padY = 10;
+        var fontSize = 15;
+        var font = fontSize + 'px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif';
+
+        var canvas = document.createElement('canvas');
+        var ctx = canvas.getContext('2d');
+        ctx.font = font;
+
+        var rows = [];
+        var trs = tableEl.querySelectorAll('tr');
+        for (var i = 0; i < trs.length; i++) {
+            var cells = [];
+            var tds = trs[i].querySelectorAll('th, td');
+            for (var j = 0; j < tds.length; j++) {
+                cells.push({ text: tds[j].textContent.trim(), isHeader: tds[j].tagName === 'TH' });
+            }
+            if (cells.length > 0) rows.push(cells);
+        }
+        if (rows.length === 0) return null;
+
+        var numCols = 0;
+        for (var i = 0; i < rows.length; i++) { if (rows[i].length > numCols) numCols = rows[i].length; }
+
+        var colWidths = [];
+        for (var c = 0; c < numCols; c++) colWidths[c] = 0;
+        for (var i = 0; i < rows.length; i++) {
+            for (var j = 0; j < rows[i].length; j++) {
+                var w = ctx.measureText(rows[i][j].text).width;
+                if (w > colWidths[j]) colWidths[j] = w;
+            }
+        }
+        for (var c = 0; c < numCols; c++) colWidths[c] += padX * 2;
+
+        var totalW = 0;
+        for (var c = 0; c < numCols; c++) totalW += colWidths[c];
+        totalW += 1;
+        var rowH = fontSize + padY * 2;
+        var totalH = rows.length * rowH + 1;
+
+        canvas.width = Math.ceil(totalW * dpr);
+        canvas.height = Math.ceil(totalH * dpr);
+        ctx.scale(dpr, dpr);
+
+        ctx.fillStyle = bg;
+        ctx.fillRect(0, 0, totalW, totalH);
+
+        for (var i = 0; i < rows.length; i++) {
+            var y = i * rowH;
+            if (i > 0 && i % 2 === 0) { ctx.fillStyle = hdrBg; ctx.fillRect(0, y, totalW, rowH); }
+            if (rows[i].length > 0 && rows[i][0].isHeader) { ctx.fillStyle = hdrBg; ctx.fillRect(0, y, totalW, rowH); }
+            var x = 0;
+            for (var j = 0; j < rows[i].length; j++) {
+                var cw = colWidths[j] || 60;
+                ctx.strokeStyle = border; ctx.lineWidth = 1;
+                ctx.strokeRect(x + 0.5, y + 0.5, cw, rowH);
+                ctx.fillStyle = fg;
+                ctx.font = (rows[i][j].isHeader ? '600 ' : '') + fontSize + 'px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(rows[i][j].text, x + padX, y + rowH / 2, cw - padX * 2);
+                x += cw;
+            }
+        }
+        ctx.strokeStyle = border; ctx.lineWidth = 1;
+        ctx.strokeRect(0.5, 0.5, totalW, totalH);
+        return canvas.toDataURL('image/png');
+    }
+
     /** 将 SVG 元素通过 Canvas 转换为 PNG base64（data URL）。
      *  完全在 JS 端完成渲染，避免离屏 WebView draw(canvas) 空白问题。 */
     function _svgToPngBase64(svgEl) {
@@ -779,7 +854,12 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
             } else {
                 var tbody = previewOverlay.querySelector('.mdreader-preview-body');
                 var table = tbody.querySelector('table');
-                if (table && b.saveElementImage) b.saveElementImage('table', table.outerHTML);
+                if (table) {
+                    var dataUrl = _captureTableToPng(table);
+                    if (dataUrl && b.savePngBase64) {
+                        b.savePngBase64(dataUrl.replace(/^data:image\/png;base64,/, ''), 'table');
+                    }
+                }
             }
         } catch (e) { /* bridge unavailable */ }
     }
@@ -805,7 +885,12 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
                     var svg = el && el.querySelector ? el.querySelector('svg') : null;
                     if (svg && b.saveMermaidImage) b.saveMermaidImage(inlineSvgStyles(svg));
                 } else {
-                    if (el && b.saveElementImage) b.saveElementImage('table', el.outerHTML);
+                    if (el) {
+                        var dataUrl = _captureTableToPng(el);
+                        if (dataUrl && b.savePngBase64) {
+                            b.savePngBase64(dataUrl.replace(/^data:image\/png;base64,/, ''), 'table');
+                        }
+                    }
                 }
             } catch (e) { /* bridge unavailable */ }
         };

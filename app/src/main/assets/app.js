@@ -707,6 +707,110 @@
         return clone.outerHTML;
     }
 
+    /** 将表格元素直接渲染为 PNG data URL（纯 JS Canvas 绘制，完全绕过离屏 WebView）。
+     *  解决 Android WebView view.draw(canvas) 输出空白的问题。 */
+    function _captureTableToPng(tableEl) {
+        var dpr = window.devicePixelRatio || 1;
+        var isDark = document.body.classList.contains('dark');
+        var bg = isDark ? '#0d1117' : '#ffffff';
+        var fg = isDark ? '#e6edf3' : '#1f2328';
+        var border = isDark ? '#30363d' : '#d0d7de';
+        var hdrBg = isDark ? '#161b22' : '#f6f8fa';
+        var padX = 14, padY = 10;
+        var fontSize = 15;
+        var font = fontSize + 'px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif';
+
+        var canvas = document.createElement('canvas');
+        var ctx = canvas.getContext('2d');
+        ctx.font = font;
+
+        // 提取表格数据
+        var rows = [];
+        var trs = tableEl.querySelectorAll('tr');
+        for (var i = 0; i < trs.length; i++) {
+            var cells = [];
+            var tds = trs[i].querySelectorAll('th, td');
+            for (var j = 0; j < tds.length; j++) {
+                cells.push({
+                    text: tds[j].textContent.trim(),
+                    isHeader: tds[j].tagName === 'TH'
+                });
+            }
+            if (cells.length > 0) rows.push(cells);
+        }
+        if (rows.length === 0) return null;
+
+        // 计算列数
+        var numCols = 0;
+        for (var i = 0; i < rows.length; i++) {
+            if (rows[i].length > numCols) numCols = rows[i].length;
+        }
+
+        // 测量每列最大文本宽度
+        var colWidths = [];
+        for (var c = 0; c < numCols; c++) colWidths[c] = 0;
+        for (var i = 0; i < rows.length; i++) {
+            for (var j = 0; j < rows[i].length; j++) {
+                var w = ctx.measureText(rows[i][j].text).width;
+                if (w > colWidths[j]) colWidths[j] = w;
+            }
+        }
+        // 每列加 padding
+        for (var c = 0; c < numCols; c++) colWidths[c] += padX * 2;
+
+        var totalW = 0;
+        for (var c = 0; c < numCols; c++) totalW += colWidths[c];
+        totalW += 1; // 右边框
+
+        var rowH = fontSize + padY * 2;
+        var totalH = rows.length * rowH + 1; // 底边框
+
+        // 设置 canvas 物理尺寸（高清）
+        canvas.width = Math.ceil(totalW * dpr);
+        canvas.height = Math.ceil(totalH * dpr);
+        ctx.scale(dpr, dpr);
+
+        // 背景
+        ctx.fillStyle = bg;
+        ctx.fillRect(0, 0, totalW, totalH);
+
+        // 逐行绘制
+        for (var i = 0; i < rows.length; i++) {
+            var y = i * rowH;
+            // 行背景（偶数行斑马纹）
+            if (i > 0 && i % 2 === 0) {
+                ctx.fillStyle = hdrBg;
+                ctx.fillRect(0, y, totalW, rowH);
+            }
+            // 表头背景
+            if (rows[i].length > 0 && rows[i][0].isHeader) {
+                ctx.fillStyle = hdrBg;
+                ctx.fillRect(0, y, totalW, rowH);
+            }
+
+            var x = 0;
+            for (var j = 0; j < rows[i].length; j++) {
+                var cw = colWidths[j] || 60;
+                // 单元格边框
+                ctx.strokeStyle = border;
+                ctx.lineWidth = 1;
+                ctx.strokeRect(x + 0.5, y + 0.5, cw, rowH);
+                // 文字
+                ctx.fillStyle = fg;
+                ctx.font = (rows[i][j].isHeader ? '600 ' : '') + fontSize + 'px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(rows[i][j].text, x + padX, y + rowH / 2, cw - padX * 2);
+                x += cw;
+            }
+        }
+        // 外边框
+        ctx.strokeStyle = border;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(0.5, 0.5, totalW, totalH);
+
+        return canvas.toDataURL('image/png');
+    }
+
     /** 将 SVG 元素通过 Canvas 转换为 PNG base64（data URL）。
      *  完全在 JS 端完成渲染，避免离屏 WebView draw(canvas) 空白问题。 */
     function _svgToPngBase64(svgEl) {
@@ -750,11 +854,14 @@
                     b.saveMermaidImage(previewCurrentSvg);
                 }
             } else {
-                // 表格：走原生离屏 WebView 渲染
+                // 表格：JS Canvas 直接绘制，绕过离屏 WebView draw(canvas) 空白问题
                 var tbody = previewOverlay.querySelector('.mdreader-preview-body');
                 var table = tbody.querySelector('table');
-                if (table && b.saveElementImage) {
-                    b.saveElementImage('table', table.outerHTML);
+                if (table) {
+                    var dataUrl = _captureTableToPng(table);
+                    if (dataUrl && b.savePngBase64) {
+                        b.savePngBase64(dataUrl.replace(/^data:image\/png;base64,/, ''), 'table');
+                    }
                 }
             }
         } catch (e) { /* bridge unavailable */ }
@@ -783,7 +890,13 @@
                         b.saveMermaidImage(inlineSvgStyles(svg));
                     }
                 } else {
-                    if (el && b.saveElementImage) b.saveElementImage('table', el.outerHTML);
+                    // 表格：JS Canvas 直接绘制 PNG
+                    if (el) {
+                        var dataUrl = _captureTableToPng(el);
+                        if (dataUrl && b.savePngBase64) {
+                            b.savePngBase64(dataUrl.replace(/^data:image\/png;base64,/, ''), 'table');
+                        }
+                    }
                 }
             } catch (e) { /* bridge unavailable */ }
         };
