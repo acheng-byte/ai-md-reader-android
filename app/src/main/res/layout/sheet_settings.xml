@@ -229,7 +229,7 @@
             android:id="@+id/switch_frontmatter"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:checked="true" />
+            android:checked="false" />
     </LinearLayout>
 
     <!-- 显示引用样式 (Blockquote) -->
@@ -249,7 +249,7 @@
             android:id="@+id/switch_citations"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:checked="true" />
+            android:checked="false" />
     </LinearLayout>
 
     <!-- Vault 文件夹 -->

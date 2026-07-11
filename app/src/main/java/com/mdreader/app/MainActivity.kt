@@ -74,6 +74,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
     private val annotationModes = listOf("free", "highlight", "circle", "wavy")
     private var colorIndex = 0
     private var modeIndex = 0
+    private var annotationSaveRunnable: Runnable? = null
 
     // Cancel token: increment before each new load; JS render checks if it's stale
     private val loadGeneration = AtomicInteger(0)
@@ -81,6 +82,10 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
     // Debounce renderCurrent
     private val renderHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private var pendingRender: Runnable? = null
+
+    // Debounce settings apply (slider drag fires dozens of events per second)
+    private val settingsHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var pendingSettings: Runnable? = null
 
     private val openPicker =
         registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
@@ -363,7 +368,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             js("window.appRestoreScroll && window.appRestoreScroll()")
         }
         pendingRender = r
-        renderHandler.postDelayed(r, 50)
+        renderHandler.postDelayed(r, 150)
     }
 
     private fun applySettingsToWeb() {
@@ -375,6 +380,21 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             binding.editText.setBackgroundColor(bg)
             binding.editScroll.setBackgroundColor(bg)
         }
+    }
+
+    /** 防抖 300ms：滑块拖拽期间只更新标签，松手后才批量写 SP + 推送 WebView */
+    private fun debouncedApplySettings(sheet: SheetSettingsBinding) {
+        updateLabels(sheet)
+        pendingSettings?.let { settingsHandler.removeCallbacks(it) }
+        val r = Runnable {
+            pendingSettings = null
+            prefs.fontSize = sheet.sliderFont.value
+            prefs.lineHeight = sheet.sliderLine.value
+            prefs.paraGap = sheet.sliderPara.value
+            applySettingsToWeb()
+        }
+        pendingSettings = r
+        settingsHandler.postDelayed(r, 300)
     }
 
     private fun js(code: String) {
@@ -618,18 +638,25 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                 if (strokes.isNotEmpty()) overlay.loadStrokes(strokes)
             }
             overlay.onStrokesChanged = {
-                // 自动保存标注
-                currentUri?.let { uri ->
-                    annotations.save(uri, overlay.exportStrokes())
+                // 异步防抖保存标注，避免文件 IO 阻塞主线程
+                settingsHandler.removeCallbacks(annotationSaveRunnable)
+                annotationSaveRunnable = Runnable {
+                    currentUri?.let { uri ->
+                        val strokesCopy = overlay.exportStrokes()
+                        Thread { annotations.save(uri, strokesCopy) }.start()
+                    }
                 }
+                settingsHandler.postDelayed(annotationSaveRunnable, 500)
             }
             Toast.makeText(this, R.string.annotate_on, Toast.LENGTH_SHORT).show()
         } else {
             overlay.annotationEnabled = false
             overlay.visibility = View.GONE
-            // 保存标注
+            // 取消待执行的防抖保存，立即异步保存最终状态
+            settingsHandler.removeCallbacks(annotationSaveRunnable)
             currentUri?.let { uri ->
-                annotations.save(uri, overlay.exportStrokes())
+                val strokesCopy = overlay.exportStrokes()
+                Thread { annotations.save(uri, strokesCopy) }.start()
                 Toast.makeText(this, R.string.annotate_saved, Toast.LENGTH_SHORT).show()
             }
             Toast.makeText(this, R.string.annotate_off, Toast.LENGTH_SHORT).show()
@@ -770,7 +797,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
 
     private fun shareFileName(title: String): String {
         var base = title.trim().ifEmpty { "document" }
-        base = base.replace(Regex("[\\\\/:*?\"<>|\\r\\n]"), "_")
+        base = base.replace(FILENAME_UNSAFE_REGEX, "_")
         if (!base.endsWith(".md", true) && !base.endsWith(".markdown", true)) base += ".md"
         return base
     }
@@ -858,9 +885,9 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
 
         sheet.btnSelectVault.setOnClickListener { vaultPicker.launch(null) }
 
-        sheet.sliderFont.addOnChangeListener { _, value, _ -> prefs.fontSize = value; updateLabels(sheet); applySettingsToWeb() }
-        sheet.sliderLine.addOnChangeListener { _, value, _ -> prefs.lineHeight = value; updateLabels(sheet); applySettingsToWeb() }
-        sheet.sliderPara.addOnChangeListener { _, value, _ -> prefs.paraGap = value; updateLabels(sheet); applySettingsToWeb() }
+        sheet.sliderFont.addOnChangeListener { _, _, _ -> debouncedApplySettings(sheet) }
+        sheet.sliderLine.addOnChangeListener { _, _, _ -> debouncedApplySettings(sheet) }
+        sheet.sliderPara.addOnChangeListener { _, _, _ -> debouncedApplySettings(sheet) }
         sheet.toggleTheme.addOnButtonCheckedListener { _, checkedId, isChecked ->
             if (isChecked) {
                 prefs.themeMode = when (checkedId) {
@@ -997,8 +1024,15 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         } catch (e: Exception) { if (hasPerm) DocStatus.DELETED else DocStatus.EXPIRED }
     }
 
+    override fun onPause() {
+        super.onPause()
+        reading.flush()
+    }
+
     override fun onDestroy() {
         pendingRender?.let { renderHandler.removeCallbacks(it) }
+        pendingSettings?.let { settingsHandler.removeCallbacks(it) }
+        reading.flush()
         binding.webview.apply { (parent as? android.view.ViewGroup)?.removeView(this); destroy() }
         super.onDestroy()
     }
@@ -1310,8 +1344,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         val vaultUri = prefs.vaultUri ?: return html
         if (!html.contains(vaultBase)) return html
 
-        val imgRegex = Regex("""(<img[^>]+src=")([^"]+)("[^>]*>)""")
-        return imgRegex.replace(html) { match ->
+        return IMG_SRC_REGEX.replace(html) { match ->
             val prefix = match.groupValues[1]
             val src = match.groupValues[2]
             val suffix = match.groupValues[3]
@@ -1443,7 +1476,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
     private fun exportFileName(title: String): String {
         var name = title.trim().ifEmpty { "document" }
         // 仅去除文件系统禁止的字符：\ / : * ? " < > | 和换行
-        name = name.replace(Regex("[\\\\/:*?\"<>|\\r\\n]"), "")
+        name = name.replace(FILENAME_UNSAFE_REGEX, "")
         // 去除首尾空格和点（Windows 不允许）
         name = name.trim(' ', '.')
         if (name.isEmpty()) name = "document"
@@ -1470,6 +1503,11 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         private const val ASSET_HOST = "appassets.androidplatform.net"
         private const val VIEWER_URL = "https://$ASSET_HOST/assets/viewer.html"
         private const val REQ_WRITE_STORAGE = 1001
+
+        /** 预编译 Regex：文件名非法字符替换 */
+        private val FILENAME_UNSAFE_REGEX = Regex("""[\\/:*?"<>|\r\n]""")
+        /** 预编译 Regex：HTML 中 img 标签 src 提取 */
+        private val IMG_SRC_REGEX = Regex("""(<img[^>]+src=")([^"]+)("[^>]*>)""")
 
         /** 导出 HTML 时内嵌的样式表 */
         private val EXPORT_CSS = """

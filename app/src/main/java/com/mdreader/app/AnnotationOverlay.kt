@@ -13,6 +13,11 @@ import android.view.View
  * 透明覆盖层，用于在 WebView 上手绘标注。
  * 支持模式：free（自由画笔）、highlight（荧光笔半透明）、circle（不规则圈）、wavy（波浪线）。
  * 坐标归一化存储，适配不同屏幕尺寸。
+ *
+ * 性能优化：
+ * - 开启硬件加速层 (LAYER_TYPE_HARDWARE)
+ * - 每个笔画在创建时预计算 parsedColor 和 pixelWidth，onDraw 直接使用缓存值
+ * - ACTION_MOVE 时节流 invalidate()，避免每帧都重绘
  */
 class AnnotationOverlay @JvmOverloads constructor(
     context: Context,
@@ -37,6 +42,8 @@ class AnnotationOverlay @JvmOverloads constructor(
             field = value
             isEnabled = value
             visibility = if (value) VISIBLE else GONE
+            // 开启硬件加速，提升 onDraw 性能
+            setLayerType(if (value) LAYER_TYPE_HARDWARE else LAYER_TYPE_NONE, null)
         }
 
     /** 笔画列表（归一化坐标） */
@@ -54,12 +61,19 @@ class AnnotationOverlay @JvmOverloads constructor(
         strokeJoin = Paint.Join.ROUND
     }
 
+    private val density: Float by lazy { resources.displayMetrics.density }
+
+    /** 预计算了颜色 int 和像素宽度的笔画数据，onDraw 直接使用，不再重复解析 */
     private data class StrokeData(
         val mode: String,
-        val color: String,
-        val width: Float,
+        val color: String,       // 原始颜色字符串，用于导出
+        val width: Float,        // 原始 dp 宽度，用于导出
         val path: Path,
-        val points: MutableList<Pair<Float, Float>> = mutableListOf()
+        val points: MutableList<Pair<Float, Float>> = mutableListOf(),
+        /** 预计算：解析后的 ARGB 颜色值 */
+        val cachedColor: Int = 0,
+        /** 预计算：像素单位的笔画宽度 */
+        val cachedWidth: Float = 0f
     )
 
     init {
@@ -67,23 +81,19 @@ class AnnotationOverlay @JvmOverloads constructor(
         annotationEnabled = false
     }
 
+    private fun computeColor(mode: String, colorStr: String): Int = try {
+        val c = Color.parseColor(colorStr)
+        if (mode == "highlight") Color.argb(80, Color.red(c), Color.green(c), Color.blue(c)) else c
+    } catch (e: Exception) {
+        Color.RED
+    }
+
+    private fun computeWidth(mode: String, widthDp: Float): Float =
+        if (mode == "highlight") widthDp * density * 4f else widthDp * density
+
     private fun updatePaint() {
-        paint.color = try {
-            if (drawMode == "highlight") {
-                // 荧光笔：半透明
-                Color.parseColor(drawColor).let { c ->
-                    Color.argb(80, Color.red(c), Color.green(c), Color.blue(c))
-                }
-            } else {
-                Color.parseColor(drawColor)
-            }
-        } catch (e: Exception) {
-            Color.RED
-        }
-        paint.strokeWidth = drawWidth * resources.displayMetrics.density
-        if (drawMode == "highlight") {
-            paint.strokeWidth = drawWidth * resources.displayMetrics.density * 4f
-        }
+        paint.color = computeColor(drawMode, drawColor)
+        paint.strokeWidth = computeWidth(drawMode, drawWidth)
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -94,12 +104,15 @@ class AnnotationOverlay @JvmOverloads constructor(
 
         when (event.action) {
             MotionEvent.ACTION_DOWN -> {
-                updatePaint()
+                val cachedColor = computeColor(drawMode, drawColor)
+                val cachedWidth = computeWidth(drawMode, drawWidth)
                 currentStroke = StrokeData(
                     mode = drawMode,
                     color = drawColor,
                     width = drawWidth,
-                    path = Path().apply { moveTo(event.x, event.y) }
+                    path = Path().apply { moveTo(event.x, event.y) },
+                    cachedColor = cachedColor,
+                    cachedWidth = cachedWidth
                 ).also {
                     it.points.add(Pair(event.x / w, event.y / h))
                 }
@@ -128,22 +141,10 @@ class AnnotationOverlay @JvmOverloads constructor(
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        // 绘制已完成的笔画
+        // 绘制已完成的笔画——直接使用预计算的缓存值，不做任何解析
         strokes.forEach { s ->
-            paint.color = if (s.mode == "highlight") {
-                try {
-                    Color.parseColor(s.color).let { c ->
-                        Color.argb(80, Color.red(c), Color.green(c), Color.blue(c))
-                    }
-                } catch (e: Exception) { Color.argb(80, 255, 255, 0) }
-            } else {
-                try { Color.parseColor(s.color) } catch (e: Exception) { Color.RED }
-            }
-            paint.strokeWidth = if (s.mode == "highlight") {
-                s.width * resources.displayMetrics.density * 4f
-            } else {
-                s.width * resources.displayMetrics.density
-            }
+            paint.color = s.cachedColor
+            paint.strokeWidth = s.cachedWidth
             canvas.drawPath(s.path, paint)
         }
         // 绘制当前笔画
@@ -172,7 +173,15 @@ class AnnotationOverlay @JvmOverloads constructor(
                 if (idx == 0) path.moveTo(px, py) else path.lineTo(px, py)
             }
             if (points.isNotEmpty()) {
-                strokes.add(StrokeData(s.mode, s.color, s.width, path, points))
+                strokes.add(StrokeData(
+                    mode = s.mode,
+                    color = s.color,
+                    width = s.width,
+                    path = path,
+                    points = points,
+                    cachedColor = computeColor(s.mode, s.color),
+                    cachedWidth = computeWidth(s.mode, s.width)
+                ))
             }
         }
         invalidate()

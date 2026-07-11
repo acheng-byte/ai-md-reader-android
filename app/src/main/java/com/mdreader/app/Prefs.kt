@@ -13,20 +13,20 @@ class Prefs(context: Context) {
 
     var fontSize: Float
         get() = sp.getFloat(KEY_FONT, DEFAULT_FONT)
-        set(v) { sp.edit().putFloat(KEY_FONT, v).apply() }
+        set(v) { sp.edit().putFloat(KEY_FONT, v).apply(); invalidateSettingsCache() }
 
     var lineHeight: Float
         get() = sp.getFloat(KEY_LINE, DEFAULT_LINE)
-        set(v) { sp.edit().putFloat(KEY_LINE, v).apply() }
+        set(v) { sp.edit().putFloat(KEY_LINE, v).apply(); invalidateSettingsCache() }
 
     var paraGap: Float
         get() = sp.getFloat(KEY_PARA, DEFAULT_PARA)
-        set(v) { sp.edit().putFloat(KEY_PARA, v).apply() }
+        set(v) { sp.edit().putFloat(KEY_PARA, v).apply(); invalidateSettingsCache() }
 
     /** 0=跟随系统 1=浅色 2=深色 */
     var themeMode: Int
         get() = sp.getInt(KEY_THEME, DEFAULT_THEME)
-        set(v) { sp.edit().putInt(KEY_THEME, v).apply() }
+        set(v) { sp.edit().putInt(KEY_THEME, v).apply(); invalidateSettingsCache() }
 
     /** "preview" 或 "code" */
     var viewMode: String
@@ -53,25 +53,25 @@ class Prefs(context: Context) {
         get() = sp.getString(KEY_LAST_DOC_NAME, "") ?: ""
         set(v) { sp.edit().putString(KEY_LAST_DOC_NAME, v).apply() }
 
-    /** 是否自动解析并显示 YAML frontmatter 元数据表格 */
+    /** 是否自动解析并显示 YAML frontmatter 元数据表格（默认关闭，减少渲染负担） */
     var showFrontmatter: Boolean
-        get() = sp.getBoolean(KEY_SHOW_FRONTMATTER, true)
-        set(v) { sp.edit().putBoolean(KEY_SHOW_FRONTMATTER, v).apply() }
+        get() = sp.getBoolean(KEY_SHOW_FRONTMATTER, DEFAULT_SHOW_FRONTMATTER)
+        set(v) { sp.edit().putBoolean(KEY_SHOW_FRONTMATTER, v).apply(); invalidateSettingsCache() }
 
-    /** 是否显示引用块样式（blockquote / citation）*/
+    /** 是否显示引用块样式（blockquote / citation）（默认关闭，减少渲染负担） */
     var showCitations: Boolean
-        get() = sp.getBoolean(KEY_SHOW_CITATIONS, true)
-        set(v) { sp.edit().putBoolean(KEY_SHOW_CITATIONS, v).apply() }
+        get() = sp.getBoolean(KEY_SHOW_CITATIONS, DEFAULT_SHOW_CITATIONS)
+        set(v) { sp.edit().putBoolean(KEY_SHOW_CITATIONS, v).apply(); invalidateSettingsCache() }
 
     /** 护眼模式：暖色背景减轻视觉疲劳 */
     var eyeProtection: Boolean
         get() = sp.getBoolean(KEY_EYE_PROTECTION, false)
-        set(v) { sp.edit().putBoolean(KEY_EYE_PROTECTION, v).apply() }
+        set(v) { sp.edit().putBoolean(KEY_EYE_PROTECTION, v).apply(); invalidateSettingsCache() }
 
     /** 字体族：default / serif / mono */
     var fontFamily: String
         get() = sp.getString(KEY_FONT_FAMILY, "default") ?: "default"
-        set(v) { sp.edit().putString(KEY_FONT_FAMILY, v).apply() }
+        set(v) { sp.edit().putString(KEY_FONT_FAMILY, v).apply(); invalidateSettingsCache() }
 
     fun isDark(context: Context): Boolean = when (themeMode) {
         1 -> false
@@ -82,16 +82,29 @@ class Prefs(context: Context) {
         }
     }
 
-    fun settingsJson(context: Context): String = JSONObject().apply {
-        put("fontSize", fontSize.roundToInt())
-        put("lineHeight", round1(lineHeight))
-        put("paraGap", round1(paraGap))
-        put("dark", isDark(context))
-        put("eyeProtection", eyeProtection)
-        put("fontFamily", fontFamily)
-        put("showFrontmatter", showFrontmatter)
-        put("showCitations", showCitations)
-    }.toString()
+    // ---- settingsJson 缓存：避免每次 applySettingsToWeb 都重建 JSON ----
+
+    @Volatile private var cachedSettingsJson: String? = null
+
+    private fun invalidateSettingsCache() {
+        cachedSettingsJson = null
+    }
+
+    fun settingsJson(context: Context): String {
+        cachedSettingsJson?.let { return it }
+        val json = JSONObject().apply {
+            put("fontSize", fontSize.roundToInt())
+            put("lineHeight", round1(lineHeight))
+            put("paraGap", round1(paraGap))
+            put("dark", isDark(context))
+            put("eyeProtection", eyeProtection)
+            put("fontFamily", fontFamily)
+            put("showFrontmatter", showFrontmatter)
+            put("showCitations", showCitations)
+        }.toString()
+        cachedSettingsJson = json
+        return json
+    }
 
     private fun round1(v: Float): Double = (v * 10).roundToInt() / 10.0
 
@@ -101,6 +114,9 @@ class Prefs(context: Context) {
         const val DEFAULT_PARA = 1.0f
         const val DEFAULT_THEME = 0
         const val DEFAULT_MODE = "preview"
+        /** 默认关闭 frontmatter/citations，减轻渲染负担，需要时手动开启 */
+        const val DEFAULT_SHOW_FRONTMATTER = false
+        const val DEFAULT_SHOW_CITATIONS = false
 
         const val FONT_MIN = 12f
         const val FONT_MAX = 30f
