@@ -8,10 +8,11 @@
 
 现在越来越多内容从 AI 对话、代码助手、知识库、会议纪要和自动化工作流里直接产出为 Markdown。电脑上阅读很方便，但手机上常常缺一个足够轻、足够直接、能从微信和文件管理器顺手打开 `.md` 的本地阅读器。**MD阅读器**解决的就是这个小而高频的痛点：把 Markdown 文件在手机上安静、清楚、离线地读起来。
 
-## 最新版本 v1.9.5
+## 最新版本 v1.9.7
 
-v1.9.5 是功能最完善的版本，涵盖 v1.9.0 至 v1.9.5 的完整更新：
+v1.9.7 是功能最完善的版本，涵盖 v1.9.0 至 v1.9.7 的完整更新：
 
+- **v1.9.7**：修复隐藏文件名标题不生效、源码模式光标定位到顶部、引用块样式开关优化（20+ Callout 类型）、支持纯文本代码块
 - **v1.9.5**：点击标题栏查看字符统计（纯文字/含标点）、9 种字体（含楷体/仿宋/隶书/微软雅黑等）、修复图片/表格点击误触设置面板、修复滑动误触表格预览、Mermaid 图表保存修复（内联样式）、全局防重复点击
 - **v1.9.4**：表格/图表全屏预览 + 双指缩放、预览内下载、长按确认下载、源码模式直接编辑 + 自动保存、设置持久化（更新不丢失）、历史 200 条
 - **v1.9.3**：Mermaid 图表长按下载、长图导出优化（32768px）、设置面板分区
@@ -92,7 +93,8 @@ adb install -r app/build/outputs/apk/release/app-release.apk
 
 | 版本 | 类型 | 更新重点 |
 | --- | --- | --- |
-| [v1.9.5](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v1.9.5) | 最新版本 | 字符统计、9字体、误触修复、Mermaid保存修复 |
+| [v1.9.7](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v1.9.7) | 最新版本 | 隐藏标题修复、源码光标定位、Callout优化、纯文本代码块 |
+| [v1.9.5](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v1.9.5) | 功能增强 | 字符统计、9字体、误触修复、Mermaid保存修复 |
 | [v1.9.4](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v1.9.4) | 功能增强 | 表格/图表预览下载、源码直接编辑、设置持久化、历史 200 条 |
 | [v1.9.3](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v1.9.3) | 功能增强 | Mermaid 下载、长图导出优化、设置面板分区 |
 | [v1.9.2](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v1.9.2) | 功能增强 | 隐藏文件名标题、渲染缓存、设置开关 |

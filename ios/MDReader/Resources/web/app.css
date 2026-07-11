@@ -590,6 +590,9 @@ body.dark .markdown-body .callout-title {
 .markdown-body .callout-done                                      { border-left-color: #3cb978; }
 .markdown-body .callout-tip,     .markdown-body .callout-hint    { border-left-color: #7c6af7; }
 .markdown-body .callout-note                                      { border-left-color: #4a9eff; }
+.markdown-body .callout-example                                   { border-left-color: #8b5cf6; }
+.markdown-body .callout-todo,    .markdown-body .callout-important { border-left-color: #f59e0b; }
+.markdown-body .callout-quote,   .markdown-body .callout-cite    { border-left-color: #9ca3af; }
 
 /* ============ 引用块隐藏开关（callout 不受影响）============ */
 body.hide-citations .markdown-body blockquote:not(.callout) {
@@ -599,6 +602,8 @@ body.hide-citations .markdown-body blockquote:not(.callout) {
     color: inherit;
     background: none;
     font-style: normal;
+    border: none;
+    box-shadow: none;
 }
 
 /* ============ Obsidian ==高亮== ============ */

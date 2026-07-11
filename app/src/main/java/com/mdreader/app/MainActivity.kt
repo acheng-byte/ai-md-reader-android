@@ -759,6 +759,22 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             binding.webview.visibility = View.GONE
             binding.editScroll.visibility = View.VISIBLE
             binding.editText.requestFocus()
+            // 根据预览模式的阅读位置，将光标定位到源码中对应位置
+            val ratio = readingRatio()
+            val textLen = currentMarkdown.length
+            val targetPos = if (ratio > 0.01 && textLen > 0) {
+                (ratio * textLen).toInt().coerceIn(0, textLen)
+            } else {
+                0
+            }
+            binding.editText.setSelection(targetPos)
+            // 滚动 EditText 到对应位置
+            binding.editText.post {
+                val layout = binding.editText.layout ?: return@post
+                val line = layout.getLineForOffset(targetPos)
+                val y = layout.getLineTop(line)
+                binding.editScroll.scrollTo(0, y)
+            }
             setupSourceAutoSave()
         } else {
             // 切换到预览模式：保存编辑内容并渲染
@@ -815,6 +831,21 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         binding.webview.visibility = View.GONE
         binding.editScroll.visibility = View.VISIBLE
         binding.editText.requestFocus()
+        // 根据预览模式的阅读位置，将光标定位到源码中对应位置
+        val ratio = readingRatio()
+        val textLen = currentMarkdown.length
+        val targetPos = if (ratio > 0.01 && textLen > 0) {
+            (ratio * textLen).toInt().coerceIn(0, textLen)
+        } else {
+            0
+        }
+        binding.editText.setSelection(targetPos)
+        binding.editText.post {
+            val layout = binding.editText.layout ?: return@post
+            val line = layout.getLineForOffset(targetPos)
+            val y = layout.getLineTop(line)
+            binding.editScroll.scrollTo(0, y)
+        }
         supportActionBar?.title = currentTitle + getString(R.string.edit_title_suffix)
         invalidateOptionsMenu()
     }

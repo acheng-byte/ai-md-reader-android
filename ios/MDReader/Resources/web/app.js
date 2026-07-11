@@ -1,4 +1,4 @@
-/* MD 阅读器 iOS 前端 v1.9.5
+/* MD 阅读器 iOS 前端 v1.9.7
    基于 Android 版 app.js，添加 iOS WKWebView 桥接兼容层。
    与 Android 的区别：
    - 内容由原生 push：appSetContent(md) 注入
@@ -23,7 +23,7 @@ function _iosPost(msg) {
     } catch (e) { /* ignore */ }
 }
 
-// 仅 iOS：注入 Android bridge 模拟对象（Android 上 window.Android 由 JavascriptInterface 提供）
+// 仅 iOS：注入 Android bridge 模拟对象
 if (typeof window.Android === 'undefined') {
     window.Android = {
         getMarkdown: function () { return _iosMarkdown; },
@@ -120,6 +120,12 @@ window.appSetTitle = function (title) {
         highlight: function (str, lang) {
             if (lang === 'mermaid') {
                 return '<pre class="mermaid-block"><code class="language-mermaid">' +
+                    md.utils.escapeHtml(str) + '</code></pre>';
+            }
+            // 纯文本代码块：跳过语法高亮
+            var plainLangs = { plaintext: 1, text: 1, plain: 1, txt: 1 };
+            if (lang && plainLangs[lang.toLowerCase()]) {
+                return '<pre class="hljs"><code class="language-plaintext">' +
                     md.utils.escapeHtml(str) + '</code></pre>';
             }
             if (lang && window.hljs && hljs.getLanguage(lang)) {
@@ -388,7 +394,8 @@ window.appSetTitle = function (title) {
             info: 'ℹ', warning: '⚠', caution: '⚠', danger: '✖', error: '✖',
             tip: '💡', hint: '💡', success: '✔', check: '✔', done: '✔',
             question: '?', help: '?', faq: '?', note: '✎', abstract: '☰',
-            summary: '☰', bug: '☁', quote: '❝', cite: '❝'
+            summary: '☰', bug: '☁', quote: '❝', cite: '❝',
+            example: '📋', todo: '☐', important: '⚡', metadata: '📄'
         };
         return icons[type] || '◆';
     }
@@ -399,10 +406,11 @@ window.appSetTitle = function (title) {
             var first = bq.firstElementChild;
             if (!first) return;
             var text = (first.textContent || '').trim();
+            // 匹配 [!type] 或 [!type] 标题文本
             var m = text.match(/^\[!([^\]\s]+)\](?:\s+(.*?))?\s*$/);
             if (!m) return;
             var type = m[1].trim().toLowerCase();
-            var title = (m[2] || (type.charAt(0).toUpperCase() + type.slice(1))).trim();
+            var title = (m[2] || calloutDefaultTitle(type)).trim();
             first.remove();
             bq.classList.add('callout', 'callout-' + type);
             var titleEl = document.createElement('div');
@@ -413,6 +421,21 @@ window.appSetTitle = function (title) {
             // metadata 类型 callout 跟随 showFrontmatter 开关
             if (!showFm && metaTypes[type]) bq.style.display = 'none';
         });
+    }
+
+    function calloutDefaultTitle(type) {
+        var titles = {
+            note: '注意', abstract: '摘要', summary: '总结', info: '信息',
+            metadata: '元数据', tip: '提示', hint: '提示',
+            success: '成功', check: '检查', done: '完成',
+            question: '问题', help: '帮助', faq: '常见问题',
+            warning: '警告', caution: '注意',
+            danger: '危险', error: '错误',
+            bug: '缺陷', example: '示例',
+            quote: '引用', cite: '引述',
+            todo: '待办', important: '重要'
+        };
+        return titles[type] || (type.charAt(0).toUpperCase() + type.slice(1));
     }
 
     /* ---------- 引用文档展开 ---------- */
@@ -956,18 +979,36 @@ window.appSetTitle = function (title) {
         if (currentSettings.hideTitleHeading) {
             var firstH1 = previewEl.querySelector('h1');
             if (firstH1) {
+                var shouldHide = false;
                 try {
                     var title = '';
                     var b = bridge();
                     if (b && b.getTitle) title = b.getTitle() || '';
                 } catch (e) { title = ''; }
+                var h1Text = firstH1.textContent.trim();
                 if (title) {
                     // 比较时去除文件扩展名，忽略大小写
-                    var titleBase = title.replace(/\.[^.]+$/, '').toLowerCase();
-                    var h1Text = firstH1.textContent.trim().toLowerCase();
-                    if (h1Text === titleBase || h1Text === title.toLowerCase()) {
-                        firstH1.style.display = 'none';
+                    var titleBase = title.replace(/\.[^.]+$/, '');
+                    var h1Lower = h1Text.toLowerCase();
+                    var titleLower = titleBase.toLowerCase();
+                    // 策略1：精确匹配（去扩展名）
+                    if (h1Lower === titleLower) {
+                        shouldHide = true;
                     }
+                    // 策略2：H1 以文件名开头（如 "笔记 - 完整版" 匹配 "笔记"）
+                    else if (h1Lower.indexOf(titleLower) === 0 && h1Text.length < titleBase.length + 20) {
+                        shouldHide = true;
+                    }
+                    // 策略3：文件名包含 H1 文本（如文件名 "读书笔记整理" H1 "读书笔记"）
+                    else if (titleLower.indexOf(h1Lower) === 0 && h1Text.length >= 2) {
+                        shouldHide = true;
+                    }
+                } else {
+                    // 没有标题信息时，默认隐藏第一个 H1（工具栏已显示文件名）
+                    shouldHide = true;
+                }
+                if (shouldHide) {
+                    firstH1.style.display = 'none';
                 }
             }
         }
@@ -1606,15 +1647,11 @@ window.appSetTitle = function (title) {
 
     var isIos = (typeof window.webkit !== 'undefined' && window.webkit.messageHandlers);
     if (!isIos) {
-        // Android：立即渲染（内容已通过 bridge.getMarkdown 可用）
         render();
     } else {
-        // iOS：标记桥接已激活，等原生调用 appSetContent 触发渲染
         window._iosBridgeActive = true;
-        // 如果已有内容（例如页面重载），直接渲染
         if (_iosMarkdown) render();
     }
 
-    // 通知原生页面就绪
     _iosPost({ type: 'ready' });
 })();
