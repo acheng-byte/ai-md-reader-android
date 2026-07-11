@@ -512,7 +512,7 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
                         c.style.transition = 'background-color 0.15s';
                         c.style.backgroundColor = 'rgba(9,105,218,0.15)';
                         setTimeout(function () { c.style.backgroundColor = ''; }, 300);
-                        showDownloadConfirm('mermaid');
+                        showDownloadConfirm('mermaid', c);
                     }, LONG_PRESS_MS);
                 }
                 function cancelPress() { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } }
@@ -543,14 +543,18 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
 
             try {
                 window.mermaid.render(divId + '-svg', graphDef).then(function (result) {
-                    container.innerHTML = result.svg;
+                    if (document.contains(container)) container.innerHTML = result.svg;
                 }).catch(function (e) {
-                    container.textContent = graphDef;
-                    container.classList.add('mermaid-error');
+                    if (document.contains(container)) {
+                        container.textContent = graphDef;
+                        container.classList.add('mermaid-error');
+                    }
                 });
             } catch (e) {
-                container.textContent = graphDef;
-                container.classList.add('mermaid-error');
+                if (document.contains(container)) {
+                    container.textContent = graphDef;
+                    container.classList.add('mermaid-error');
+                }
             }
         });
     }
@@ -593,6 +597,7 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
 
     var previewOverlay = null;
     var previewCurrentSvg = null;
+    var previewBlobUrl = null;
 
     /** 创建预览覆盖层 DOM（惰性创建，复用） */
     function ensurePreviewOverlay() {
@@ -651,8 +656,9 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
             body.appendChild(wrapper);
         };
         var blob = new Blob([svgHtml], { type: 'image/svg+xml;charset=utf-8' });
-        var url = URL.createObjectURL(blob);
-        img.src = url;
+        if (previewBlobUrl) URL.revokeObjectURL(previewBlobUrl);
+        previewBlobUrl = URL.createObjectURL(blob);
+        img.src = previewBlobUrl;
         overlay.style.display = 'flex';
     }
 
@@ -677,6 +683,7 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
         if (previewOverlay) {
             previewOverlay.style.display = 'none';
             previewCurrentSvg = null;
+            if (previewBlobUrl) { URL.revokeObjectURL(previewBlobUrl); previewBlobUrl = null; }
         }
     }
 
@@ -778,7 +785,7 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
     }
 
     /** 显示下载确认弹窗 */
-    function showDownloadConfirm(type) {
+    function showDownloadConfirm(type, el) {
         var msg = type === 'mermaid' ? '确定保存此图表为图片？' : '确定保存此表格为图片？';
         var overlay = document.createElement('div');
         overlay.className = 'mdreader-confirm-overlay';
@@ -795,11 +802,10 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
                 var b = bridge();
                 if (!b) return;
                 if (type === 'mermaid') {
-                    var svg = previewEl.querySelector('.mermaid-container svg');
+                    var svg = el && el.querySelector ? el.querySelector('svg') : null;
                     if (svg && b.saveMermaidImage) b.saveMermaidImage(inlineSvgStyles(svg));
                 } else {
-                    var table = previewEl.querySelector('table');
-                    if (table && b.saveElementImage) b.saveElementImage('table', table.outerHTML);
+                    if (el && b.saveElementImage) b.saveElementImage('table', el.outerHTML);
                 }
             } catch (e) { /* bridge unavailable */ }
         };
@@ -894,7 +900,7 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
                         table.style.transition = 'background-color 0.15s';
                         table.style.backgroundColor = 'rgba(9,105,218,0.1)';
                         setTimeout(function () { table.style.backgroundColor = ''; }, 300);
-                        showDownloadConfirm('table');
+                        showDownloadConfirm('table', table);
                     }, 500);
                 }
                 function cancelPress() {
@@ -1521,6 +1527,7 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
         var prevFm = currentSettings.showFrontmatter;
         var prevCit = currentSettings.showCitations;
         var prevHideTitle = currentSettings.hideTitleHeading;
+        var prevDark = currentSettings.dark;
         currentSettings = s;
         var root = document.documentElement;
         if (s.fontSize != null) root.style.setProperty('--font-size', s.fontSize + 'px');
@@ -1555,8 +1562,8 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
         if (s.showCitations != null) {
             document.body.classList.toggle('hide-citations', !s.showCitations);
         }
-        // frontmatter / citations / hideTitleHeading 开关变化时立即重渲染
-        if (prevFm !== s.showFrontmatter || prevCit !== s.showCitations || prevHideTitle !== s.hideTitleHeading) {
+        // frontmatter / citations / hideTitleHeading / dark 开关变化时立即重渲染
+        if (prevFm !== s.showFrontmatter || prevCit !== s.showCitations || prevHideTitle !== s.hideTitleHeading || prevDark !== s.dark) {
             render();
         }
     }

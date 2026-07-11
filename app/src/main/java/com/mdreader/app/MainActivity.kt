@@ -392,7 +392,8 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         val r = Runnable {
             pendingRender = null
             js("window.appRender && window.appRender()")
-            js("window.appSetMode && window.appSetMode('$currentMode')")
+            // WebView 始终渲染预览内容，即使当前处于源码模式（编辑器覆盖在 WebView 上方）
+            js("window.appSetMode && window.appSetMode('preview')")
             applySettingsToWeb()
             js("window.appRestoreScroll && window.appRestoreScroll()")
         }
@@ -912,9 +913,8 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
 
     private fun writeTextToUri(uri: Uri, text: String): Boolean =
         runCatching {
-            contentResolver.openOutputStream(uri, "wt")?.use { out ->
-                out.write(text.toByteArray(Charsets.UTF_8))
-            }
+            val out = contentResolver.openOutputStream(uri, "wt") ?: return@runCatching false
+            out.use { it.write(text.toByteArray(Charsets.UTF_8)) }
             true
         }.getOrDefault(false)
 
@@ -1201,9 +1201,11 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
     }
 
     override fun onDestroy() {
+        pageReady = false // 防止 JS 回调在 WebView 销毁后仍执行
         pendingRender?.let { renderHandler.removeCallbacks(it) }
         pendingSettings?.let { settingsHandler.removeCallbacks(it) }
         sourceSaveRunnable?.let { settingsHandler.removeCallbacks(it) }
+        annotationSaveRunnable?.let { settingsHandler.removeCallbacks(it) }
         // 源码模式下退出时同步内容
         if (currentMode == "code") syncSourceContent()
         reading.flush()
@@ -1455,17 +1457,23 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                                     getString(R.string.element_save_failed, e.message ?: ""), Toast.LENGTH_LONG).show()
                             }
                         }
-                        // 清理离屏 WebView
-                        (view.parent as? android.view.ViewGroup)?.removeView(view)
+                        // 清理离屏 WebView 及其临时容器
+                        val parent = view.parent as? android.view.ViewGroup
+                        parent?.removeView(view)
                         view.destroy()
+                        parent?.parent?.removeView(parent) // 移除 tempContainer
                     }, 1000)
                 }
             }
             // 添加到临时 ViewGroup 以触发 WebView 内部初始化（不替换 Activity 布局）
+            // 关键：必须用 INVISIBLE（而非 GONE），否则子 View 不参与布局，draw(canvas) 输出空白
+            // 容器给实际尺寸，平移到屏幕外，确保 WebView 能正常渲染
             val tempContainer = android.widget.FrameLayout(this)
-            tempContainer.visibility = View.GONE
+            tempContainer.visibility = View.INVISIBLE
+            val screenW = resources.displayMetrics.widthPixels
             (window.decorView as android.view.ViewGroup).addView(tempContainer,
-                android.view.ViewGroup.LayoutParams(0, 0))
+                android.view.ViewGroup.LayoutParams(renderWidth, android.view.ViewGroup.LayoutParams.WRAP_CONTENT))
+            tempContainer.translationX = screenW.toFloat() + 100f
             tempContainer.addView(offscreen,
                 android.view.ViewGroup.LayoutParams(renderWidth, android.view.ViewGroup.LayoutParams.WRAP_CONTENT))
             offscreen.loadDataWithBaseURL(null, styledHtml, "text/html", "utf-8", null)
