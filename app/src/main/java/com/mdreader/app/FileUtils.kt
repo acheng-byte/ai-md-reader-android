@@ -69,11 +69,22 @@ object FileUtils {
 
         // 2. Try UTF-8; count replacement characters to decide fallback
         val utf8Text = bytes.toString(Charsets.UTF_8)
-        val replacements = utf8Text.count { it == '\uFFFD' }
-        text = if (replacements > 0 && replacements.toDouble() / maxOf(utf8Text.length, 1) > 0.01) {
-            // GB18030 is a superset of GBK/GB2312, covers more Chinese characters
-            runCatching { bytes.toString(charset("GB18030")) }.getOrElse {
-                runCatching { bytes.toString(charset("GBK")) }.getOrElse { utf8Text }
+        val utf8Repl = utf8Text.count { it == '\uFFFD' }
+        text = if (utf8Repl > 0 && utf8Repl.toDouble() / maxOf(utf8Text.length, 1) > 0.01) {
+            // UTF-8 有较多替换字符，可能是 GBK/GB18030 编码
+            // 但必须先验证 GB18030 解码确实更好，否则保留 UTF-8
+            val gb18030Text = runCatching { bytes.toString(charset("GB18030")) }.getOrNull()
+            if (gb18030Text != null) {
+                val gbRepl = gb18030Text.count { it == '\uFFFD' }
+                if (gbRepl < utf8Repl) gb18030Text else utf8Text
+            } else {
+                val gbkText = runCatching { bytes.toString(charset("GBK")) }.getOrNull()
+                if (gbkText != null) {
+                    val gbkRepl = gbkText.count { it == '\uFFFD' }
+                    if (gbkRepl < utf8Repl) gbkText else utf8Text
+                } else {
+                    utf8Text
+                }
             }
         } else {
             utf8Text

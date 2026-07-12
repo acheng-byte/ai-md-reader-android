@@ -51,24 +51,28 @@ enum DocumentService {
             }
         }
 
-        // 2. Try UTF-8
-        if let s = String(data: data, encoding: .utf8) {
-            // 检查是否含有替换字符，判断是否为假阳性
-            let replacements = s.unicodeScalars.filter { $0.value == 0xFFFD }.count
-            if replacements == 0 || Double(replacements) / Double(max(s.count, 1)) <= 0.01 {
-                return s.hasPrefix("\u{FEFF}") ? String(s.dropFirst()) : s
-            }
+        // 2. Try UTF-8, count replacement characters
+        let utf8Text = String(decoding: data, as: UTF8.self)
+        let utf8Repl = utf8Text.unicodeScalars.filter { $0.value == 0xFFFD }.count
+
+        if utf8Repl == 0 || Double(utf8Repl) / Double(max(utf8Text.count, 1)) <= 0.01 {
+            // UTF-8 基本无替换字符，直接使用
+            return utf8Text.hasPrefix("\u{FEFF}") ? String(utf8Text.dropFirst()) : utf8Text
         }
 
-        // 3. Fallback: GB18030（兼容 GBK / GB2312）
+        // 3. UTF-8 有较多替换字符，尝试 GB18030 并比较
         let gb18030Enc = CFStringConvertEncodingToNSStringEncoding(
             CFStringEncoding(CFStringEncodings.GB_18030_2000.rawValue)
         )
-        if let s = String(data: data, encoding: String.Encoding(rawValue: gb18030Enc)) {
-            return s
+        if let gbText = String(data: data, encoding: String.Encoding(rawValue: gb18030Enc)) {
+            let gbRepl = gbText.unicodeScalars.filter { $0.value == 0xFFFD }.count
+            // 只有 GB18030 确实比 UTF-8 更好时才采用
+            if gbRepl < utf8Repl {
+                return gbText
+            }
         }
 
-        // 4. Last resort: lossy UTF-8
-        return String(decoding: data, as: UTF8.self)
+        // 4. GB18030 没有更好，保留 UTF-8（去除 BOM）
+        return utf8Text.hasPrefix("\u{FEFF}") ? String(utf8Text.dropFirst()) : utf8Text
     }
 }
