@@ -471,63 +471,24 @@
         });
     }
 
-    /** 为 Mermaid 容器绑定单击预览 + 长按下载事件 */
+    /** 为 Mermaid 容器绑定单击预览事件 */
     function bindMermaidEvents(c) {
-        var pressTimer = null;
-        var LONG_PRESS_MS = 500;
-        var longPressFired = false;
-        var startX = 0, startY = 0;
         var lastTapTime = 0;
-        var MOVE_THRESHOLD = 15;
 
-        function getTouchPos(e) {
-            if (e.touches && e.touches.length > 0) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
-            if (e.changedTouches && e.changedTouches.length > 0) return { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
-            return { x: e.clientX || 0, y: e.clientY || 0 };
-        }
-        function isMoved(e) {
-            var pos = getTouchPos(e);
-            return (Math.abs(pos.x - startX) > MOVE_THRESHOLD || Math.abs(pos.y - startY) > MOVE_THRESHOLD);
-        }
-        function startPress(e) {
-            var pos = getTouchPos(e);
-            startX = pos.x; startY = pos.y;
-            longPressFired = false;
-            pressTimer = setTimeout(function () {
-                pressTimer = null;
-                longPressFired = true;
-                if (!c.querySelector('svg')) return;
-                c.style.transition = 'background-color 0.15s';
-                c.style.backgroundColor = 'rgba(9,105,218,0.15)';
-                setTimeout(function () { c.style.backgroundColor = ''; }, 300);
-                showDownloadConfirm('mermaid', c);
-            }, LONG_PRESS_MS);
-        }
-        function cancelPress() { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } }
-
-        c.addEventListener('touchstart', startPress, { passive: true });
         c.addEventListener('touchend', function (e) {
-            cancelPress();
             var now = Date.now();
             if (now - lastTapTime < 400) return;
-            if (!longPressFired && !isMoved(e)) {
-                var svg = c.querySelector('svg');
-                if (svg) { lastTapTime = now; openMermaidPreview(svg); }
-            }
+            lastTapTime = now;
+            var svg = c.querySelector('svg');
+            if (svg) openMermaidPreview(svg);
         });
-        c.addEventListener('touchmove', function (e) { if (isMoved(e)) cancelPress(); });
-        c.addEventListener('touchcancel', cancelPress);
-        c.addEventListener('mousedown', startPress);
-        c.addEventListener('mouseup', function (e) {
-            cancelPress();
+        c.addEventListener('click', function () {
             var now = Date.now();
             if (now - lastTapTime < 400) return;
-            if (!longPressFired && !isMoved(e)) {
-                var svg = c.querySelector('svg');
-                if (svg) { lastTapTime = now; openMermaidPreview(svg); }
-            }
+            lastTapTime = now;
+            var svg = c.querySelector('svg');
+            if (svg) openMermaidPreview(svg);
         });
-        c.addEventListener('mouseleave', cancelPress);
     }
 
     /* ---------- LaTeX 公式渲染 ---------- */
@@ -583,8 +544,6 @@
     })();
 
     var previewOverlay = null;
-    var previewCurrentSvg = null;
-    var previewCurrentSvgEl = null; // 保留原始 SVG DOM 引用，用于 PNG 转换时的 getComputedStyle
     var previewBlobUrl = null; // 跟踪当前 blob URL，防止内存泄漏
     var recentPinch = false; // 捏合手势刚结束时阻止 overlay 关闭
 
@@ -630,10 +589,10 @@
         var body = overlay.querySelector('.mdreader-preview-body');
         body.innerHTML = '';
         body.scrollTop = 0;
-        // 存储原始 SVG 引用和内联样式后的 SVG 字符串
-        previewCurrentSvgEl = svgEl;
+        // 隐藏保存按钮（Mermaid 不支持保存）
+        var dlBtn = overlay.querySelector('.mdreader-preview-dl-btn');
+        if (dlBtn) dlBtn.style.display = 'none';
         var svgHtml = svgEl.outerHTML;
-        previewCurrentSvg = inlineSvgStyles(svgEl);
         var img = new Image();
         img.onload = function () {
             body.appendChild(img);
@@ -660,7 +619,9 @@
         var body = overlay.querySelector('.mdreader-preview-body');
         body.innerHTML = '';
         body.scrollTop = 0;
-        previewCurrentSvg = null;
+        // 显示保存按钮
+        var dlBtn = overlay.querySelector('.mdreader-preview-dl-btn');
+        if (dlBtn) dlBtn.style.display = '';
         // 克隆表格（样式由 CSS 控制，跟随主题）
         var clone = tableEl.cloneNode(true);
         var wrapper = document.createElement('div');
@@ -674,55 +635,8 @@
     function closePreviewOverlay() {
         if (previewOverlay) {
             previewOverlay.style.display = 'none';
-            previewCurrentSvg = null;
-            previewCurrentSvgEl = null;
             if (previewBlobUrl) { URL.revokeObjectURL(previewBlobUrl); previewBlobUrl = null; }
         }
-    }
-
-    /** 将 SVG 元素的计算样式内联到属性中（用于 offscreen WebView 渲染）。
-     *  注意：不移除 class 属性（Mermaid SVG 内部 &lt;style&gt; 块依赖 class 选择器），
-     *  不内联 background-color 为 fill（深色模式下会导致黑色区域）。 */
-    function inlineSvgStyles(svgEl) {
-        var clone = svgEl.cloneNode(true);
-        // 只内联无法通过 SVG 内部 &lt;style&gt; 块携带的属性
-        // 移除 background-color/background（会导致深色背景被当作 fill）
-        var styleProps = [
-            'fill', 'stroke', 'stroke-width', 'stroke-dasharray', 'stroke-dashoffset',
-            'font-family', 'font-size', 'font-weight', 'font-style',
-            'opacity', 'transform', 'transform-origin',
-            'text-anchor', 'dominant-baseline'
-        ];
-        var allEls = [clone].concat(Array.prototype.slice.call(clone.querySelectorAll('*')));
-        for (var i = 0; i < allEls.length; i++) {
-            var el = allEls[i];
-            if (el.nodeType !== 1) continue;
-            try {
-                var cs = window.getComputedStyle(el);
-                for (var j = 0; j < styleProps.length; j++) {
-                    var prop = styleProps[j];
-                    var val = cs.getPropertyValue(prop);
-                    if (val && val !== 'none' && val !== 'normal' && val !== '0px') {
-                        var attrName = prop.replace(/-([a-z])/g, function (_, c) { return c.toUpperCase(); });
-                        if (prop === 'font-family') {
-                            el.setAttribute('font-family', val);
-                        } else if (prop === 'font-size') {
-                            el.setAttribute('font-size', val);
-                        } else if (prop === 'font-weight') {
-                            el.setAttribute('font-weight', val);
-                        } else if (prop === 'stroke-width') {
-                            el.setAttribute('stroke-width', parseFloat(val));
-                        } else if (prop === 'stroke-dasharray') {
-                            el.setAttribute('stroke-dasharray', val);
-                        } else {
-                            el.setAttribute(attrName, val);
-                        }
-                    }
-                }
-                // 不再移除 class 属性 — Mermaid SVG 的 &lt;style&gt; 块依赖 class 选择器
-            } catch (e) { /* skip */ }
-        }
-        return clone.outerHTML;
     }
 
     /** 将表格元素直接渲染为 PNG data URL（纯 JS Canvas 绘制，完全绕过离屏 WebView）。
@@ -829,213 +743,25 @@
         return canvas.toDataURL('image/png');
     }
 
-    /** 将 SVG 元素通过 Canvas 转换为 PNG base64（data URL）。
-     *  完全在 JS 端完成渲染，避免离屏 WebView draw(canvas) 空白问题。 */
-    function _svgToPngBase64(svgEl) {
-        var svgClone = svgEl.cloneNode(true);
-        // 确保 xmlns 声明，Image 才能正确解析
-        if (!svgClone.getAttribute('xmlns')) {
-            svgClone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-        }
-        var svgStr = new XMLSerializer().serializeToString(svgClone);
-        var svgBlob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
-        var url = URL.createObjectURL(svgBlob);
-        return new Promise(function (resolve, reject) {
-            var img = new Image();
-            img.onload = function () {
-                var w = img.naturalWidth || svgEl.clientWidth || 800;
-                var h = img.naturalHeight || svgEl.clientHeight || 600;
-                var canvas = document.createElement('canvas');
-                canvas.width = w;
-                canvas.height = h;
-                var ctx = canvas.getContext('2d');
-                ctx.drawImage(img, 0, 0, w, h);
-                URL.revokeObjectURL(url);
-                resolve(canvas.toDataURL('image/png'));
-            };
-            img.onerror = function () {
-                URL.revokeObjectURL(url);
-                reject(new Error('SVG image load failed'));
-            };
-            img.src = url;
-        });
-    }
-
-    /** 将 Mermaid SVG 转换为 PNG data URL。
-     *  解决 Canvas 无法渲染 foreignObject 的问题：将 foreignObject 替换为 SVG text 元素，
-     *  并为缺少 class 属性的元素补充 class，确保 CSS 选择器匹配。 */
-    function _captureMermaidToPng(svgElOrString) {
-        var svgClone;
-
-        // 克隆 SVG（支持 DOM 元素或字符串输入）
-        if (typeof svgElOrString === 'string') {
-            var parser = new DOMParser();
-            var doc = parser.parseFromString(svgElOrString, 'image/svg+xml');
-            svgClone = doc.documentElement;
-        } else {
-            svgClone = svgElOrString.cloneNode(true);
-        }
-
-        // 挂载到隐藏容器，getComputedStyle 和 inlineSvgStyles 需要 DOM 挂载
-        var tempContainer = document.createElement('div');
-        tempContainer.style.cssText = 'position:fixed;left:-9999px;top:0;visibility:hidden;width:800px;height:600px;overflow:hidden;';
-        tempContainer.appendChild(svgClone);
-        document.body.appendChild(tempContainer);
-
-        // 1. 将所有 foreignObject 替换为 SVG text 元素（Canvas 无法渲染 foreignObject 中的 HTML）
-        var fos = svgClone.querySelectorAll('foreignObject');
-        for (var i = fos.length - 1; i >= 0; i--) {
-            var fo = fos[i];
-            var foW = parseFloat(fo.getAttribute('width')) || 100;
-            var foH = parseFloat(fo.getAttribute('height')) || 40;
-
-            // 从嵌入的 HTML 中提取文本行（<br> 为换行分隔符）
-            var lines = [];
-            var innerDiv = fo.querySelector('div');
-            if (innerDiv) {
-                var html = innerDiv.innerHTML;
-                // 按 <br> / <br/> / <br /> 拆分
-                var parts = html.split(/<br\s*\/?>/i);
-                for (var pi = 0; pi < parts.length; pi++) {
-                    // 去除 HTML 标签，只保留文本
-                    var t = parts[pi].replace(/<[^>]*>/g, '').trim();
-                    if (t) lines.push(t);
-                }
-                // 去重（嵌套 div/span 可能导致重复）
-                if (lines.length <= 1) {
-                    // 单行情况：直接用 textContent
-                    var full = (innerDiv.textContent || '').trim();
-                    if (full) lines = [full];
-                } else {
-                    var seen = {};
-                    var unique = [];
-                    for (var li = 0; li < lines.length; li++) {
-                        if (!seen[lines[li]]) { seen[lines[li]] = true; unique.push(lines[li]); }
-                    }
-                    lines = unique;
-                }
-            }
-            if (lines.length === 0) {
-                var rawText = (fo.textContent || '').trim();
-                if (rawText) lines = [rawText];
-            }
-            if (lines.length === 0) { fo.parentNode.removeChild(fo); continue; }
-
-            // 创建 SVG text 元素
-            var textEl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-            textEl.setAttribute('x', String(foW / 2));
-            textEl.setAttribute('text-anchor', 'middle');
-            textEl.setAttribute('fill', '#333');
-            textEl.setAttribute('font-family', '"trebuchet ms",verdana,arial,sans-serif');
-            textEl.setAttribute('font-size', '14');
-
-            var lineH = Math.min(18, foH / lines.length);
-            var startY = (foH - lines.length * lineH) / 2 + lineH * 0.8;
-            for (var li = 0; li < lines.length; li++) {
-                var tspan = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');
-                tspan.setAttribute('x', String(foW / 2));
-                tspan.setAttribute('dy', li === 0 ? String(startY) : String(lineH));
-                tspan.textContent = lines[li];
-                textEl.appendChild(tspan);
-            }
-
-            // 继承父级 transform
-            var parentG = fo.parentNode;
-            if (parentG && parentG.tagName === 'g') {
-                var pTrans = parentG.getAttribute('transform');
-                if (pTrans) textEl.setAttribute('transform', pTrans);
-            }
-
-            fo.parentNode.replaceChild(textEl, fo);
-        }
-
-        // 2. 为缺少 class 的元素补充 class 属性（CSS 选择器依赖这些 class）
-        var allG = svgClone.querySelectorAll('g');
-        for (var i = 0; i < allG.length; i++) {
-            var g = allG[i];
-            if (g.getAttribute('class')) continue;
-            var gid = g.getAttribute('id') || '';
-            if (gid === 'social-circle' || gid.indexOf('cluster') >= 0) {
-                g.setAttribute('class', 'cluster');
-            } else if (g.getAttribute('data-node') === 'true' || gid.indexOf('flowchart-') === 0) {
-                g.setAttribute('class', 'node');
-            }
-        }
-
-        // 3. 确保 xmlns 声明
-        if (!svgClone.getAttribute('xmlns')) {
-            svgClone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-        }
-
-        // 4. 内联计算样式（确保 Canvas 渲染时样式正确）
-        var svgStr = inlineSvgStyles(svgClone);
-        // 清理临时容器
-        if (tempContainer && tempContainer.parentNode) {
-            tempContainer.parentNode.removeChild(tempContainer);
-        }
-        tempContainer = null;
-
-        var svgBlob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
-        var url = URL.createObjectURL(svgBlob);
-        return new Promise(function (resolve, reject) {
-            var img = new Image();
-            img.onload = function () {
-                var w = img.naturalWidth || 800;
-                var h = img.naturalHeight || 600;
-                var dpr = window.devicePixelRatio || 1;
-                var canvas = document.createElement('canvas');
-                canvas.width = Math.ceil(w * dpr);
-                canvas.height = Math.ceil(h * dpr);
-                var ctx = canvas.getContext('2d');
-                ctx.scale(dpr, dpr);
-                // 白色背景（PNG 透明背景不好看）
-                ctx.fillStyle = '#ffffff';
-                ctx.fillRect(0, 0, w, h);
-                ctx.drawImage(img, 0, 0, w, h);
-                URL.revokeObjectURL(url);
-                resolve(canvas.toDataURL('image/png'));
-            };
-            img.onerror = function () {
-                URL.revokeObjectURL(url);
-                reject(new Error('Mermaid SVG to PNG failed'));
-            };
-            img.src = url;
-        });
-    }
-
-    /** 从预览覆盖层下载当前内容 */
+    /** 从预览覆盖层下载当前内容（仅表格） */
     function downloadFromPreview() {
         try {
             var b = bridge();
             if (!b) return;
-            if (previewCurrentSvg) {
-                // Mermaid: 通过 Canvas 转换为 PNG（解决 foreignObject 渲染问题）
-                if (b.savePngBase64) {
-                    // 优先使用原始 DOM 元素（getComputedStyle 可用）
-                    var svgSource = previewCurrentSvgEl || previewCurrentSvg;
-                    _captureMermaidToPng(svgSource).then(function (dataUrl) {
-                        b.savePngBase64(dataUrl.replace(/^data:image\/png;base64,/, ''), 'mermaid');
-                    }).catch(function () {
-                        // 降级：直接保存 SVG
-                        if (b.saveMermaidImage) b.saveMermaidImage(previewCurrentSvg);
-                    });
-                }
-            } else {
-                // 表格：JS Canvas 直接绘制，绕过离屏 WebView draw(canvas) 空白问题
-                var tbody = previewOverlay.querySelector('.mdreader-preview-body');
-                var table = tbody.querySelector('table');
-                if (table) {
-                    var dataUrl = _captureTableToPng(table);
-                    if (dataUrl && b.savePngBase64) {
-                        b.savePngBase64(dataUrl.replace(/^data:image\/png;base64,/, ''), 'table');
-                    }
+            // 表格：JS Canvas 直接绘制，绕过离屏 WebView draw(canvas) 空白问题
+            var tbody = previewOverlay.querySelector('.mdreader-preview-body');
+            var table = tbody.querySelector('table');
+            if (table) {
+                var dataUrl = _captureTableToPng(table);
+                if (dataUrl && b.savePngBase64) {
+                    b.savePngBase64(dataUrl.replace(/^data:image\/png;base64,/, ''), 'table');
                 }
             }
         } catch (e) { /* bridge unavailable */ }
     }
 
-    /** 显示下载确认弹窗。el 为用户长按的具体图表/表格元素，避免多图表时保存错误 */
-    function showDownloadConfirm(type, el) {
+    /** 显示下载确认弹窗。el 为用户长按的具体表格元素 */
+    function showDownloadConfirm(el) {
         var msg = '确定保存此图片？';
         var overlay = document.createElement('div');
         overlay.className = 'mdreader-confirm-overlay';
@@ -1051,25 +777,11 @@
             try {
                 var b = bridge();
                 if (!b) return;
-                if (type === 'mermaid') {
-                    var svg = el && el.querySelector ? el.querySelector('svg') : null;
-                    if (svg && b.savePngBase64) {
-                        _captureMermaidToPng(svg).then(function (dataUrl) {
-                            b.savePngBase64(dataUrl.replace(/^data:image\/png;base64,/, ''), 'mermaid');
-                        }).catch(function () {
-                            // 降级：保存 SVG
-                            if (b.saveMermaidImage) b.saveMermaidImage(inlineSvgStyles(svg));
-                        });
-                    } else if (svg && b.saveMermaidImage) {
-                        b.saveMermaidImage(inlineSvgStyles(svg));
-                    }
-                } else {
-                    // 表格：JS Canvas 直接绘制 PNG
-                    if (el) {
-                        var dataUrl = _captureTableToPng(el);
-                        if (dataUrl && b.savePngBase64) {
-                            b.savePngBase64(dataUrl.replace(/^data:image\/png;base64,/, ''), 'table');
-                        }
+                // 表格：JS Canvas 直接绘制 PNG
+                if (el) {
+                    var dataUrl = _captureTableToPng(el);
+                    if (dataUrl && b.savePngBase64) {
+                        b.savePngBase64(dataUrl.replace(/^data:image\/png;base64,/, ''), 'table');
                     }
                 }
             } catch (e) { /* bridge unavailable */ }
@@ -1202,7 +914,7 @@
                         table.style.transition = 'background-color 0.15s';
                         table.style.backgroundColor = 'rgba(9,105,218,0.1)';
                         setTimeout(function () { table.style.backgroundColor = ''; }, 300);
-                        showDownloadConfirm('table', table);
+                        showDownloadConfirm(table);
                     }, 500);
                 }
                 function cancelPress() {

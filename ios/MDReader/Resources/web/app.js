@@ -22,7 +22,6 @@ if (typeof window.Android === 'undefined') {
         saveScrollRatio: function (r) { _iosPost({ type: 'saveScroll', ratio: r }); },
         saveElementImage: function (t, h) { _iosPost({ type: 'saveElement', elementType: t, html: h }); },
         savePngBase64: function (b64, t) { _iosPost({ type: 'savePngBase64', base64: b64, elementType: t }); },
-        saveMermaidImage: function (h) { _iosPost({ type: 'saveMermaid', html: h }); },
         showCharCount: function (s) { _iosPost({ type: 'charCount', stats: s }); },
         searchVault: function (q) { return '[]'; },
         searchVaultAsync: function (q, cbId) { _iosPost({ type: 'searchVault', query: q, cbId: cbId }); },
@@ -506,63 +505,24 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
         });
     }
 
-    /** 为 Mermaid 容器绑定单击预览 + 长按下载事件 */
+    /** 为 Mermaid 容器绑定单击预览事件 */
     function bindMermaidEvents(c) {
-        var pressTimer = null;
-        var LONG_PRESS_MS = 500;
-        var longPressFired = false;
-        var startX = 0, startY = 0;
         var lastTapTime = 0;
-        var MOVE_THRESHOLD = 15;
 
-        function getTouchPos(e) {
-            if (e.touches && e.touches.length > 0) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
-            if (e.changedTouches && e.changedTouches.length > 0) return { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
-            return { x: e.clientX || 0, y: e.clientY || 0 };
-        }
-        function isMoved(e) {
-            var pos = getTouchPos(e);
-            return (Math.abs(pos.x - startX) > MOVE_THRESHOLD || Math.abs(pos.y - startY) > MOVE_THRESHOLD);
-        }
-        function startPress(e) {
-            var pos = getTouchPos(e);
-            startX = pos.x; startY = pos.y;
-            longPressFired = false;
-            pressTimer = setTimeout(function () {
-                pressTimer = null;
-                longPressFired = true;
-                if (!c.querySelector('svg')) return;
-                c.style.transition = 'background-color 0.15s';
-                c.style.backgroundColor = 'rgba(9,105,218,0.15)';
-                setTimeout(function () { c.style.backgroundColor = ''; }, 300);
-                showDownloadConfirm('mermaid', c);
-            }, LONG_PRESS_MS);
-        }
-        function cancelPress() { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } }
-
-        c.addEventListener('touchstart', startPress, { passive: true });
         c.addEventListener('touchend', function (e) {
-            cancelPress();
             var now = Date.now();
             if (now - lastTapTime < 400) return;
-            if (!longPressFired && !isMoved(e)) {
-                var svg = c.querySelector('svg');
-                if (svg) { lastTapTime = now; openMermaidPreview(svg); }
-            }
+            lastTapTime = now;
+            var svg = c.querySelector('svg');
+            if (svg) openMermaidPreview(svg);
         });
-        c.addEventListener('touchmove', function (e) { if (isMoved(e)) cancelPress(); });
-        c.addEventListener('touchcancel', cancelPress);
-        c.addEventListener('mousedown', startPress);
-        c.addEventListener('mouseup', function (e) {
-            cancelPress();
+        c.addEventListener('click', function () {
             var now = Date.now();
             if (now - lastTapTime < 400) return;
-            if (!longPressFired && !isMoved(e)) {
-                var svg = c.querySelector('svg');
-                if (svg) { lastTapTime = now; openMermaidPreview(svg); }
-            }
+            lastTapTime = now;
+            var svg = c.querySelector('svg');
+            if (svg) openMermaidPreview(svg);
         });
-        c.addEventListener('mouseleave', cancelPress);
     }
 
     /* ---------- LaTeX 公式渲染 ---------- */
@@ -617,8 +577,6 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
     })();
 
     var previewOverlay = null;
-    var previewCurrentSvg = null;
-    var previewCurrentSvgEl = null;
     var previewBlobUrl = null;
     var recentPinch = false;
 
@@ -664,9 +622,10 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
         var body = overlay.querySelector('.mdreader-preview-body');
         body.innerHTML = '';
         body.scrollTop = 0;
-        previewCurrentSvgEl = svgEl;
+        // 隐藏保存按钮（Mermaid 不支持保存）
+        var dlBtn = overlay.querySelector('.mdreader-preview-dl-btn');
+        if (dlBtn) dlBtn.style.display = 'none';
         var svgHtml = svgEl.outerHTML;
-        previewCurrentSvg = inlineSvgStyles(svgEl);
         var img = new Image();
         img.onload = function () {
             body.appendChild(img);
@@ -692,7 +651,9 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
         var body = overlay.querySelector('.mdreader-preview-body');
         body.innerHTML = '';
         body.scrollTop = 0;
-        previewCurrentSvg = null;
+        // 显示保存按钮
+        var dlBtn = overlay.querySelector('.mdreader-preview-dl-btn');
+        if (dlBtn) dlBtn.style.display = '';
         // 克隆表格（样式由 CSS 控制，跟随主题）
         var clone = tableEl.cloneNode(true);
         var wrapper = document.createElement('div');
@@ -706,53 +667,8 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
     function closePreviewOverlay() {
         if (previewOverlay) {
             previewOverlay.style.display = 'none';
-            previewCurrentSvg = null;
-            previewCurrentSvgEl = null;
             if (previewBlobUrl) { URL.revokeObjectURL(previewBlobUrl); previewBlobUrl = null; }
         }
-    }
-
-    /** 将 SVG 元素的计算样式内联到属性中。
-     *  不移除 class（Mermaid SVG 内部 &lt;style&gt; 依赖 class 选择器），
-     *  不内联 background-color 为 fill（深色模式会导致黑色区域）。 */
-    function inlineSvgStyles(svgEl) {
-        var clone = svgEl.cloneNode(true);
-        var styleProps = [
-            'fill', 'stroke', 'stroke-width', 'stroke-dasharray', 'stroke-dashoffset',
-            'font-family', 'font-size', 'font-weight', 'font-style',
-            'opacity', 'transform', 'transform-origin',
-            'text-anchor', 'dominant-baseline'
-        ];
-        var allEls = [clone].concat(Array.prototype.slice.call(clone.querySelectorAll('*')));
-        for (var i = 0; i < allEls.length; i++) {
-            var el = allEls[i];
-            if (el.nodeType !== 1) continue;
-            try {
-                var cs = window.getComputedStyle(el);
-                for (var j = 0; j < styleProps.length; j++) {
-                    var prop = styleProps[j];
-                    var val = cs.getPropertyValue(prop);
-                    if (val && val !== 'none' && val !== 'normal' && val !== '0px') {
-                        var attrName = prop.replace(/-([a-z])/g, function (_, c) { return c.toUpperCase(); });
-                        if (prop === 'font-family') {
-                            el.setAttribute('font-family', val);
-                        } else if (prop === 'font-size') {
-                            el.setAttribute('font-size', val);
-                        } else if (prop === 'font-weight') {
-                            el.setAttribute('font-weight', val);
-                        } else if (prop === 'stroke-width') {
-                            el.setAttribute('stroke-width', parseFloat(val));
-                        } else if (prop === 'stroke-dasharray') {
-                            el.setAttribute('stroke-dasharray', val);
-                        } else {
-                            el.setAttribute(attrName, val);
-                        }
-                    }
-                }
-                // 不再移除 class 属性
-            } catch (e) { /* skip */ }
-        }
-        return clone.outerHTML;
     }
 
     /** 将表格元素直接渲染为 PNG data URL（纯 JS Canvas 绘制） */
@@ -830,192 +746,24 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
         return canvas.toDataURL('image/png');
     }
 
-    /** 将 SVG 元素通过 Canvas 转换为 PNG base64（data URL）。
-     *  完全在 JS 端完成渲染，避免离屏 WebView draw(canvas) 空白问题。 */
-    function _svgToPngBase64(svgEl) {
-        var svgClone = svgEl.cloneNode(true);
-        if (!svgClone.getAttribute('xmlns')) {
-            svgClone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-        }
-        var svgStr = new XMLSerializer().serializeToString(svgClone);
-        var svgBlob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
-        var url = URL.createObjectURL(svgBlob);
-        return new Promise(function (resolve, reject) {
-            var img = new Image();
-            img.onload = function () {
-                var w = img.naturalWidth || svgEl.clientWidth || 800;
-                var h = img.naturalHeight || svgEl.clientHeight || 600;
-                var canvas = document.createElement('canvas');
-                canvas.width = w;
-                canvas.height = h;
-                var ctx = canvas.getContext('2d');
-                ctx.drawImage(img, 0, 0, w, h);
-                URL.revokeObjectURL(url);
-                resolve(canvas.toDataURL('image/png'));
-            };
-            img.onerror = function () {
-                URL.revokeObjectURL(url);
-                reject(new Error('SVG image load failed'));
-            };
-            img.src = url;
-        });
-    }
-
-    /** 将 Mermaid SVG 转换为 PNG data URL。
-     *  解决 Canvas 无法渲染 foreignObject 的问题。 */
-    function _captureMermaidToPng(svgElOrString) {
-        var svgClone;
-
-        if (typeof svgElOrString === 'string') {
-            var parser = new DOMParser();
-            var doc = parser.parseFromString(svgElOrString, 'image/svg+xml');
-            svgClone = doc.documentElement;
-        } else {
-            svgClone = svgElOrString.cloneNode(true);
-        }
-
-        var tempContainer = document.createElement('div');
-        tempContainer.style.cssText = 'position:fixed;left:-9999px;top:0;visibility:hidden;width:800px;height:600px;overflow:hidden;';
-        tempContainer.appendChild(svgClone);
-        document.body.appendChild(tempContainer);
-
-        // 1. 将 foreignObject 替换为 SVG text 元素
-        var fos = svgClone.querySelectorAll('foreignObject');
-        for (var i = fos.length - 1; i >= 0; i--) {
-            var fo = fos[i];
-            var foW = parseFloat(fo.getAttribute('width')) || 100;
-            var foH = parseFloat(fo.getAttribute('height')) || 40;
-
-            var lines = [];
-            var innerDiv = fo.querySelector('div');
-            if (innerDiv) {
-                var html = innerDiv.innerHTML;
-                var parts = html.split(/<br\s*\/?>/i);
-                for (var pi = 0; pi < parts.length; pi++) {
-                    var t = parts[pi].replace(/<[^>]*>/g, '').trim();
-                    if (t) lines.push(t);
-                }
-                if (lines.length <= 1) {
-                    var full = (innerDiv.textContent || '').trim();
-                    if (full) lines = [full];
-                } else {
-                    var seen = {};
-                    var unique = [];
-                    for (var li = 0; li < lines.length; li++) {
-                        if (!seen[lines[li]]) { seen[lines[li]] = true; unique.push(lines[li]); }
-                    }
-                    lines = unique;
-                }
-            }
-            if (lines.length === 0) {
-                var rawText = (fo.textContent || '').trim();
-                if (rawText) lines = [rawText];
-            }
-            if (lines.length === 0) { fo.parentNode.removeChild(fo); continue; }
-
-            var textEl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-            textEl.setAttribute('x', String(foW / 2));
-            textEl.setAttribute('text-anchor', 'middle');
-            textEl.setAttribute('fill', '#333');
-            textEl.setAttribute('font-family', '"trebuchet ms",verdana,arial,sans-serif');
-            textEl.setAttribute('font-size', '14');
-
-            var lineH = Math.min(18, foH / lines.length);
-            var startY = (foH - lines.length * lineH) / 2 + lineH * 0.8;
-            for (var li = 0; li < lines.length; li++) {
-                var tspan = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');
-                tspan.setAttribute('x', String(foW / 2));
-                tspan.setAttribute('dy', li === 0 ? String(startY) : String(lineH));
-                tspan.textContent = lines[li];
-                textEl.appendChild(tspan);
-            }
-
-            var parentG = fo.parentNode;
-            if (parentG && parentG.tagName === 'g') {
-                var pTrans = parentG.getAttribute('transform');
-                if (pTrans) textEl.setAttribute('transform', pTrans);
-            }
-
-            fo.parentNode.replaceChild(textEl, fo);
-        }
-
-        // 2. 补充 class 属性
-        var allG = svgClone.querySelectorAll('g');
-        for (var i = 0; i < allG.length; i++) {
-            var g = allG[i];
-            if (g.getAttribute('class')) continue;
-            var gid = g.getAttribute('id') || '';
-            if (gid === 'social-circle' || gid.indexOf('cluster') >= 0) {
-                g.setAttribute('class', 'cluster');
-            } else if (g.getAttribute('data-node') === 'true' || gid.indexOf('flowchart-') === 0) {
-                g.setAttribute('class', 'node');
-            }
-        }
-
-        if (!svgClone.getAttribute('xmlns')) {
-            svgClone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-        }
-
-        var svgStr = inlineSvgStyles(svgClone);
-        if (tempContainer.parentNode) tempContainer.parentNode.removeChild(tempContainer);
-
-        var svgBlob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
-        var url = URL.createObjectURL(svgBlob);
-        return new Promise(function (resolve, reject) {
-            var img = new Image();
-            img.onload = function () {
-                var w = img.naturalWidth || 800;
-                var h = img.naturalHeight || 600;
-                var dpr = window.devicePixelRatio || 1;
-                var canvas = document.createElement('canvas');
-                canvas.width = Math.ceil(w * dpr);
-                canvas.height = Math.ceil(h * dpr);
-                var ctx = canvas.getContext('2d');
-                ctx.scale(dpr, dpr);
-                ctx.fillStyle = '#ffffff';
-                ctx.fillRect(0, 0, w, h);
-                ctx.drawImage(img, 0, 0, w, h);
-                URL.revokeObjectURL(url);
-                resolve(canvas.toDataURL('image/png'));
-            };
-            img.onerror = function () {
-                URL.revokeObjectURL(url);
-                reject(new Error('Mermaid SVG to PNG failed'));
-            };
-            img.src = url;
-        });
-    }
-
-    /** 从预览覆盖层下载当前内容 */
+    /** 从预览覆盖层下载当前内容（仅表格） */
     function downloadFromPreview() {
         try {
             var b = bridge();
             if (!b) return;
-            if (previewCurrentSvg) {
-                // Mermaid: 通过 Canvas 转换为 PNG
-                if (b.savePngBase64) {
-                    var svgSource = previewCurrentSvgEl || previewCurrentSvg;
-                    _captureMermaidToPng(svgSource).then(function (dataUrl) {
-                        b.savePngBase64(dataUrl.replace(/^data:image\/png;base64,/, ''), 'mermaid');
-                    }).catch(function () {
-                        if (b.saveMermaidImage) b.saveMermaidImage(previewCurrentSvg);
-                    });
-                }
-            } else {
-                var tbody = previewOverlay.querySelector('.mdreader-preview-body');
-                var table = tbody.querySelector('table');
-                if (table) {
-                    var dataUrl = _captureTableToPng(table);
-                    if (dataUrl && b.savePngBase64) {
-                        b.savePngBase64(dataUrl.replace(/^data:image\/png;base64,/, ''), 'table');
-                    }
+            var tbody = previewOverlay.querySelector('.mdreader-preview-body');
+            var table = tbody.querySelector('table');
+            if (table) {
+                var dataUrl = _captureTableToPng(table);
+                if (dataUrl && b.savePngBase64) {
+                    b.savePngBase64(dataUrl.replace(/^data:image\/png;base64,/, ''), 'table');
                 }
             }
         } catch (e) { /* bridge unavailable */ }
     }
 
-    /** 显示下载确认弹窗 */
-    function showDownloadConfirm(type, el) {
+    /** 显示下载确认弹窗（仅表格） */
+    function showDownloadConfirm(el) {
         var msg = '确定保存此图片？';
         var overlay = document.createElement('div');
         overlay.className = 'mdreader-confirm-overlay';
@@ -1031,28 +779,14 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
             try {
                 var b = bridge();
                 if (!b) return;
-                if (type === 'mermaid') {
-                    var svg = el && el.querySelector ? el.querySelector('svg') : null;
-                    if (svg && b.savePngBase64) {
-                        _captureMermaidToPng(svg).then(function (dataUrl) {
-                            b.savePngBase64(dataUrl.replace(/^data:image\/png;base64,/, ''), 'mermaid');
-                        }).catch(function () {
-                            if (b.saveMermaidImage) b.saveMermaidImage(inlineSvgStyles(svg));
-                        });
-                    } else if (svg && b.saveMermaidImage) {
-                        b.saveMermaidImage(inlineSvgStyles(svg));
-                    }
-                } else {
-                    if (el) {
-                        var dataUrl = _captureTableToPng(el);
-                        if (dataUrl && b.savePngBase64) {
-                            b.savePngBase64(dataUrl.replace(/^data:image\/png;base64,/, ''), 'table');
-                        }
+                if (el) {
+                    var dataUrl = _captureTableToPng(el);
+                    if (dataUrl && b.savePngBase64) {
+                        b.savePngBase64(dataUrl.replace(/^data:image\/png;base64,/, ''), 'table');
                     }
                 }
             } catch (e) { /* bridge unavailable */ }
         };
-        // 点击背景关闭
         overlay.addEventListener('click', function (e) {
             if (e.target === overlay) document.body.removeChild(overlay);
         });
@@ -1178,7 +912,7 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
                         table.style.transition = 'background-color 0.15s';
                         table.style.backgroundColor = 'rgba(9,105,218,0.1)';
                         setTimeout(function () { table.style.backgroundColor = ''; }, 300);
-                        showDownloadConfirm('table', table);
+                        showDownloadConfirm(table);
                     }, 500);
                 }
                 function cancelPress() {

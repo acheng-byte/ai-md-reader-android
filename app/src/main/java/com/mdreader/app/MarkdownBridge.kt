@@ -27,9 +27,7 @@ class MarkdownBridge(private val provider: Provider) {
         fun loadEmbedContent(uri: String): String
         /** 当前文档标题（文件名），供 JS 端隐藏重复的一级标题 */
         fun docTitle(): String
-        /** 保存 Mermaid 图表 SVG 到本地文件 */
-        fun saveMermaidImage(svgHtml: String)
-        /** 保存表格或图表元素为 PNG 图片（type="mermaid"|"table"，html 为元素 HTML） */
+        /** 保存表格或图表元素为 PNG 图片（html 为元素 HTML） */
         fun saveElementImage(type: String, html: String)
         /** 保存 JS 端转换的 PNG base64 数据（Mermaid SVG→Canvas→PNG） */
         fun savePngBase64(base64: String, elementType: String)
@@ -67,9 +65,6 @@ class MarkdownBridge(private val provider: Provider) {
 
     @JavascriptInterface
     fun getTitle(): String = provider.docTitle()
-
-    @JavascriptInterface
-    fun saveMermaidImage(svgHtml: String) = provider.saveMermaidImage(svgHtml)
 
     @JavascriptInterface
     fun saveElementImage(type: String, html: String) = provider.saveElementImage(type, html)
