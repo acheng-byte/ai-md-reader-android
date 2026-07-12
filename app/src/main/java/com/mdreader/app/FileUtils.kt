@@ -387,67 +387,141 @@ object FileUtils {
             val sb = StringBuilder("# $title\n\n")
             var hasText = false
 
-            for (pi in 0 until range.numParagraphs) {
-                val para = range.getParagraph(pi)
-                val text = para.text() ?: ""
+            // 逐 CharacterRun 迭代（HWPF Paragraph 无 numRuns/getRun API）
+            // 通过 \r 检测段落边界，\u0007 检测表格单元格
+            var paraBuffer = StringBuilder()
+            var paraBold = false
+            var tableBuffer = StringBuilder()
+            var tableHeaderDone = false
+            var tableCells = ArrayList<String>()
+            var cellBuffer = StringBuilder()
+            var cellBold = false
 
-                // 跳过只含控制字符的空段落
-                if (text.replace(Regex("[\\x00-\\x09\\x0b-\\x1f]"), "").isBlank()) {
-                    if (hasText) sb.append('\n')
-                    continue
-                }
+            for (i in 0 until range.numCharacterRuns()) {
+                val run = range.getCharacterRun(i)
+                var text = run.text() ?: continue
+                val bold = run.isBold
+                val italic = run.isItalic
 
-                // ── 表格段落：\u0007 分隔单元格 ──
-                if (para.isInTable) {
-                    val allText = buildString {
-                        for (ri in 0 until para.numRuns) append(para.getRun(ri).text())
-                    }
-                    if (allText.contains("\u0007")) {
-                        val cells = allText.split("\u0007")
-                            .map { it.replace(Regex("[\\r\\u0007\\u000b]"), "").trim() }
-                            .filter { it.isNotEmpty() }
-                        if (cells.isNotEmpty()) {
-                            sb.append(formatDocTableRow(cells))
-                            hasText = true
+                // 处理文本中的单元格分隔符 \u0007
+                if (text.contains("\u0007")) {
+                    val parts = text.split("\u0007")
+                    for ((idx, part) in parts.withIndex()) {
+                        val clean = part.replace(Regex("[\\r\\u000b]"), "")
+                        if (clean.isNotEmpty()) {
+                            val formatted = when {
+                                bold && italic -> "***$clean***"
+                                bold -> "**$clean**"
+                                italic -> "*$clean*"
+                                else -> clean
+                            }
+                            cellBuffer.append(formatted)
+                        }
+                        if (bold) cellBold = true
+                        // 每个 \u0007 完成一个单元格
+                        if (idx < parts.size - 1) {
+                            val cellText = cellBuffer.toString().trim()
+                            if (cellText.isNotEmpty()) tableCells.add(cellText)
+                            cellBuffer = StringBuilder()
+                            cellBold = false
                         }
                     }
+                    // \u0007 后的文本属于新单元格或行结束
                     continue
                 }
 
-                // ── 普通段落：逐 CharacterRun 提取格式 ──
-                val paraSb = StringBuilder()
-                var hasBoldRun = false
+                // 检查是否为表格内容（tableBuffer 有内容说明在表格中）
+                val inTable = tableBuffer.isNotEmpty() || text.contains("\u0007")
 
-                for (ri in 0 until para.numRuns) {
-                    val run = para.getRun(ri)
-                    var runText = run.text() ?: continue
-                    // 去除段落终止符和控制字符
-                    runText = runText.replace(Regex("[\\x00-\\x09\\x0b-\\x1f]"), "")
-                    if (runText.isEmpty()) continue
-
-                    if (run.isBold) hasBoldRun = true
-
-                    val formatted = when {
-                        run.isBold && run.isItalic -> "***$runText***"
-                        run.isBold -> "**$runText**"
-                        run.isItalic -> "*$runText*"
-                        else -> runText
+                if (text.contains("\r")) {
+                    // 段落结束
+                    val clean = text.replace("\r", "").replace(Regex("[\\x00-\\x09\\x0b-\\x1f]"), "")
+                    if (clean.isNotEmpty()) {
+                        val formatted = when {
+                            bold && italic -> "***$clean***"
+                            bold -> "**$clean**"
+                            italic -> "*$clean*"
+                            else -> clean
+                        }
+                        if (inTable) {
+                            cellBuffer.append(formatted)
+                            if (bold) cellBold = true
+                        } else {
+                            paraBuffer.append(formatted)
+                            if (bold) paraBold = true
+                        }
                     }
-                    paraSb.append(formatted)
-                }
 
-                val paraText = paraSb.toString().trim()
-                if (paraText.isNotEmpty()) {
-                    if (hasBoldRun && looksLikeHeading(paraText)) {
-                        // 整段加粗 + 短文本 → 视为标题
-                        val level = headingLevelFromLength(paraText)
-                        sb.append("#".repeat(level)).append(' ')
-                        sb.append(paraText.trim('*')).append("\n\n")
+                    // 刷新表格或段落
+                    if (inTable) {
+                        // 行结束：把剩余 cellBuffer 作为最后一个单元格
+                        val lastCell = cellBuffer.toString().trim()
+                        if (lastCell.isNotEmpty()) tableCells.add(lastCell)
+                        if (tableCells.isNotEmpty()) {
+                            if (!tableHeaderDone) {
+                                sb.append(formatDocTableRow(tableCells))
+                                sb.append(formatDocTableSep(tableCells.size))
+                                tableHeaderDone = true
+                            } else {
+                                sb.append(formatDocTableRow(tableCells))
+                            }
+                        }
+                        tableCells = ArrayList()
+                        tableBuffer = StringBuilder()
+                        cellBuffer = StringBuilder()
+                        tableHeaderDone = false
+                        hasText = true
+                    } else if (paraBuffer.isNotEmpty()) {
+                        val paraText = paraBuffer.toString().trim()
+                        if (paraText.isNotEmpty()) {
+                            if (paraBold && looksLikeHeading(paraText)) {
+                                val level = headingLevelFromLength(paraText)
+                                sb.append("#".repeat(level)).append(' ')
+                                sb.append(paraText.trim('*')).append("\n\n")
+                            } else {
+                                sb.append(paraText).append("\n\n")
+                            }
+                            hasText = true
+                        }
+                        paraBuffer = StringBuilder()
+                        paraBold = false
                     } else {
-                        sb.append(paraText).append("\n\n")
+                        // 空段落 → 换行
+                        if (hasText) sb.append('\n')
                     }
-                    hasText = true
+                } else {
+                    // 非段落结束：检查是否进入表格
+                    val clean = text.replace(Regex("[\\x00-\\x09\\x0b-\\x1f]"), "")
+                    if (clean.isNotEmpty()) {
+                        val formatted = when {
+                            bold && italic -> "***$clean***"
+                            bold -> "**$clean**"
+                            italic -> "*$clean*"
+                            else -> clean
+                        }
+                        // 检测表格开始：当前累积的段落文本含 \u0007
+                        if (paraBuffer.contains("\u0007")) {
+                            tableBuffer.append(paraBuffer)
+                            paraBuffer = StringBuilder()
+                            paraBold = false
+                        }
+                        if (tableBuffer.isNotEmpty()) {
+                            cellBuffer.append(formatted)
+                            if (bold) cellBold = true
+                            tableBuffer.append(text)
+                        } else {
+                            paraBuffer.append(formatted)
+                            if (bold) paraBold = true
+                        }
+                    }
                 }
+            }
+
+            // 刷新未结束的段落
+            val remaining = paraBuffer.toString().trim()
+            if (remaining.isNotEmpty()) {
+                sb.append(remaining).append("\n\n")
+                hasText = true
             }
 
             // 提取嵌入图片
@@ -481,9 +555,16 @@ object FileUtils {
 
     /** 表格单元格 → Markdown 表格行 */
     private fun formatDocTableRow(cells: List<String>): String {
-        val row = cells.joinToString(" | ") { it.ifBlank { " " } }
+        val cleaned = cells.map { it.replace(Regex("[\\r\\u0007\\u000b]"), "").trim() }
+            .filter { it.isNotEmpty() }
+        if (cleaned.isEmpty()) return ""
+        val row = cleaned.joinToString(" | ") { it.ifBlank { " " } }
         return "| $row |\n"
     }
+
+    /** 表格分隔行 */
+    private fun formatDocTableSep(colCount: Int): String =
+        "|" + " --- |".repeat(colCount) + "\n"
 
     /** 整段加粗的短文本可能实际是标题 */
     private fun looksLikeHeading(text: String): Boolean {
