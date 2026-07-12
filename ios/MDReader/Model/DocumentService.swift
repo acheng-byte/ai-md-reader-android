@@ -55,7 +55,7 @@ enum DocumentService {
         let utf8Text = String(decoding: data, as: UTF8.self)
         let utf8Repl = utf8Text.unicodeScalars.filter { $0.value == 0xFFFD }.count
 
-        if utf8Repl == 0 || Double(utf8Repl) / Double(max(utf8Text.count, 1)) <= 0.01 {
+        if utf8Repl == 0 || Double(utf8Repl) / Double(max(utf8Text.count, 1)) <= 0.001 {
             // UTF-8 基本无替换字符，直接使用
             return utf8Text.hasPrefix("\u{FEFF}") ? String(utf8Text.dropFirst()) : utf8Text
         }

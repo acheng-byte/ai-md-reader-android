@@ -70,7 +70,7 @@ object FileUtils {
         // 2. Try UTF-8; count replacement characters to decide fallback
         val utf8Text = bytes.toString(Charsets.UTF_8)
         val utf8Repl = utf8Text.count { it == '\uFFFD' }
-        text = if (utf8Repl > 0 && utf8Repl.toDouble() / maxOf(utf8Text.length, 1) > 0.01) {
+        text = if (utf8Repl > 0 && utf8Repl.toDouble() / maxOf(utf8Text.length, 1) > 0.001) {
             // UTF-8 有较多替换字符，可能是 GBK/GB18030 编码
             // 但必须先验证 GB18030 解码确实更好，否则保留 UTF-8
             val gb18030Text = runCatching { bytes.toString(charset("GB18030")) }.getOrNull()

@@ -1114,6 +1114,8 @@
         s = s.replace(/\u00A0/g, ' ');
         // 其他 Unicode 空格统一为普通空格（em space, en space, thin space 等）
         s = s.replace(/[\u2000-\u200A\u202F\u205F]/g, ' ');
+        // 去除替换字符（菱形问号）—— 这是编码错误的标记，不是真实内容
+        s = s.replace(/\uFFFD/g, '');
         return s;
     }
 
