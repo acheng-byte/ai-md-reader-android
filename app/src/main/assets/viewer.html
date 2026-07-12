@@ -31,7 +31,10 @@
     <!-- 搜索覆层 -->
     <div id="search-overlay" class="search-overlay" style="display:none">
         <div class="search-bar">
-            <input id="search-input" type="text" placeholder="搜索…" autocomplete="off" />
+            <div class="search-input-wrap">
+                <input id="search-input" type="text" placeholder="搜索…" autocomplete="off" />
+                <button id="search-clear" class="search-clear-btn" title="清除" style="display:none">&#10005;</button>
+            </div>
             <span id="search-count" class="search-count"></span>
             <button id="search-prev" class="search-btn" title="上一个">&#8679;</button>
             <button id="search-next" class="search-btn" title="下一个">&#8681;</button>

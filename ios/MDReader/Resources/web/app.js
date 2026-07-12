@@ -192,6 +192,7 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
     var searchOverlay = document.getElementById('search-overlay');
     var searchInput = document.getElementById('search-input');
     var searchCount = document.getElementById('search-count');
+    var searchClearBtn = document.getElementById('search-clear');
     var vaultResultsEl = document.getElementById('vault-results');
 
     var headings = [];
@@ -1257,9 +1258,20 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
     var vaultSearchTimer = null;
 
     function openSearch() {
+        if (searchOverlay.style.display === 'block') {
+            closeSearch();
+            return;
+        }
         searchOverlay.style.display = 'block';
         searchInput.focus();
         searchInput.select();
+        updateClearBtn();
+    }
+
+    function updateClearBtn() {
+        if (searchClearBtn) {
+            searchClearBtn.style.display = searchInput.value.length > 0 ? 'block' : 'none';
+        }
     }
 
     function closeSearch() {
@@ -1269,6 +1281,7 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
         searchIdx = -1;
         searchInput.value = '';
         searchCount.textContent = '';
+        if (searchClearBtn) searchClearBtn.style.display = 'none';
         vaultResultsEl.style.display = 'none';
         vaultResultsEl.innerHTML = '';
         searchVaultMode = false;
@@ -1431,6 +1444,7 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
 
     // Search UI wiring
     searchInput.addEventListener('input', function () {
+        updateClearBtn();
         clearTimeout(searchInput._t);
         searchInput._t = setTimeout(doSearch, 150);
     });
@@ -1438,6 +1452,17 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
         if (e.key === 'Enter') { searchNext(); e.preventDefault(); }
         if (e.key === 'Escape') { closeSearch(); }
     });
+    if (searchClearBtn) {
+        searchClearBtn.onclick = function () {
+            searchInput.value = '';
+            updateClearBtn();
+            clearHighlights();
+            searchMatches = [];
+            searchIdx = -1;
+            searchCount.textContent = '';
+            searchInput.focus();
+        };
+    }
     document.getElementById('search-prev').onclick = searchPrev;
     document.getElementById('search-next').onclick = searchNext;
     document.getElementById('search-close').onclick = closeSearch;
@@ -1594,14 +1619,14 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
         }
         if (s.fontFamily != null) {
             var fontMap = {
-                'default': '-apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", "Helvetica Neue", Arial, sans-serif',
-                'serif': '"Noto Serif CJK SC", "Source Han Serif SC", "SimSun", "Songti SC", Georgia, "Times New Roman", serif',
-                'mono': 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Courier New", monospace',
-                'sans': '"Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei", "PingFang SC", sans-serif',
-                'kai': '"KaiTi", "STKaiti", "AR PL UKai CN", "楷体", cursive',
-                'fangsong': '"FangSong", "STFangsong", "仿宋", serif',
-                'xiaobiao': '"FZXiaoBiaoSong-B05S", "方正小标宋简体", "SimSun", "宋体", serif',
-                'lishu': '"LiSu", "STLiti", "隶书", cursive',
+                'default': '-apple-system, "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif',
+                'serif': '"Noto Serif CJK SC", "Source Han Serif SC", "Songti SC", "SimSun", Georgia, "Times New Roman", serif',
+                'mono': 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Noto Sans Mono CJK SC", "Courier New", monospace',
+                'sans': '"Noto Sans CJK SC", "Source Han Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif',
+                'kai': '"STKaiti", "KaiTi", "AR PL UKai CN", "楷体", cursive',
+                'fangsong': '"STFangsong", "FangSong", "仿宋", serif',
+                'xiaobiao': '"FZXiaoBiaoSong-B05S", "方正小标宋简体", "Noto Serif CJK SC", "SimSun", serif',
+                'lishu': '"STLiti", "LiSu", "华文隶书", "隶书", cursive',
                 'yahei': '"Microsoft YaHei", "微软雅黑", "PingFang SC", "Noto Sans CJK SC", sans-serif'
             };
             var ff = fontMap[s.fontFamily] || fontMap['default'];

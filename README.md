@@ -8,10 +8,11 @@
 
 现在越来越多内容从 AI 对话、代码助手、知识库、会议纪要和自动化工作流里直接产出为 Markdown。电脑上阅读很方便，但手机上常常缺一个足够轻、足够直接、能从微信和文件管理器顺手打开 `.md` 的本地阅读器。**MD阅读器**解决的就是这个小而高频的痛点：把 Markdown 文件在手机上安静、清楚、离线地读起来。
 
-## 最新版本 v2.1.0
+## 最新版本 v2.1.1
 
-v2.1.0 是功能最完善的版本，涵盖 v1.9.0 至 v2.1.0 的完整更新：
+v2.1.1 是功能最完善的版本，涵盖 v1.9.0 至 v2.1.1 的完整更新：
 
+- **v2.1.1**：欢迎页更新、搜索栏优化（清除按钮/切换开关/响应式）、字体映射改善
 - **v2.1.0**：全新羽毛笔图标、添加桌面快捷方式、主题同步修复、精简 Mermaid 保存
 - **v2.0.7**：移除 Mermaid 保存为 PNG 功能（保留预览）、清理保存相关代码残留
 - **v2.0.6**：修复工具栏/状态栏颜色不随浅色/深色/护眼主题切换
@@ -100,7 +101,8 @@ adb install -r app/build/outputs/apk/release/app-release.apk
 
 | 版本 | 类型 | 更新重点 |
 | --- | --- | --- |
-| [v2.1.0](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.1.0) | 最新版本 | 全新羽毛笔图标、桌面快捷方式、主题同步、精简 Mermaid |
+| [v2.1.1](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.1.1) | 最新版本 | 欢迎页更新、搜索栏优化、字体映射改善 |
+| [v2.1.0](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.1.0) | 功能增强 | 全新羽毛笔图标、桌面快捷方式、主题同步、精简 Mermaid |
 | [v2.0.7](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.0.7) | 功能精简 | 移除 Mermaid 保存为 PNG、清理保存代码残留 |
 | [v2.0.6](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.0.6) | Bug 修复 | 工具栏/状态栏颜色跟随主题切换 |
 | [v2.0.5](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.0.5) | 新增功能 | 添加文件到桌面快捷方式 |

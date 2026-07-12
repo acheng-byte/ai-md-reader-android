@@ -27,15 +27,20 @@
         </div>
     </div>
 
-    <!-- 搜索占位（iOS 暂未实现原生搜索 UI） -->
-    <div id="search-overlay" style="display:none">
-        <input id="search-input" type="text">
-        <span id="search-count"></span>
-        <button id="search-prev"></button>
-        <button id="search-next"></button>
-        <button id="search-close"></button>
-        <button id="search-vault-btn"></button>
-        <div id="vault-results"></div>
+    <!-- 搜索覆层 -->
+    <div id="search-overlay" class="search-overlay" style="display:none">
+        <div class="search-bar">
+            <div class="search-input-wrap">
+                <input id="search-input" type="text" placeholder="搜索…" autocomplete="off" />
+                <button id="search-clear" class="search-clear-btn" title="清除" style="display:none">&#10005;</button>
+            </div>
+            <span id="search-count" class="search-count"></span>
+            <button id="search-prev" class="search-btn" title="上一个">&#8679;</button>
+            <button id="search-next" class="search-btn" title="下一个">&#8681;</button>
+            <button id="search-vault-btn" class="search-btn search-vault-toggle" title="搜索全库">&#128269;</button>
+            <button id="search-close" class="search-btn" title="关闭">&#10005;</button>
+        </div>
+        <div id="vault-results" class="vault-results" style="display:none"></div>
     </div>
 
     <script src="app.js"></script>
