@@ -485,65 +485,12 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
             container.id = divId;
             pre.parentNode.replaceChild(container, pre);
 
-            // 立即绑定事件处理器（不等 Mermaid 异步渲染完成）
-            (function (c) {
-                var pressTimer = null;
-                var LONG_PRESS_MS = 500;
-                var longPressFired = false;
-                var startX = 0, startY = 0;
-                var lastTapTime = 0;
-                var MOVE_THRESHOLD = 15;
-                function getTouchPos(e) {
-                    if (e.touches && e.touches.length > 0) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
-                    if (e.changedTouches && e.changedTouches.length > 0) return { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
-                    return { x: e.clientX || 0, y: e.clientY || 0 };
-                }
-                function isMoved(e) {
-                    var pos = getTouchPos(e);
-                    return (Math.abs(pos.x - startX) > MOVE_THRESHOLD || Math.abs(pos.y - startY) > MOVE_THRESHOLD);
-                }
-                function startPress(e) {
-                    var pos = getTouchPos(e);
-                    startX = pos.x; startY = pos.y;
-                    longPressFired = false;
-                    pressTimer = setTimeout(function () {
-                        pressTimer = null; longPressFired = true;
-                        if (!c.querySelector('svg')) return;
-                        c.style.transition = 'background-color 0.15s';
-                        c.style.backgroundColor = 'rgba(9,105,218,0.15)';
-                        setTimeout(function () { c.style.backgroundColor = ''; }, 300);
-                        showDownloadConfirm('mermaid', c);
-                    }, LONG_PRESS_MS);
-                }
-                function cancelPress() { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } }
-                c.addEventListener('touchstart', startPress, { passive: true });
-                c.addEventListener('touchend', function (e) {
-                    cancelPress();
-                    var now = Date.now();
-                    if (now - lastTapTime < 400) return;
-                    if (!longPressFired && !isMoved(e)) {
-                        var svg = c.querySelector('svg');
-                        if (svg) { lastTapTime = now; openMermaidPreview(svg); }
-                    }
-                });
-                c.addEventListener('touchmove', function (e) { if (isMoved(e)) cancelPress(); });
-                c.addEventListener('touchcancel', cancelPress);
-                c.addEventListener('mousedown', startPress);
-                c.addEventListener('mouseup', function (e) {
-                    cancelPress();
-                    var now = Date.now();
-                    if (now - lastTapTime < 400) return;
-                    if (!longPressFired && !isMoved(e)) {
-                        var svg = c.querySelector('svg');
-                        if (svg) { lastTapTime = now; openMermaidPreview(svg); }
-                    }
-                });
-                c.addEventListener('mouseleave', cancelPress);
-            })(container);
-
+            // 异步渲染 Mermaid SVG，渲染完成后再绑定事件处理器
             try {
                 window.mermaid.render(divId + '-svg', graphDef).then(function (result) {
-                    if (document.contains(container)) container.innerHTML = result.svg;
+                    if (!document.contains(container)) return;
+                    container.innerHTML = result.svg;
+                    bindMermaidEvents(container);
                 }).catch(function (e) {
                     if (document.contains(container)) {
                         container.textContent = graphDef;
@@ -557,6 +504,65 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
                 }
             }
         });
+    }
+
+    /** 为 Mermaid 容器绑定单击预览 + 长按下载事件 */
+    function bindMermaidEvents(c) {
+        var pressTimer = null;
+        var LONG_PRESS_MS = 500;
+        var longPressFired = false;
+        var startX = 0, startY = 0;
+        var lastTapTime = 0;
+        var MOVE_THRESHOLD = 15;
+
+        function getTouchPos(e) {
+            if (e.touches && e.touches.length > 0) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+            if (e.changedTouches && e.changedTouches.length > 0) return { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
+            return { x: e.clientX || 0, y: e.clientY || 0 };
+        }
+        function isMoved(e) {
+            var pos = getTouchPos(e);
+            return (Math.abs(pos.x - startX) > MOVE_THRESHOLD || Math.abs(pos.y - startY) > MOVE_THRESHOLD);
+        }
+        function startPress(e) {
+            var pos = getTouchPos(e);
+            startX = pos.x; startY = pos.y;
+            longPressFired = false;
+            pressTimer = setTimeout(function () {
+                pressTimer = null;
+                longPressFired = true;
+                if (!c.querySelector('svg')) return;
+                c.style.transition = 'background-color 0.15s';
+                c.style.backgroundColor = 'rgba(9,105,218,0.15)';
+                setTimeout(function () { c.style.backgroundColor = ''; }, 300);
+                showDownloadConfirm('mermaid', c);
+            }, LONG_PRESS_MS);
+        }
+        function cancelPress() { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } }
+
+        c.addEventListener('touchstart', startPress, { passive: true });
+        c.addEventListener('touchend', function (e) {
+            cancelPress();
+            var now = Date.now();
+            if (now - lastTapTime < 400) return;
+            if (!longPressFired && !isMoved(e)) {
+                var svg = c.querySelector('svg');
+                if (svg) { lastTapTime = now; openMermaidPreview(svg); }
+            }
+        });
+        c.addEventListener('touchmove', function (e) { if (isMoved(e)) cancelPress(); });
+        c.addEventListener('touchcancel', cancelPress);
+        c.addEventListener('mousedown', startPress);
+        c.addEventListener('mouseup', function (e) {
+            cancelPress();
+            var now = Date.now();
+            if (now - lastTapTime < 400) return;
+            if (!longPressFired && !isMoved(e)) {
+                var svg = c.querySelector('svg');
+                if (svg) { lastTapTime = now; openMermaidPreview(svg); }
+            }
+        });
+        c.addEventListener('mouseleave', cancelPress);
     }
 
     /* ---------- 表格/图表预览与下载 ---------- */
@@ -597,6 +603,7 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
 
     var previewOverlay = null;
     var previewCurrentSvg = null;
+    var previewCurrentSvgEl = null;
     var previewBlobUrl = null;
 
     /** 创建预览覆盖层 DOM（惰性创建，复用） */
@@ -640,7 +647,7 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
         var body = overlay.querySelector('.mdreader-preview-body');
         body.innerHTML = '';
         body.scrollTop = 0;
-        // 存储内联样式后的 SVG，确保 offscreen WebView 渲染正确
+        previewCurrentSvgEl = svgEl;
         var svgHtml = svgEl.outerHTML;
         previewCurrentSvg = inlineSvgStyles(svgEl);
         var img = new Image();
@@ -683,6 +690,7 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
         if (previewOverlay) {
             previewOverlay.style.display = 'none';
             previewCurrentSvg = null;
+            previewCurrentSvgEl = null;
             if (previewBlobUrl) { URL.revokeObjectURL(previewBlobUrl); previewBlobUrl = null; }
         }
     }
@@ -844,13 +852,146 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
         });
     }
 
+    /** 将 Mermaid SVG 转换为 PNG data URL。
+     *  解决 Canvas 无法渲染 foreignObject 的问题。 */
+    function _captureMermaidToPng(svgElOrString) {
+        var svgClone;
+
+        if (typeof svgElOrString === 'string') {
+            var parser = new DOMParser();
+            var doc = parser.parseFromString(svgElOrString, 'image/svg+xml');
+            svgClone = doc.documentElement;
+        } else {
+            svgClone = svgElOrString.cloneNode(true);
+        }
+
+        var tempContainer = document.createElement('div');
+        tempContainer.style.cssText = 'position:fixed;left:-9999px;top:0;visibility:hidden;width:800px;height:600px;overflow:hidden;';
+        tempContainer.appendChild(svgClone);
+        document.body.appendChild(tempContainer);
+
+        // 1. 将 foreignObject 替换为 SVG text 元素
+        var fos = svgClone.querySelectorAll('foreignObject');
+        for (var i = fos.length - 1; i >= 0; i--) {
+            var fo = fos[i];
+            var foW = parseFloat(fo.getAttribute('width')) || 100;
+            var foH = parseFloat(fo.getAttribute('height')) || 40;
+
+            var lines = [];
+            var innerDiv = fo.querySelector('div');
+            if (innerDiv) {
+                var html = innerDiv.innerHTML;
+                var parts = html.split(/<br\s*\/?>/i);
+                for (var pi = 0; pi < parts.length; pi++) {
+                    var t = parts[pi].replace(/<[^>]*>/g, '').trim();
+                    if (t) lines.push(t);
+                }
+                if (lines.length <= 1) {
+                    var full = (innerDiv.textContent || '').trim();
+                    if (full) lines = [full];
+                } else {
+                    var seen = {};
+                    var unique = [];
+                    for (var li = 0; li < lines.length; li++) {
+                        if (!seen[lines[li]]) { seen[lines[li]] = true; unique.push(lines[li]); }
+                    }
+                    lines = unique;
+                }
+            }
+            if (lines.length === 0) {
+                var rawText = (fo.textContent || '').trim();
+                if (rawText) lines = [rawText];
+            }
+            if (lines.length === 0) { fo.parentNode.removeChild(fo); continue; }
+
+            var textEl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            textEl.setAttribute('x', String(foW / 2));
+            textEl.setAttribute('text-anchor', 'middle');
+            textEl.setAttribute('fill', '#333');
+            textEl.setAttribute('font-family', '"trebuchet ms",verdana,arial,sans-serif');
+            textEl.setAttribute('font-size', '14');
+
+            var lineH = Math.min(18, foH / lines.length);
+            var startY = (foH - lines.length * lineH) / 2 + lineH * 0.8;
+            for (var li = 0; li < lines.length; li++) {
+                var tspan = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');
+                tspan.setAttribute('x', String(foW / 2));
+                tspan.setAttribute('dy', li === 0 ? String(startY) : String(lineH));
+                tspan.textContent = lines[li];
+                textEl.appendChild(tspan);
+            }
+
+            var parentG = fo.parentNode;
+            if (parentG && parentG.tagName === 'g') {
+                var pTrans = parentG.getAttribute('transform');
+                if (pTrans) textEl.setAttribute('transform', pTrans);
+            }
+
+            fo.parentNode.replaceChild(textEl, fo);
+        }
+
+        // 2. 补充 class 属性
+        var allG = svgClone.querySelectorAll('g');
+        for (var i = 0; i < allG.length; i++) {
+            var g = allG[i];
+            if (g.getAttribute('class')) continue;
+            var gid = g.getAttribute('id') || '';
+            if (gid === 'social-circle' || gid.indexOf('cluster') >= 0) {
+                g.setAttribute('class', 'cluster');
+            } else if (g.getAttribute('data-node') === 'true' || gid.indexOf('flowchart-') === 0) {
+                g.setAttribute('class', 'node');
+            }
+        }
+
+        if (!svgClone.getAttribute('xmlns')) {
+            svgClone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+        }
+
+        var svgStr = inlineSvgStyles(svgClone);
+        if (tempContainer.parentNode) tempContainer.parentNode.removeChild(tempContainer);
+
+        var svgBlob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
+        var url = URL.createObjectURL(svgBlob);
+        return new Promise(function (resolve, reject) {
+            var img = new Image();
+            img.onload = function () {
+                var w = img.naturalWidth || 800;
+                var h = img.naturalHeight || 600;
+                var dpr = window.devicePixelRatio || 1;
+                var canvas = document.createElement('canvas');
+                canvas.width = Math.ceil(w * dpr);
+                canvas.height = Math.ceil(h * dpr);
+                var ctx = canvas.getContext('2d');
+                ctx.scale(dpr, dpr);
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, w, h);
+                ctx.drawImage(img, 0, 0, w, h);
+                URL.revokeObjectURL(url);
+                resolve(canvas.toDataURL('image/png'));
+            };
+            img.onerror = function () {
+                URL.revokeObjectURL(url);
+                reject(new Error('Mermaid SVG to PNG failed'));
+            };
+            img.src = url;
+        });
+    }
+
     /** 从预览覆盖层下载当前内容 */
     function downloadFromPreview() {
         try {
             var b = bridge();
             if (!b) return;
             if (previewCurrentSvg) {
-                if (b.saveMermaidImage) b.saveMermaidImage(previewCurrentSvg);
+                // Mermaid: 通过 Canvas 转换为 PNG
+                if (b.savePngBase64) {
+                    var svgSource = previewCurrentSvgEl || previewCurrentSvg;
+                    _captureMermaidToPng(svgSource).then(function (dataUrl) {
+                        b.savePngBase64(dataUrl.replace(/^data:image\/png;base64,/, ''), 'mermaid');
+                    }).catch(function () {
+                        if (b.saveMermaidImage) b.saveMermaidImage(previewCurrentSvg);
+                    });
+                }
             } else {
                 var tbody = previewOverlay.querySelector('.mdreader-preview-body');
                 var table = tbody.querySelector('table');
@@ -866,7 +1007,7 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
 
     /** 显示下载确认弹窗 */
     function showDownloadConfirm(type, el) {
-        var msg = type === 'mermaid' ? '确定保存此图表为图片？' : '确定保存此表格为图片？';
+        var msg = '确定保存此图片？';
         var overlay = document.createElement('div');
         overlay.className = 'mdreader-confirm-overlay';
         overlay.innerHTML = '<div class="mdreader-confirm-box">' +
@@ -883,7 +1024,15 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
                 if (!b) return;
                 if (type === 'mermaid') {
                     var svg = el && el.querySelector ? el.querySelector('svg') : null;
-                    if (svg && b.saveMermaidImage) b.saveMermaidImage(inlineSvgStyles(svg));
+                    if (svg && b.savePngBase64) {
+                        _captureMermaidToPng(svg).then(function (dataUrl) {
+                            b.savePngBase64(dataUrl.replace(/^data:image\/png;base64,/, ''), 'mermaid');
+                        }).catch(function () {
+                            if (b.saveMermaidImage) b.saveMermaidImage(inlineSvgStyles(svg));
+                        });
+                    } else if (svg && b.saveMermaidImage) {
+                        b.saveMermaidImage(inlineSvgStyles(svg));
+                    }
                 } else {
                     if (el) {
                         var dataUrl = _captureTableToPng(el);
@@ -901,11 +1050,15 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
         document.body.appendChild(overlay);
     }
 
-    /** 为预览图片设置双指缩放 */
+    /** 为预览图片设置双指缩放 + 单指平移 */
     function setupPinchZoom(img) {
         var scale = 1;
         var startDist = 0;
         var startScale = 1;
+        var panX = 0, panY = 0;
+        var startPanX = 0, startPanY = 0;
+        var startTouchX = 0, startTouchY = 0;
+        var isPanning = false;
 
         function getDist(t1, t2) {
             var dx = t1.clientX - t2.clientX;
@@ -913,35 +1066,54 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
             return Math.sqrt(dx * dx + dy * dy);
         }
 
+        function applyTransform() {
+            img.style.transform = 'translate(' + panX + 'px,' + panY + 'px) scale(' + scale + ')';
+        }
+
         img.addEventListener('touchstart', function (e) {
             if (e.touches.length === 2) {
                 e.preventDefault();
+                isPanning = false;
                 startDist = getDist(e.touches[0], e.touches[1]);
                 startScale = scale;
+            } else if (e.touches.length === 1 && scale > 1) {
+                isPanning = true;
+                startTouchX = e.touches[0].clientX;
+                startTouchY = e.touches[0].clientY;
+                startPanX = panX;
+                startPanY = panY;
             }
         }, { passive: false });
 
         img.addEventListener('touchmove', function (e) {
             if (e.touches.length === 2) {
                 e.preventDefault();
+                isPanning = false;
                 var dist = getDist(e.touches[0], e.touches[1]);
                 scale = Math.max(0.5, Math.min(5, startScale * (dist / startDist)));
-                img.style.transform = 'scale(' + scale + ')';
+                applyTransform();
+            } else if (e.touches.length === 1 && isPanning && scale > 1) {
+                e.preventDefault();
+                var dx = e.touches[0].clientX - startTouchX;
+                var dy = e.touches[0].clientY - startTouchY;
+                panX = startPanX + dx;
+                panY = startPanY + dy;
+                applyTransform();
             }
         }, { passive: false });
 
         img.addEventListener('touchend', function (e) {
-            if (e.touches.length < 2) {
-                if (scale < 1) { scale = 1; img.style.transform = 'scale(1)'; }
+            if (e.touches.length === 0) {
+                isPanning = false;
             }
         });
 
-        // 双击重置缩放
+        // 双击重置缩放和平移
         var lastTap = 0;
         img.addEventListener('touchend', function (e) {
             var now = Date.now();
-            if (now - lastTap < 300 && e.touches.length < 2) {
-                scale = 1;
+            if (now - lastTap < 300 && e.touches.length === 0) {
+                scale = 1; panX = 0; panY = 0;
                 img.style.transform = 'scale(1)';
             }
             lastTap = now;
@@ -1140,6 +1312,24 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
                 if (pre.classList.contains('mermaid-block')) return;
                 var codeEl = pre.querySelector('code');
                 var text = codeEl ? codeEl.textContent : pre.textContent;
+
+                // 提取语言名称
+                var lang = '';
+                if (codeEl) {
+                    var cls = codeEl.className || '';
+                    var m = cls.match(/language-(\w+)/);
+                    if (m) lang = m[1];
+                }
+
+                // 语言标签
+                if (lang && lang !== 'plaintext' && lang !== 'text' && lang !== 'plain' && lang !== 'txt') {
+                    var label = document.createElement('span');
+                    label.className = 'code-lang-label';
+                    label.textContent = lang;
+                    pre.appendChild(label);
+                }
+
+                // 复制按钮
                 var btn = document.createElement('button');
                 btn.className = 'copy-btn';
                 btn.type = 'button';
