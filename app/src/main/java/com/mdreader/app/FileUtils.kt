@@ -250,13 +250,21 @@ object FileUtils {
                         localName == "i" && isWordNs && inRunProps -> {
                             runItalic = true
                         }
-                        // ── 文本 ──────────────────────────────────────────────
+                        // ── 文本 ─────────────────────────────────────────────
                         localName == "t" && isWordNs -> {
                             var text = parser.nextText()
-                            // 应用 run 级格式
-                            if (runBold && runItalic) text = "***$text***"
-                            else if (runBold) text = "**$text**"
-                            else if (runItalic) text = "*$text*"
+                            // 应用 run 级格式：加粗/斜体文本先去除原文中的 * _ 避免 **** 冲突
+                            if (runBold && runItalic) {
+                                text = "***${text.replace("*", "").replace("_", "")}***"
+                            } else if (runBold) {
+                                text = "**${text.replace("*", "").replace("_", "")}**"
+                            } else if (runItalic) {
+                                text = "*${text.replace("*", "").replace("_", "")}*"
+                            } else {
+                                // 普通文本：转义 markdown 特殊字符，防止原文 * ~ # 干扰渲染
+                                text = text.replace("*", "\\*").replace("_", "\\_")
+                                    .replace("~", "\\~").replace("#", "\\#")
+                            }
                             if (inCell) cellBuffer.append(text)
                             else paraBuffer.append(text)
                         }
@@ -410,10 +418,11 @@ object FileUtils {
                         val clean = part.replace(Regex("[\\r\\u000b]"), "")
                         if (clean.isNotEmpty()) {
                             val formatted = when {
-                                bold && italic -> "***$clean***"
-                                bold -> "**$clean**"
-                                italic -> "*$clean*"
-                                else -> clean
+                                bold && italic -> "***${clean.replace("*", "").replace("_", "")}***"
+                                bold -> "**${clean.replace("*", "").replace("_", "")}**"
+                                italic -> "*${clean.replace("*", "").replace("_", "")}*"
+                                else -> clean.replace("*", "\\*").replace("_", "\\_")
+                                    .replace("~", "\\~").replace("#", "\\#")
                             }
                             cellBuffer.append(formatted)
                         }
@@ -438,10 +447,11 @@ object FileUtils {
                     val clean = text.replace("\r", "").replace(Regex("[\\x00-\\x09\\x0b-\\x1f]"), "")
                     if (clean.isNotEmpty()) {
                         val formatted = when {
-                            bold && italic -> "***$clean***"
-                            bold -> "**$clean**"
-                            italic -> "*$clean*"
-                            else -> clean
+                            bold && italic -> "***${clean.replace("*", "").replace("_", "")}***"
+                            bold -> "**${clean.replace("*", "").replace("_", "")}**"
+                            italic -> "*${clean.replace("*", "").replace("_", "")}*"
+                            else -> clean.replace("*", "\\*").replace("_", "\\_")
+                                .replace("~", "\\~").replace("#", "\\#")
                         }
                         if (inTable) {
                             cellBuffer.append(formatted)
@@ -494,10 +504,11 @@ object FileUtils {
                     val clean = text.replace(Regex("[\\x00-\\x09\\x0b-\\x1f]"), "")
                     if (clean.isNotEmpty()) {
                         val formatted = when {
-                            bold && italic -> "***$clean***"
-                            bold -> "**$clean**"
-                            italic -> "*$clean*"
-                            else -> clean
+                            bold && italic -> "***${clean.replace("*", "").replace("_", "")}***"
+                            bold -> "**${clean.replace("*", "").replace("_", "")}**"
+                            italic -> "*${clean.replace("*", "").replace("_", "")}*"
+                            else -> clean.replace("*", "\\*").replace("_", "\\_")
+                                .replace("~", "\\~").replace("#", "\\#")
                         }
                         // 检测表格开始：当前累积的段落文本含 \u0007
                         if (paraBuffer.contains("\u0007")) {

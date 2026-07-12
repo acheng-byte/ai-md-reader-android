@@ -778,13 +778,12 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
 
     private fun toggleMode() {
         if (currentMode == "preview") {
-            // 二进制格式（PDF/DOC/DOCX）不支持编辑，仅允许查看
+            // PDF 不支持编辑，仅允许查看
             val ext = currentTitle.substringAfterLast('.', "").lowercase()
             val name = currentDocumentUri?.let { FileUtils.displayName(this, it) }?.lowercase() ?: ""
-            val isBinary = name.endsWith(".doc") || name.endsWith(".docx") ||
-                name.endsWith(".pdf") || ext == "doc" || ext == "docx" || ext == "pdf"
-            if (isBinary) {
-                Toast.makeText(this, "PDF/DOC 文档不支持编辑，仅可查看", Toast.LENGTH_SHORT).show()
+            val isPdf = name.endsWith(".pdf") || ext == "pdf"
+            if (isPdf) {
+                Toast.makeText(this, "PDF 文档不支持编辑，仅可查看", Toast.LENGTH_SHORT).show()
                 return
             }
             // 切换到源码模式：显示可编辑的 editText
@@ -2022,7 +2021,7 @@ body { background: var(--bg); color: var(--fg); font-family: -apple-system, "Pin
         private val WELCOME_MD = """
 # 欢迎使用 MD 阅读器
 
-这是一个功能丰富的本地 **Markdown 阅读器**（v2.1.8），支持多种文档格式与 Obsidian 兼容语法。
+这是一个功能丰富的本地 **Markdown 阅读器**（v2.2.0），支持多种文档格式与 Obsidian 兼容语法。
 
 ## 快速上手
 

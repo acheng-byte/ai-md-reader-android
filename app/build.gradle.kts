@@ -21,8 +21,8 @@ android {
         applicationId = "com.mdreader.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 42
-        versionName = "2.1.8"
+        versionCode = 44
+        versionName = "2.2.0"
         resourceConfigurations += listOf("zh", "en")
     }
 
