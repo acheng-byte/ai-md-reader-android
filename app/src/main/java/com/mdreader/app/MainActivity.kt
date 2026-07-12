@@ -7,6 +7,8 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.ShortcutInfo
+import android.content.pm.ShortcutManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
@@ -582,6 +584,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             R.id.action_share, R.id.action_toc, R.id.action_search,
             R.id.action_toggle, R.id.action_favorite,
             R.id.action_open, R.id.action_favorites, R.id.action_history,
+            R.id.action_add_shortcut,
             R.id.action_export_image, R.id.action_export_html,
             R.id.action_annotate
         ).forEach { menu.findItem(it)?.isVisible = normalVisible }
@@ -670,6 +673,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         R.id.action_favorite -> { toggleFavorite(); true }
         R.id.action_favorites -> { showFavorites(); true }
         R.id.action_history -> { showHistory(); true }
+        R.id.action_add_shortcut -> { addShortcutToHomeScreen(); true }
         R.id.action_export_image -> { requestStorageAndExportImage(); true }
         R.id.action_export_html -> { exportHtml(); true }
         R.id.action_annotate -> { toggleAnnotationMode(); true }
@@ -917,6 +921,38 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             out.use { it.write(text.toByteArray(Charsets.UTF_8)) }
             true
         }.getOrDefault(false)
+
+    // ---- 桌面快捷方式 ----
+
+    private fun addShortcutToHomeScreen() {
+        val uri = currentUri
+        if (uri == null) {
+            Toast.makeText(this, R.string.shortcut_no_doc, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val shortcutManager = getSystemService(ShortcutManager::class.java)
+        if (shortcutManager == null || !shortcutManager.isRequestPinShortcutSupported) {
+            Toast.makeText(this, R.string.shortcut_not_supported, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val docUri = currentDocumentUri ?: Uri.parse(uri)
+        val displayName = currentTitle.ifEmpty { "MD文档" }
+
+        // 构建 Intent：通过 ACTION_VIEW 打开文档，handleIntent() 会自动处理
+        val intent = Intent(Intent.ACTION_VIEW, docUri).apply {
+            setClass(this@MainActivity, MainActivity::class.java)
+        }
+
+        val shortcutInfo = ShortcutInfo.Builder(this, "doc_${uri.hashCode()}")
+            .setShortLabel(displayName)
+            .setLongLabel(displayName)
+            .setIcon(android.graphics.drawable.Icon.createWithResource(this, R.mipmap.ic_launcher))
+            .setIntent(intent)
+            .build()
+
+        shortcutManager.requestPinShortcut(shortcutInfo, null)
+        Toast.makeText(this, getString(R.string.shortcut_added, displayName), Toast.LENGTH_SHORT).show()
+    }
 
     // ---- 分享 ----
 

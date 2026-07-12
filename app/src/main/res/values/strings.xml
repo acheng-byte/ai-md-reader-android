@@ -144,4 +144,11 @@
     <!-- 字符统计 -->
     <string name="char_count_title">字符统计</string>
     <string name="ok">确定</string>
+
+    <!-- 桌面快捷方式 -->
+    <string name="action_add_shortcut">添加到桌面</string>
+    <string name="shortcut_no_doc">请先打开一个文件</string>
+    <string name="shortcut_not_supported">当前设备不支持快捷方式</string>
+    <string name="shortcut_added">已添加到桌面：%1$s</string>
+    <string name="shortcut_failed">添加失败：%1$s</string>
 </resources>

@@ -78,6 +78,12 @@
         android:title="@string/action_history"
         app:showAsAction="never" />
 
+    <item
+        android:id="@+id/action_add_shortcut"
+        android:icon="@drawable/ic_shortcut"
+        android:title="@string/action_add_shortcut"
+        app:showAsAction="never" />
+
     <!-- 导出功能 -->
     <item
         android:id="@+id/action_export_image"
