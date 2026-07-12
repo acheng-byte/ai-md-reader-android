@@ -334,6 +334,10 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             "mp3" -> "audio/mpeg"
             "ogg" -> "audio/ogg"
             "wav" -> "audio/wav"
+            "m4a" -> "audio/mp4"
+            "aac" -> "audio/aac"
+            "flac" -> "audio/flac"
+            "wma" -> "audio/x-ms-wma"
             "pdf" -> "application/pdf"
             else -> "application/octet-stream"
         }

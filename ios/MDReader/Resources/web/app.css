@@ -148,7 +148,7 @@ body[data-mode="code"] #code { display: block; }
     border-left: 0.25em solid var(--border);
 }
 
-.markdown-body img { max-width: 100%; height: auto; }
+.markdown-body img { max-width: 100%; height: auto; cursor: zoom-in; }
 
 .markdown-body hr {
     border: 0;
@@ -517,6 +517,21 @@ body.dark mark.search-mark-active { background: #b36e00; outline-color: #b36e00;
     background: #000;
 }
 .video-caption {
+    font-size: 0.82em;
+    color: var(--muted);
+    margin-top: 4px;
+}
+
+/* ============ 音频嵌入 ============ */
+.audio-embed {
+    margin: 1em 0;
+    text-align: center;
+}
+.audio-embed audio {
+    max-width: 100%;
+    border-radius: 8px;
+}
+.audio-caption {
     font-size: 0.82em;
     color: var(--muted);
     margin-top: 4px;

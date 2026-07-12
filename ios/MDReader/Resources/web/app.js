@@ -268,6 +268,7 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
             var ext = ref.split('.').pop().toLowerCase();
             var imageExts = ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp', 'ico'];
             var videoExts = ['mp4', 'webm', 'ogv', 'mov'];
+            var audioExts = ['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac', 'wma'];
             if (imageExts.indexOf(ext) >= 0) {
                 var imgUrl = VAULT_BASE + encodeURIComponent(ref);
                 return '!['  + ref + '](' + imgUrl + ')';
@@ -276,6 +277,11 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
                 var vidUrl = VAULT_BASE + encodeURIComponent(ref);
                 return '<div class="video-embed"><video controls preload="metadata" src="' +
                     escapeHtml(vidUrl) + '"></video><p class="video-caption">' + escapeHtml(ref) + '</p></div>';
+            }
+            if (audioExts.indexOf(ext) >= 0) {
+                var audUrl = VAULT_BASE + encodeURIComponent(ref);
+                return '<div class="audio-embed"><audio controls preload="metadata" src="' +
+                    escapeHtml(audUrl) + '"></audio><p class="audio-caption">' + escapeHtml(ref) + '</p></div>';
             }
             // 非图片/视频：生成可展开的引用块
             return '<div class="embed-block" data-embed-ref="' + escapeHtml(ref) + '">' +
@@ -952,6 +958,86 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
         }
     }
 
+    /** 为内嵌图片添加单击预览 + 双击关闭 + 双指缩放 + 单指拖动 */
+    function setupImageInteractions() {
+        var imgs = previewEl.querySelectorAll('img');
+        for (var i = 0; i < imgs.length; i++) {
+            (function (img) {
+                var lastTapTime = 0;
+                img.style.cursor = 'zoom-in';
+                img.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    var nowTap = Date.now();
+                    if (nowTap - lastTapTime < 350) {
+                        lastTapTime = 0;
+                        closePreviewOverlay();
+                        return;
+                    }
+                    lastTapTime = nowTap;
+                    openImagePreview(img);
+                });
+            })(imgs[i]);
+        }
+    }
+
+    /** 打开图片预览 */
+    function openImagePreview(imgEl) {
+        var overlay = ensurePreviewOverlay();
+        var body = overlay.querySelector('.mdreader-preview-body');
+        body.innerHTML = '';
+        body.scrollTop = 0;
+        var dlBtn = overlay.querySelector('.mdreader-preview-dl-btn');
+        if (dlBtn) dlBtn.style.display = 'none';
+        var clone = new Image();
+        clone.style.cssText = 'max-width:95vw;max-height:90vh;object-fit:contain;';
+        clone.onload = function () {
+            body.appendChild(clone);
+            setupPinchZoom(clone);
+        };
+        clone.src = imgEl.src;
+        overlay.style.display = 'flex';
+    }
+
+    /** 为内嵌视频添加单击全屏预览 + 双击关闭 */
+    function setupVideoInteractions() {
+        var videos = previewEl.querySelectorAll('video');
+        for (var i = 0; i < videos.length; i++) {
+            (function (video) {
+                var lastTapTime = 0;
+                video.style.cursor = 'pointer';
+                video.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    var nowTap = Date.now();
+                    if (nowTap - lastTapTime < 350) {
+                        lastTapTime = 0;
+                        closePreviewOverlay();
+                        return;
+                    }
+                    lastTapTime = nowTap;
+                    openVideoPreview(video);
+                });
+            })(videos[i]);
+        }
+    }
+
+    /** 打开视频预览 */
+    function openVideoPreview(videoEl) {
+        var overlay = ensurePreviewOverlay();
+        var body = overlay.querySelector('.mdreader-preview-body');
+        body.innerHTML = '';
+        body.scrollTop = 0;
+        var dlBtn = overlay.querySelector('.mdreader-preview-dl-btn');
+        if (dlBtn) dlBtn.style.display = 'none';
+        var clone = document.createElement('video');
+        clone.controls = true;
+        clone.preload = 'auto';
+        clone.src = videoEl.src;
+        clone.style.cssText = 'max-width:95vw;max-height:85vh;border-radius:8px;background:#000;';
+        clone.autoplay = true;
+        body.appendChild(clone);
+        overlay.style.display = 'flex';
+    }
+
     /* ---------- 渲染缓存 ---------- */
     var renderCache = { source: null, html: null };
 
@@ -1022,6 +1108,8 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
         addCopyButtons();
         renderMermaid();
         setupTableInteractions();
+        setupImageInteractions();
+        setupVideoInteractions();
         renderFormulas();
 
         codeBlockEl.removeAttribute('data-highlighted');
