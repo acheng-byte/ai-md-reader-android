@@ -117,17 +117,9 @@ object FileUtils {
             .replace("!", "\\!")         // 图片 ![]()
             .replace("<", "\\<")         // 内嵌 HTML
             .replace("+", "\\+")         // 无序列表 +
-        // 行首数字 + . / ) 会被解析为有序列表，需转义数字
-        val lineStartList = StringBuilder()
-        var atLineStart = true
-        for (ch in escaped) {
-            if (atLineStart && ch.isDigit()) {
-                lineStartList.append('\\')
-            }
-            lineStartList.append(ch)
-            atLineStart = (ch == '\n')
-        }
-        return "# $title\n\n$lineStartList"
+        // 行首数字 + . / ) 会被解析为有序列表，在数字和标点之间插入零宽空格打断模式
+        val noList = escaped.replace(Regex("(^|\n)(\\d+)([.)])"), "$1$2\u200B$3")
+        return "# $title\n\n$noList"
     }
 
     /* ========== DOCX（ZIP + XML）提取文本 + 内嵌图片 ========== */

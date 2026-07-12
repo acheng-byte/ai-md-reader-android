@@ -778,6 +778,15 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
 
     private fun toggleMode() {
         if (currentMode == "preview") {
+            // 二进制格式（PDF/DOC/DOCX）不支持编辑，仅允许查看
+            val ext = currentTitle.substringAfterLast('.', "").lowercase()
+            val name = FileUtils.displayName(this, currentDocumentUri)?.lowercase() ?: ""
+            val isBinary = name.endsWith(".doc") || name.endsWith(".docx") ||
+                name.endsWith(".pdf") || ext == "doc" || ext == "docx" || ext == "pdf"
+            if (isBinary) {
+                Toast.makeText(this, "PDF/DOC 文档不支持编辑，仅可查看", Toast.LENGTH_SHORT).show()
+                return
+            }
             // 切换到源码模式：显示可编辑的 editText
             currentMode = "code"
             prefs.viewMode = currentMode
@@ -926,8 +935,11 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         // 检查当前文件是否为二进制格式（DOC/DOCX/PDF），这些格式不支持原地保存
         val ext = currentTitle.substringAfterLast('.', "").lowercase()
         val name = FileUtils.displayName(this, uri)?.lowercase() ?: ""
+        val mime = contentResolver.getType(uri)?.lowercase() ?: ""
         val isBinaryFormat = name.endsWith(".doc") || name.endsWith(".docx") ||
-            name.endsWith(".pdf") || ext == "doc" || ext == "docx" || ext == "pdf"
+            name.endsWith(".pdf") || ext == "doc" || ext == "docx" || ext == "pdf" ||
+            mime.startsWith("application/pdf") || mime.startsWith("application/msword") ||
+            mime.contains("officedocument")
         if (isBinaryFormat) return false  // 强制走「另存为」流程
         if (uri.scheme == "file") {
             return runCatching {
@@ -2010,7 +2022,7 @@ body { background: var(--bg); color: var(--fg); font-family: -apple-system, "Pin
         private val WELCOME_MD = """
 # 欢迎使用 MD 阅读器
 
-这是一个功能丰富的本地 **Markdown 阅读器**（v2.1.6），支持多种文档格式与 Obsidian 兼容语法。
+这是一个功能丰富的本地 **Markdown 阅读器**（v2.1.7），支持多种文档格式与 Obsidian 兼容语法。
 
 ## 快速上手
 

@@ -8,10 +8,11 @@
 
 现在越来越多内容从 AI 对话、代码助手、知识库、会议纪要和自动化工作流里直接产出为 Markdown。电脑上阅读很方便，但手机上常常缺一个足够轻、足够直接、能从微信和文件管理器顺手打开 `.md` 的本地阅读器。**MD阅读器**解决的就是这个小而高频的痛点：把 Markdown 文件在手机上安静、清楚、离线地读起来。
 
-## 最新版本 v2.1.6
+## 最新版本 v2.1.7
 
-v2.1.6 是功能最完善的版本，涵盖 v1.9.0 至 v2.1.6 的完整更新：
+v2.1.7 是功能最完善的版本，涵盖 v1.9.0 至 v2.1.7 的完整更新：
 
+- **v2.1.7**：PDF 编辑崩溃修复、TXT 行首数字反斜杠修复
 - **v2.1.6**：渲染前清除菱形问号（U+FFFD），编码检测阈值优化
 - **v2.1.5**：编码检测逻辑优化 — 比较解码质量避免乱码
 - **v2.1.4**：编码检测增强（UTF-16/GB18030）、换行符统一、特殊字符转义、特殊空格规范化
@@ -109,7 +110,8 @@ adb install -r app/build/outputs/apk/release/app-release.apk
 
 | 版本 | 类型 | 更新重点 |
 | --- | --- | --- |
-| [v2.1.6](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.1.6) | 最新版本 | 渲染前清除菱形问号，编码检测阈值优化 |
+| [v2.1.7](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.1.7) | 最新版本 | PDF 编辑崩溃修复、TXT 行首数字反斜杠修复 |
+| [v2.1.6](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.1.6) | 编码修复 | 渲染前清除菱形问号，编码检测阈值优化 |
 | [v2.1.5](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.1.5) | 编码修复 | 编码检测优化：比较解码质量避免乱码 |
 | [v2.1.4](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.1.4) | 编码修复 | 编码检测增强、换行符统一、特殊字符转义、特殊空格规范化 |
 | [v2.1.3](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.1.3) | 功能增强 | 图片预览、视频全屏、音频播放 |
