@@ -1,5 +1,22 @@
 # 版本记录
 
+## v2.1.0 - 2026-07-12
+
+- 新增：全新应用图标 — 羽毛笔 + "MD" 矢量设计，替换原有的白色 "M" + 下载箭头图标。
+- 新增：添加文件到桌面快捷方式 — 阅读界面菜单入口，使用 `ShortcutManager.requestPinShortcut()` 创建桌面固定快捷方式。
+- 修复：工具栏/状态栏颜色不随主题切换 — 在 `onCreate()` 的 `super.onCreate()` 前调用 `AppCompatDelegate.setDefaultNightMode()`；切换主题时 `recreate()`；`applySettingsToWeb()` 中手动同步工具栏和状态栏颜色。
+- 精简：移除 Mermaid 保存为 PNG 功能 — 删除 `_captureMermaidToPng()`、`_svgToPngBase64()`、`inlineSvgStyles()` 等约 620 行代码；保留 Mermaid 单击预览功能；清理 Bridge 接口和字符串资源中的残留引用。
+- 修复：隐藏文件名标题在折叠/展开后重新出现 — 在 `recompute()` 内部增加 `title-hidden` class 检测保留。
+
+## v2.0.5 - 2026-07-12
+
+- 新增：添加文件到桌面快捷方式 — 阅读界面 ⋮ 菜单新增"添加到桌面"入口，使用 `ShortcutManager.requestPinShortcut()`（API 26+）。
+- 新增：`INSTALL_SHORTCUT` 权限声明。
+
+## v2.0.4 - 2026-07-12
+
+- 修复：隐藏文件名标题在标题折叠/展开后重新显示 — 根本原因是 `recompute()` 被 `toggleCollapse()` 和 `expandAncestors()` 调用时重置了所有标题的 `display` 样式；解决方案是在 `recompute()` 内部检测 `title-hidden` class 并保留隐藏状态。
+
 ## v2.0.0 - 2026-07-12
 
 - 修复：Mermaid 图表点击预览不灵敏 — 事件处理器从异步渲染回调内移至容器创建时立即绑定，消除渲染等待期间的点击盲区。

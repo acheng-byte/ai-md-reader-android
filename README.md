@@ -8,15 +8,20 @@
 
 现在越来越多内容从 AI 对话、代码助手、知识库、会议纪要和自动化工作流里直接产出为 Markdown。电脑上阅读很方便，但手机上常常缺一个足够轻、足够直接、能从微信和文件管理器顺手打开 `.md` 的本地阅读器。**MD阅读器**解决的就是这个小而高频的痛点：把 Markdown 文件在手机上安静、清楚、离线地读起来。
 
-## 最新版本 v2.0.0
+## 最新版本 v2.1.0
 
-v2.0.0 是功能最完善的版本，涵盖 v1.9.0 至 v2.0.0 的完整更新：
+v2.1.0 是功能最完善的版本，涵盖 v1.9.0 至 v2.1.0 的完整更新：
 
+- **v2.1.0**：全新羽毛笔图标、添加桌面快捷方式、主题同步修复、精简 Mermaid 保存
+- **v2.0.7**：移除 Mermaid 保存为 PNG 功能（保留预览）、清理保存相关代码残留
+- **v2.0.6**：修复工具栏/状态栏颜色不随浅色/深色/护眼主题切换
+- **v2.0.5**：添加文件到桌面快捷方式（ShortcutManager）
+- **v2.0.4**：修复隐藏文件名标题在折叠/展开后重新出现
 - **v2.0.0**：Mermaid 点击预览修复（事件立即绑定）、Mermaid 保存修复（直接存 SVG）、隐藏文件名标题修复（时序+匹配+兜底）
-- **v1.9.8**：修复预览覆盖层黑色背景（改为默认浅色+跟随主题）、修复保存文件名显示数字、Mermaid 保存改为 JS Canvas 渲染
+- **v1.9.8**：修复预览覆盖层黑色背景（改为默认浅色+跟随主题）、修复保存文件名显示数字
 - **v1.9.7**：修复隐藏文件名标题不生效、源码模式光标定位到顶部、引用块样式开关优化（20+ Callout 类型）、支持纯文本代码块
-- **v1.9.5**：点击标题栏查看字符统计（纯文字/含标点）、9 种字体（含楷体/仿宋/隶书/微软雅黑等）、修复图片/表格点击误触设置面板、修复滑动误触表格预览、Mermaid 图表保存修复（内联样式）、全局防重复点击
-- **v1.9.4**：表格/图表全屏预览 + 双指缩放、预览内下载、长按确认下载、源码模式直接编辑 + 自动保存、设置持久化（更新不丢失）、历史 200 条
+- **v1.9.5**：点击标题栏查看字符统计、9 种字体、修复图片/表格点击误触、全局防重复点击
+- **v1.9.4**：表格/图表全屏预览 + 双指缩放、源码模式直接编辑 + 自动保存、设置持久化、历史 200 条
 - **v1.9.3**：Mermaid 图表长按下载、长图导出优化（32768px）、设置面板分区
 - **v1.9.2**：隐藏文件名标题、渲染缓存、设置开关
 - **v1.9.1**：全面性能优化（防抖、异步保存、内存缓存）
@@ -51,8 +56,8 @@ v2.0.0 是功能最完善的版本，涵盖 v1.9.0 至 v2.0.0 的完整更新：
 | 文内搜索 | 在当前文档中搜索关键词，高亮显示并逐个定位 |
 | 全库搜索 | 在 Vault 文件夹中搜索所有文档（需先设置 Vault） |
 | 转发分享 | 一键把完整文档经系统分享转发到微信等应用 |
-| 表格/图表预览 | 单击表格或 Mermaid 图表全屏预览，支持双指缩放 |
-| 图表/表格下载 | 预览内下载或长按确认保存为 PNG |
+| 桌面快捷方式 | 将当前文档添加为桌面快捷方式，一键直达 |
+| 表格预览下载 | 单击表格全屏预览，支持双指缩放和预览内下载 |
 | 源码直接编辑 | 源码模式即可编辑，自动保存 |
 | 字符统计 | 点击标题栏查看总字符、纯文字（去除标点和 Markdown 语法）、总行数、代码字符数 |
 | 阅读标注 | 手指绘画标注，多色多模式 |
@@ -95,7 +100,13 @@ adb install -r app/build/outputs/apk/release/app-release.apk
 
 | 版本 | 类型 | 更新重点 |
 | --- | --- | --- |
-| [v1.9.7](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v1.9.7) | 最新版本 | 隐藏标题修复、源码光标定位、Callout优化、纯文本代码块 |
+| [v2.1.0](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.1.0) | 最新版本 | 全新羽毛笔图标、桌面快捷方式、主题同步、精简 Mermaid |
+| [v2.0.7](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.0.7) | 功能精简 | 移除 Mermaid 保存为 PNG、清理保存代码残留 |
+| [v2.0.6](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.0.6) | Bug 修复 | 工具栏/状态栏颜色跟随主题切换 |
+| [v2.0.5](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.0.5) | 新增功能 | 添加文件到桌面快捷方式 |
+| [v2.0.4](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.0.4) | Bug 修复 | 隐藏文件名标题折叠后重新出现 |
+| [v2.0.0](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.0.0) | 功能增强 | Mermaid 预览修复、保存修复、隐藏标题修复 |
+| [v1.9.7](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v1.9.7) | 功能增强 | 隐藏标题修复、源码光标定位、Callout优化、纯文本代码块 |
 | [v1.9.5](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v1.9.5) | 功能增强 | 字符统计、9字体、误触修复、Mermaid保存修复 |
 | [v1.9.4](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v1.9.4) | 功能增强 | 表格/图表预览下载、源码直接编辑、设置持久化、历史 200 条 |
 | [v1.9.3](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v1.9.3) | 功能增强 | Mermaid 下载、长图导出优化、设置面板分区 |
