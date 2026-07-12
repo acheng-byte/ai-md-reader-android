@@ -41,32 +41,82 @@ object FileUtils {
     }
 
     private fun decodeText(bytes: ByteArray): String {
-        // Detect encoding: count UTF-8 replacement characters to decide if it's really GBK
+        var text: String
+
+        // 1. BOM-based detection (most reliable)
+        if (bytes.size >= 2) {
+            val b0 = bytes[0].toInt() and 0xFF
+            val b1 = bytes[1].toInt() and 0xFF
+            // UTF-16LE: FF FE
+            if (b0 == 0xFF && b1 == 0xFE) {
+                text = bytes.toString(charset("UTF-16LE"))
+                    .replace("\uFEFF", "")
+                return normalizeLineEndings(text)
+            }
+            // UTF-16BE: FE FF
+            if (b0 == 0xFE && b1 == 0xFF) {
+                text = bytes.toString(charset("UTF-16BE"))
+                    .replace("\uFEFF", "")
+                return normalizeLineEndings(text)
+            }
+            // UTF-8 BOM: EF BB BF
+            if (bytes.size >= 3 && b0 == 0xEF && b1 == 0xBB && (bytes[2].toInt() and 0xFF) == 0xBF) {
+                text = bytes.toString(Charsets.UTF_8)
+                if (text.isNotEmpty() && text[0] == '\uFEFF') text = text.substring(1)
+                return normalizeLineEndings(text)
+            }
+        }
+
+        // 2. Try UTF-8; count replacement characters to decide fallback
         val utf8Text = bytes.toString(Charsets.UTF_8)
         val replacements = utf8Text.count { it == '\uFFFD' }
-        val text = if (replacements > 0 && replacements.toDouble() / utf8Text.length > 0.01) {
-            // Likely GBK/GB2312 (common for Chinese Windows files)
-            runCatching { bytes.toString(charset("GBK")) }.getOrElse { utf8Text }
+        text = if (replacements > 0 && replacements.toDouble() / maxOf(utf8Text.length, 1) > 0.01) {
+            // GB18030 is a superset of GBK/GB2312, covers more Chinese characters
+            runCatching { bytes.toString(charset("GB18030")) }.getOrElse {
+                runCatching { bytes.toString(charset("GBK")) }.getOrElse { utf8Text }
+            }
         } else {
             utf8Text
         }
-        // Strip UTF-8 BOM
-        return if (text.isNotEmpty() && text[0] == '﻿') text.substring(1) else text
+
+        // 3. Strip UTF-8 BOM if still present (safety net)
+        if (text.isNotEmpty() && text[0] == '\uFEFF') text = text.substring(1)
+
+        return normalizeLineEndings(text)
     }
+
+    /** \r\n 和孤立 \r 统一为 \n，避免不同平台的换行符差异。 */
+    private fun normalizeLineEndings(s: String): String =
+        s.replace("\r\n", "\n").replace('\r', '\n')
 
     private fun wrapPlainText(filename: String, text: String): String {
         val title = filename.substringBeforeLast('.')
-        // Escape markdown special chars so plain text renders as-is (not as headings/lists/etc.)
+        // Escape markdown special chars so plain text renders as-is
         val escaped = text
-            .replace("\\", "\\\\")
-            .replace("`", "\\`")
-            .replace("*", "\\*")
-            .replace("_", "\\_")
-            .replace("#", "\\#")
-            .replace("[", "\\[")
-            .replace("|", "\\|")
-            .replace(">", "\\>")
-        return "# $title\n\n$escaped"
+            .replace("\\", "\\\\")       // 反斜杠（最先处理）
+            .replace("`", "\\`")         // 行内代码
+            .replace("*", "\\*")         // 强调 / 列表
+            .replace("_", "\\_")         // 强调
+            .replace("#", "\\#")         // 标题
+            .replace("[", "\\[")         // 链接 / 图片
+            .replace("|", "\\|")         // 表格
+            .replace(">", "\\>")         // 引用
+            .replace("~", "\\~")         // 删除线 ~~text~~
+            .replace("=", "\\=")         // Obsidian 高亮 ==text==
+            .replace("!", "\\!")         // 图片 ![]()
+            .replace("<", "\\<")         // 内嵌 HTML
+            .replace("+", "\\+")         // 无序列表 +
+        // 行首数字 + . / ) 会被解析为有序列表，需转义数字
+        val lineStartList = StringBuilder()
+        var atLineStart = true
+        for (ch in escaped) {
+            if (atLineStart && ch.isDigit()) {
+                lineStartList.append('\\')
+            }
+            lineStartList.append(ch)
+            atLineStart = (ch == '\n')
+        }
+        return "# $title\n\n$lineStartList"
     }
 
     /* ========== DOCX（ZIP + XML）提取文本 + 内嵌图片 ========== */

@@ -1104,10 +1104,24 @@
         return true;
     }
 
+    /* ---------- 文本规范化（特殊空格 / 零宽字符） ---------- */
+    function normalizeText(s) {
+        // 去除零宽字符：ZWS / ZWNJ / ZWJ / BOM / 软连字符 / 左至右 / 右至左标记
+        s = s.replace(/[\u200B\u200C\u200D\uFEFF\u00AD\u200E\u200F]/g, '');
+        // 全角空格 → 普通空格
+        s = s.replace(/\u3000/g, ' ');
+        // 不间断空格 → 普通空格
+        s = s.replace(/\u00A0/g, ' ');
+        // 其他 Unicode 空格统一为普通空格（em space, en space, thin space 等）
+        s = s.replace(/[\u2000-\u200A\u202F\u205F]/g, ' ');
+        return s;
+    }
+
     /* ---------- 渲染 ---------- */
     function render() {
         var rawSource = '';
         try { var b = bridge(); if (b && b.getMarkdown) rawSource = b.getMarkdown() || ''; } catch (e) { rawSource = ''; }
+        rawSource = normalizeText(rawSource);
 
         // 立即清空旧内容，防止停留在上一个文档
         previewEl.innerHTML = '';
