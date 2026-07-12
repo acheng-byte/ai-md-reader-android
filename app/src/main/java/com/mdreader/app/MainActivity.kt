@@ -27,6 +27,7 @@ import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AppCompatDelegate
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.IntentCompat
 import androidx.core.content.FileProvider
@@ -144,6 +145,14 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // 在创建 Activity 之前同步夜间模式，确保 DayNight 主题正确应用到工具栏和系统栏
+        val p = Prefs(this)
+        val nightMode = when (p.themeMode) {
+            1 -> AppCompatDelegate.MODE_NIGHT_NO
+            2 -> AppCompatDelegate.MODE_NIGHT_YES
+            else -> AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
+        }
+        AppCompatDelegate.setDefaultNightMode(nightMode)
         super.onCreate(savedInstanceState)
         prefs = Prefs(this)
         history = History(this)
@@ -153,6 +162,10 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         setSupportActionBar(binding.toolbar)
+        // 状态栏图标颜色：深色模式用白色图标，浅色模式用深色图标
+        val isDarkInit = prefs.isDark(this)
+        @Suppress("DEPRECATION")
+        window.decorView.systemUiVisibility = if (isDarkInit) 0 else android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
         // 标题栏点击 → 字符统计（防重复点击）
         var lastCharCountClick = 0L
         binding.toolbar.setOnClickListener {
@@ -407,8 +420,15 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         js("window.appApplySettings && window.appApplySettings(${prefs.settingsJson(this)})")
         val bg = bgColor()
         webView.setBackgroundColor(bg)
+        // 同步工具栏和状态栏颜色
+        binding.toolbar.setBackgroundColor(bg)
+        window.statusBarColor = bg
+        val isDark = prefs.isDark(this)
+        // 状态栏图标：深色模式用白色图标，浅色模式用深色图标
+        @Suppress("DEPRECATION")
+        window.decorView.systemUiVisibility = if (isDark) 0 else android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
         if (currentMode == "code") {
-            binding.editText.setTextColor(if (prefs.isDark(this)) Color.WHITE else Color.BLACK)
+            binding.editText.setTextColor(if (isDark) Color.WHITE else Color.BLACK)
             binding.editText.setBackgroundColor(bg)
             binding.editScroll.setBackgroundColor(bg)
         }
@@ -1108,7 +1128,14 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                     R.id.btn_theme_dark -> 2
                     else -> 0
                 }
-                applySettingsToWeb()
+                // 同步夜间模式并重建 Activity，使工具栏/状态栏颜色跟随主题
+                val nightMode = when (prefs.themeMode) {
+                    1 -> AppCompatDelegate.MODE_NIGHT_NO
+                    2 -> AppCompatDelegate.MODE_NIGHT_YES
+                    else -> AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
+                }
+                AppCompatDelegate.setDefaultNightMode(nightMode)
+                recreate()
             }
         }
         sheet.switchEyeProtection.setOnCheckedChangeListener { _, checked ->
