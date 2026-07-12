@@ -438,12 +438,7 @@ object FileUtils {
 
                 val paraText = paraSb.toString().trim()
                 if (paraText.isNotEmpty()) {
-                    val styleName = para.style?.name ?: ""
-                    val headingLevel = detectHeadingLevel(styleName)
-                    if (headingLevel > 0) {
-                        sb.append("#".repeat(headingLevel)).append(' ')
-                        sb.append(paraText).append("\n\n")
-                    } else if (hasBoldRun && looksLikeHeading(paraText)) {
+                    if (hasBoldRun && looksLikeHeading(paraText)) {
                         // 整段加粗 + 短文本 → 视为标题
                         val level = headingLevelFromLength(paraText)
                         sb.append("#".repeat(level)).append(' ')

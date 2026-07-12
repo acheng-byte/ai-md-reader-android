@@ -780,7 +780,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         if (currentMode == "preview") {
             // 二进制格式（PDF/DOC/DOCX）不支持编辑，仅允许查看
             val ext = currentTitle.substringAfterLast('.', "").lowercase()
-            val name = FileUtils.displayName(this, currentDocumentUri)?.lowercase() ?: ""
+            val name = currentDocumentUri?.let { FileUtils.displayName(this, it) }?.lowercase() ?: ""
             val isBinary = name.endsWith(".doc") || name.endsWith(".docx") ||
                 name.endsWith(".pdf") || ext == "doc" || ext == "docx" || ext == "pdf"
             if (isBinary) {
