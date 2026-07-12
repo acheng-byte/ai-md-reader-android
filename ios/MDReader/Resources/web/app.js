@@ -565,6 +565,21 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
         c.addEventListener('mouseleave', cancelPress);
     }
 
+    /* ---------- LaTeX 公式渲染 ---------- */
+    function renderFormulas() {
+        if (typeof renderMathInElement !== 'function') return;
+        try {
+            renderMathInElement(previewEl, {
+                delimiters: [
+                    { left: '$$', right: '$$', display: true },
+                    { left: '$', right: '$', display: false }
+                ],
+                throwOnError: false,
+                errorColor: '#cc0000'
+            });
+        } catch (e) { /* KaTeX render error */ }
+    }
+
     /* ---------- 表格/图表预览与下载 ---------- */
 
     /** 为预览覆盖层注入样式 */
@@ -576,8 +591,8 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
             '.mdreader-preview-toolbar button{color:#333;border:none;border-radius:6px;padding:8px 16px;font-size:14px;cursor:pointer;}',
             '.mdreader-preview-dl-btn{background:#0969da;color:#fff;}',
             '.mdreader-preview-close-btn{background:rgba(0,0,0,0.1);}',
-            '.mdreader-preview-body{flex:1;overflow:auto;display:flex;align-items:center;justify-content:center;padding:12px;background:#fff;border-radius:8px;margin:8px;box-shadow:0 2px 12px rgba(0,0,0,0.12);}',
-            '.mdreader-preview-body img{max-width:100%;height:auto;transform-origin:center center;touch-action:none;}',
+            '.mdreader-preview-body{flex:1;overflow:hidden;display:flex;align-items:center;justify-content:center;padding:12px;background:#fff;border-radius:8px;margin:8px;box-shadow:0 2px 12px rgba(0,0,0,0.12);}',
+            '.mdreader-preview-body img{max-width:none;height:auto;transform-origin:center center;touch-action:none;}',
             '.mdreader-preview-body table{border-collapse:collapse;width:auto;min-width:300px;max-width:95vw;margin:0 auto;font-size:14px;}',
             '.mdreader-preview-body table th,.mdreader-preview-body table td{border:1px solid #ccc;padding:8px 14px;color:#333;}',
             '.mdreader-preview-body table th{background:#f5f5f5;font-weight:600;}',
@@ -605,6 +620,7 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
     var previewCurrentSvg = null;
     var previewCurrentSvgEl = null;
     var previewBlobUrl = null;
+    var recentPinch = false;
 
     /** 创建预览覆盖层 DOM（惰性创建，复用） */
     function ensurePreviewOverlay() {
@@ -632,8 +648,9 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
         body.className = 'mdreader-preview-body';
         previewOverlay.appendChild(body);
 
-        // 点击背景关闭
+        // 点击背景关闭（捏合手势刚结束时不关闭）
         previewOverlay.addEventListener('click', function (e) {
+            if (recentPinch) { recentPinch = false; return; }
             if (e.target === previewOverlay || e.target === body) closePreviewOverlay();
         });
 
@@ -695,17 +712,16 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
         }
     }
 
-    /** 将 SVG 元素的计算样式内联到属性中（用于 offscreen WebView 渲染） */
+    /** 将 SVG 元素的计算样式内联到属性中。
+     *  不移除 class（Mermaid SVG 内部 &lt;style&gt; 依赖 class 选择器），
+     *  不内联 background-color 为 fill（深色模式会导致黑色区域）。 */
     function inlineSvgStyles(svgEl) {
         var clone = svgEl.cloneNode(true);
-        // 需要内联样式的 SVG 属性映射
         var styleProps = [
             'fill', 'stroke', 'stroke-width', 'stroke-dasharray', 'stroke-dashoffset',
             'font-family', 'font-size', 'font-weight', 'font-style',
             'opacity', 'transform', 'transform-origin',
-            'text-anchor', 'dominant-baseline',
-            'background-color', 'background',
-            'border', 'border-radius'
+            'text-anchor', 'dominant-baseline'
         ];
         var allEls = [clone].concat(Array.prototype.slice.call(clone.querySelectorAll('*')));
         for (var i = 0; i < allEls.length; i++) {
@@ -717,14 +733,8 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
                     var prop = styleProps[j];
                     var val = cs.getPropertyValue(prop);
                     if (val && val !== 'none' && val !== 'normal' && val !== '0px') {
-                        // SVG 属性用驼峰命名
                         var attrName = prop.replace(/-([a-z])/g, function (_, c) { return c.toUpperCase(); });
-                        // fill/stroke 特殊处理
-                        if (prop === 'background-color' || prop === 'background') {
-                            if (el.tagName === 'rect' || el.tagName === 'path' || el.tagName === 'polygon') {
-                                el.setAttribute('fill', val);
-                            }
-                        } else if (prop === 'font-family') {
+                        if (prop === 'font-family') {
                             el.setAttribute('font-family', val);
                         } else if (prop === 'font-size') {
                             el.setAttribute('font-size', val);
@@ -739,8 +749,7 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
                         }
                     }
                 }
-                // 移除 class 属性（样式已内联）
-                el.removeAttribute('class');
+                // 不再移除 class 属性
             } catch (e) { /* skip */ }
         }
         return clone.outerHTML;
@@ -1059,6 +1068,7 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
         var startPanX = 0, startPanY = 0;
         var startTouchX = 0, startTouchY = 0;
         var isPanning = false;
+        var wasPinching = false;
 
         function getDist(t1, t2) {
             var dx = t1.clientX - t2.clientX;
@@ -1074,14 +1084,18 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
             if (e.touches.length === 2) {
                 e.preventDefault();
                 isPanning = false;
+                wasPinching = true;
                 startDist = getDist(e.touches[0], e.touches[1]);
                 startScale = scale;
             } else if (e.touches.length === 1 && scale > 1) {
                 isPanning = true;
+                wasPinching = false;
                 startTouchX = e.touches[0].clientX;
                 startTouchY = e.touches[0].clientY;
                 startPanX = panX;
                 startPanY = panY;
+            } else {
+                wasPinching = false;
             }
         }, { passive: false });
 
@@ -1089,11 +1103,13 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
             if (e.touches.length === 2) {
                 e.preventDefault();
                 isPanning = false;
+                wasPinching = true;
                 var dist = getDist(e.touches[0], e.touches[1]);
                 scale = Math.max(0.5, Math.min(5, startScale * (dist / startDist)));
                 applyTransform();
             } else if (e.touches.length === 1 && isPanning && scale > 1) {
                 e.preventDefault();
+                wasPinching = false;
                 var dx = e.touches[0].clientX - startTouchX;
                 var dy = e.touches[0].clientY - startTouchY;
                 panX = startPanX + dx;
@@ -1104,7 +1120,12 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
 
         img.addEventListener('touchend', function (e) {
             if (e.touches.length === 0) {
+                if (wasPinching) {
+                    recentPinch = true;
+                    setTimeout(function () { recentPinch = false; }, 400);
+                }
                 isPanning = false;
+                wasPinching = false;
             }
         });
 
@@ -1262,7 +1283,24 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
         }
         previewEl.innerHTML = html;
 
-        // 隐藏文件名一级标题（工具栏已显示文件名，正文中重复的一级标题默认隐藏）
+        postprocessCallouts(previewEl, showFm);
+        addCopyButtons();
+        renderMermaid();
+        setupTableInteractions();
+        renderFormulas();
+
+        codeBlockEl.removeAttribute('data-highlighted');
+        codeBlockEl.className = 'language-markdown';
+        codeBlockEl.textContent = rawSource;
+        if (window.hljs) { try { hljs.highlightElement(codeBlockEl); } catch (e) { } }
+
+        collapsed = new Set();
+        indexHeadings();
+        setupCollapsible();
+        buildToc();
+        recompute();
+
+        // 隐藏文件名一级标题（在 recompute 之后执行，避免被重置）
         if (_getHideTitle()) {
             try {
                 var title = '';
@@ -1277,30 +1315,27 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
                 if (!h1Text) continue;
                 if (_titleMatch(h1Text, title)) {
                     h1.style.display = 'none';
+                    h1.classList.add('title-hidden');
                     matched = true;
                     break;
                 }
             }
             if (!matched && title && allH1.length > 0) {
                 allH1[0].style.display = 'none';
+                allH1[0].classList.add('title-hidden');
+            }
+            // 从目录中移除被隐藏的标题
+            var tocItems = tocListEl.querySelectorAll('.toc-item');
+            for (var ti = tocItems.length - 1; ti >= 0; ti--) {
+                var item = tocItems[ti];
+                var href = item.getAttribute('href') || '';
+                var secId = href.replace('#', '');
+                var target = document.getElementById(secId);
+                if (target && target.classList.contains('title-hidden')) {
+                    tocListEl.removeChild(item);
+                }
             }
         }
-
-        postprocessCallouts(previewEl, showFm);
-        addCopyButtons();
-        renderMermaid();
-        setupTableInteractions();
-
-        codeBlockEl.removeAttribute('data-highlighted');
-        codeBlockEl.className = 'language-markdown';
-        codeBlockEl.textContent = rawSource;
-        if (window.hljs) { try { hljs.highlightElement(codeBlockEl); } catch (e) { } }
-
-        collapsed = new Set();
-        indexHeadings();
-        setupCollapsible();
-        buildToc();
-        recompute();
 
         window.scrollTo(0, 0);
     }

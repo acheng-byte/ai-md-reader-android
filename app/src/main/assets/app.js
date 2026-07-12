@@ -530,6 +530,22 @@
         c.addEventListener('mouseleave', cancelPress);
     }
 
+    /* ---------- LaTeX 公式渲染 ---------- */
+    /** 使用 KaTeX 渲染页面中的数学公式（$$...$$ 块级公式 和 $...$ 行内公式） */
+    function renderFormulas() {
+        if (typeof renderMathInElement !== 'function') return;
+        try {
+            renderMathInElement(previewEl, {
+                delimiters: [
+                    { left: '$$', right: '$$', display: true },
+                    { left: '$', right: '$', display: false }
+                ],
+                throwOnError: false,
+                errorColor: '#cc0000'
+            });
+        } catch (e) { /* KaTeX render error */ }
+    }
+
     /* ---------- 表格/图表预览与下载 ---------- */
 
     /** 为预览覆盖层注入样式 */
@@ -541,8 +557,8 @@
             '.mdreader-preview-toolbar button{color:#333;border:none;border-radius:6px;padding:8px 16px;font-size:14px;cursor:pointer;}',
             '.mdreader-preview-dl-btn{background:#0969da;color:#fff;}',
             '.mdreader-preview-close-btn{background:rgba(0,0,0,0.1);}',
-            '.mdreader-preview-body{flex:1;overflow:auto;display:flex;align-items:center;justify-content:center;padding:12px;background:#fff;border-radius:8px;margin:8px;box-shadow:0 2px 12px rgba(0,0,0,0.12);}',
-            '.mdreader-preview-body img{max-width:100%;height:auto;transform-origin:center center;touch-action:none;}',
+            '.mdreader-preview-body{flex:1;overflow:hidden;display:flex;align-items:center;justify-content:center;padding:12px;background:#fff;border-radius:8px;margin:8px;box-shadow:0 2px 12px rgba(0,0,0,0.12);}',
+            '.mdreader-preview-body img{max-width:none;height:auto;transform-origin:center center;touch-action:none;}',
             '.mdreader-preview-body table{border-collapse:collapse;width:auto;min-width:300px;max-width:95vw;margin:0 auto;font-size:14px;}',
             '.mdreader-preview-body table th,.mdreader-preview-body table td{border:1px solid #ccc;padding:8px 14px;color:#333;}',
             '.mdreader-preview-body table th{background:#f5f5f5;font-weight:600;}',
@@ -570,6 +586,7 @@
     var previewCurrentSvg = null;
     var previewCurrentSvgEl = null; // 保留原始 SVG DOM 引用，用于 PNG 转换时的 getComputedStyle
     var previewBlobUrl = null; // 跟踪当前 blob URL，防止内存泄漏
+    var recentPinch = false; // 捏合手势刚结束时阻止 overlay 关闭
 
     /** 创建预览覆盖层 DOM（惰性创建，复用） */
     function ensurePreviewOverlay() {
@@ -597,8 +614,9 @@
         body.className = 'mdreader-preview-body';
         previewOverlay.appendChild(body);
 
-        // 点击背景关闭
+        // 点击背景关闭（捏合手势刚结束时不关闭）
         previewOverlay.addEventListener('click', function (e) {
+            if (recentPinch) { recentPinch = false; return; }
             if (e.target === previewOverlay || e.target === body) closePreviewOverlay();
         });
 
@@ -662,17 +680,18 @@
         }
     }
 
-    /** 将 SVG 元素的计算样式内联到属性中（用于 offscreen WebView 渲染） */
+    /** 将 SVG 元素的计算样式内联到属性中（用于 offscreen WebView 渲染）。
+     *  注意：不移除 class 属性（Mermaid SVG 内部 &lt;style&gt; 块依赖 class 选择器），
+     *  不内联 background-color 为 fill（深色模式下会导致黑色区域）。 */
     function inlineSvgStyles(svgEl) {
         var clone = svgEl.cloneNode(true);
-        // 需要内联样式的 SVG 属性映射
+        // 只内联无法通过 SVG 内部 &lt;style&gt; 块携带的属性
+        // 移除 background-color/background（会导致深色背景被当作 fill）
         var styleProps = [
             'fill', 'stroke', 'stroke-width', 'stroke-dasharray', 'stroke-dashoffset',
             'font-family', 'font-size', 'font-weight', 'font-style',
             'opacity', 'transform', 'transform-origin',
-            'text-anchor', 'dominant-baseline',
-            'background-color', 'background',
-            'border', 'border-radius'
+            'text-anchor', 'dominant-baseline'
         ];
         var allEls = [clone].concat(Array.prototype.slice.call(clone.querySelectorAll('*')));
         for (var i = 0; i < allEls.length; i++) {
@@ -684,14 +703,8 @@
                     var prop = styleProps[j];
                     var val = cs.getPropertyValue(prop);
                     if (val && val !== 'none' && val !== 'normal' && val !== '0px') {
-                        // SVG 属性用驼峰命名
                         var attrName = prop.replace(/-([a-z])/g, function (_, c) { return c.toUpperCase(); });
-                        // fill/stroke 特殊处理
-                        if (prop === 'background-color' || prop === 'background') {
-                            if (el.tagName === 'rect' || el.tagName === 'path' || el.tagName === 'polygon') {
-                                el.setAttribute('fill', val);
-                            }
-                        } else if (prop === 'font-family') {
+                        if (prop === 'font-family') {
                             el.setAttribute('font-family', val);
                         } else if (prop === 'font-size') {
                             el.setAttribute('font-size', val);
@@ -706,8 +719,7 @@
                         }
                     }
                 }
-                // 移除 class 属性（样式已内联）
-                el.removeAttribute('class');
+                // 不再移除 class 属性 — Mermaid SVG 的 &lt;style&gt; 块依赖 class 选择器
             } catch (e) { /* skip */ }
         }
         return clone.outerHTML;
@@ -1078,6 +1090,7 @@
         var startPanX = 0, startPanY = 0;
         var startTouchX = 0, startTouchY = 0;
         var isPanning = false;
+        var wasPinching = false; // 跟踪是否刚完成捏合手势
 
         function getDist(t1, t2) {
             var dx = t1.clientX - t2.clientX;
@@ -1093,15 +1106,19 @@
             if (e.touches.length === 2) {
                 e.preventDefault();
                 isPanning = false;
+                wasPinching = true;
                 startDist = getDist(e.touches[0], e.touches[1]);
                 startScale = scale;
             } else if (e.touches.length === 1 && scale > 1) {
                 // 缩放状态下允许单指平移
                 isPanning = true;
+                wasPinching = false;
                 startTouchX = e.touches[0].clientX;
                 startTouchY = e.touches[0].clientY;
                 startPanX = panX;
                 startPanY = panY;
+            } else {
+                wasPinching = false;
             }
         }, { passive: false });
 
@@ -1109,11 +1126,13 @@
             if (e.touches.length === 2) {
                 e.preventDefault();
                 isPanning = false;
+                wasPinching = true;
                 var dist = getDist(e.touches[0], e.touches[1]);
                 scale = Math.max(0.5, Math.min(5, startScale * (dist / startDist)));
                 applyTransform();
             } else if (e.touches.length === 1 && isPanning && scale > 1) {
                 e.preventDefault();
+                wasPinching = false;
                 var dx = e.touches[0].clientX - startTouchX;
                 var dy = e.touches[0].clientY - startTouchY;
                 panX = startPanX + dx;
@@ -1123,9 +1142,14 @@
         }, { passive: false });
 
         img.addEventListener('touchend', function (e) {
-            // 不再自动重置缩放，由双击来重置
             if (e.touches.length === 0) {
+                if (wasPinching) {
+                    // 捏合手势刚结束，阻止 overlay 点击关闭
+                    recentPinch = true;
+                    setTimeout(function () { recentPinch = false; }, 400);
+                }
                 isPanning = false;
+                wasPinching = false;
             }
         });
 
@@ -1298,36 +1322,11 @@
         }
         previewEl.innerHTML = html;
 
-        // 隐藏文件名一级标题（工具栏已显示文件名，正文中重复的一级标题默认隐藏）
-        if (_getHideTitle()) {
-            try {
-                var title = '';
-                var b2 = bridge();
-                if (b2 && b2.getTitle) title = b2.getTitle() || '';
-            } catch (e) { title = ''; }
-            // 遍历所有 H1，隐藏与文件名匹配的那个（通常只有第一个）
-            var allH1 = previewEl.querySelectorAll('h1');
-            var matched = false;
-            for (var hi = 0; hi < allH1.length; hi++) {
-                var h1 = allH1[hi];
-                var h1Text = h1.textContent.trim();
-                if (!h1Text) continue;
-                if (_titleMatch(h1Text, title)) {
-                    h1.style.display = 'none';
-                    matched = true;
-                    break; // 只隐藏第一个匹配的
-                }
-            }
-            // 兜底：有文件名但未匹配到任何 H1，隐藏第一个 H1（它大概率就是文档标题）
-            if (!matched && title && allH1.length > 0) {
-                allH1[0].style.display = 'none';
-            }
-        }
-
         postprocessCallouts(previewEl, showFm);
         addCopyButtons();
         renderMermaid();
         setupTableInteractions();
+        renderFormulas();
 
         codeBlockEl.removeAttribute('data-highlighted');
         codeBlockEl.className = 'language-markdown';
@@ -1339,6 +1338,45 @@
         setupCollapsible();
         buildToc();
         recompute();
+
+        // 隐藏文件名一级标题（放在 recompute() 之后，防止被重置）
+        if (_getHideTitle()) {
+            try {
+                var title = '';
+                var b2 = bridge();
+                if (b2 && b2.getTitle) title = b2.getTitle() || '';
+            } catch (e) { title = ''; }
+            var allH1 = previewEl.querySelectorAll('h1');
+            var matched = false;
+            for (var hi = 0; hi < allH1.length; hi++) {
+                var h1 = allH1[hi];
+                var h1Text = h1.textContent.trim();
+                if (!h1Text) continue;
+                if (_titleMatch(h1Text, title)) {
+                    h1.style.display = 'none';
+                    h1.classList.add('title-hidden'); // 标记，防止 TOC 显示
+                    matched = true;
+                    break;
+                }
+            }
+            if (!matched && title && allH1.length > 0) {
+                allH1[0].style.display = 'none';
+                allH1[0].classList.add('title-hidden');
+            }
+            // 从 TOC 中移除被隐藏的标题
+            if (matched || (title && allH1.length > 0)) {
+                var tocItems = tocListEl.querySelectorAll('.toc-item');
+                for (var ti = tocItems.length - 1; ti >= 0; ti--) {
+                    var item = tocItems[ti];
+                    var href = item.getAttribute('href') || '';
+                    var secId = href.replace('#', '');
+                    var target = document.getElementById(secId);
+                    if (target && target.classList.contains('title-hidden')) {
+                        tocListEl.removeChild(item);
+                    }
+                }
+            }
+        }
 
         window.scrollTo(0, 0);
     }
