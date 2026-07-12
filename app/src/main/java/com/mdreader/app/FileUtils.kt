@@ -198,6 +198,13 @@ object FileUtils {
         var cellBuffer = StringBuilder()
         var inCell = false
 
+        // 格式追踪
+        var inRunProps = false
+        var runBold = false
+        var runItalic = false
+        var isList = false
+        var listCounter = 0
+
         var event = parser.eventType
 
         while (event != XmlPullParser.END_DOCUMENT) {
@@ -224,14 +231,32 @@ object FileUtils {
                         localName == "p" && isWordNs && !inTable -> {
                             paraBuffer = StringBuilder()
                             headingLevel = 0
+                            runBold = false
+                            runItalic = false
+                            isList = false
                         }
                         localName == "pStyle" && isWordNs -> {
                             val styleVal = parser.getAttributeValue(null, "val") ?: ""
                             headingLevel = detectHeadingLevel(styleVal)
+                            if (isListStyle(styleVal)) isList = true
+                        }
+                        // ── Run 属性（追踪加粗/斜体）────────────────────────
+                        localName == "rPr" && isWordNs -> {
+                            inRunProps = true
+                        }
+                        localName == "b" && isWordNs && inRunProps -> {
+                            runBold = true
+                        }
+                        localName == "i" && isWordNs && inRunProps -> {
+                            runItalic = true
                         }
                         // ── 文本 ──────────────────────────────────────────────
                         localName == "t" && isWordNs -> {
-                            val text = parser.nextText()
+                            var text = parser.nextText()
+                            // 应用 run 级格式
+                            if (runBold && runItalic) text = "***$text***"
+                            else if (runBold) text = "**$text**"
+                            else if (runItalic) text = "*$text*"
                             if (inCell) cellBuffer.append(text)
                             else paraBuffer.append(text)
                         }
@@ -263,6 +288,9 @@ object FileUtils {
                 }
                 XmlPullParser.END_TAG -> {
                     when {
+                        localName == "rPr" && isWordNs -> {
+                            inRunProps = false
+                        }
                         // ── 表格结束：转 Markdown 表格 ────────────────────────
                         localName == "tbl" && isWordNs -> {
                             inTable = false
@@ -304,13 +332,20 @@ object FileUtils {
                                 if (headingLevel > 0) {
                                     sb.append("#".repeat(headingLevel)).append(' ')
                                     sb.append(paraText.trim()).append("\n\n")
+                                    listCounter = 0
+                                } else if (isList) {
+                                    listCounter++
+                                    sb.append("$listCounter. ")
+                                    sb.append(paraText.trim()).append("\n")
                                 } else {
+                                    listCounter = 0
                                     val line = paraText.trim()
                                     val escaped = if (line.startsWith("#")) "\\$line" else line
                                     sb.append(escaped).append("\n\n")
                                 }
                             } else {
                                 sb.append('\n')
+                                listCounter = 0
                             }
                         }
                     }
@@ -321,16 +356,25 @@ object FileUtils {
         return Pair(sb.toString().trimEnd(), foundImages)
     }
 
-    private fun detectHeadingLevel(styleVal: String): Int = when {
-        styleVal.equals("Heading1", ignoreCase = true) ||
-        styleVal.equals("标题1") || styleVal.equals("标题 1") -> 1
-        styleVal.equals("Heading2", ignoreCase = true) ||
-        styleVal.equals("标题2") || styleVal.equals("标题 2") -> 2
-        styleVal.equals("Heading3", ignoreCase = true) ||
-        styleVal.equals("标题3") || styleVal.equals("标题 3") -> 3
-        styleVal.equals("Heading4", ignoreCase = true) ||
-        styleVal.equals("标题4") || styleVal.equals("标题 4") -> 4
-        else -> 0
+    private fun detectHeadingLevel(styleVal: String): Int {
+        val lower = styleVal.lowercase().replace(" ", "")
+        return when {
+            lower.startsWith("heading1") || lower == "标题1" -> 1
+            lower.startsWith("heading2") || lower == "标题2" -> 2
+            lower.startsWith("heading3") || lower == "标题3" -> 3
+            lower.startsWith("heading4") || lower == "标题4" -> 4
+            lower.startsWith("heading5") || lower == "标题5" -> 5
+            lower.startsWith("heading6") || lower == "标题6" -> 6
+            lower.startsWith("title") && lower != "titlepage" -> 1
+            lower.startsWith("subtitle") -> 2
+            else -> 0
+        }
+    }
+
+    private fun isListStyle(styleVal: String): Boolean {
+        val lower = styleVal.lowercase()
+        return lower.contains("list") || lower.contains("列表") ||
+            lower.startsWith("listparagraph")
     }
 
     /* ========== 旧版 .doc（OLE2）—— 使用 Apache POI HWPF ========== */
@@ -339,21 +383,79 @@ object FileUtils {
         return runCatching {
             val doc = HWPFDocument(bytes.inputStream())
             val range = doc.range
-            val text = range.text()
-                .replace('\r', '\n')
-                .replace('\u0007', '\t')  // 表格单元格分隔符
-                .replace(Regex("[\\x00-\\x06\\x08\\x0e-\\x1f]"), "")  // 去除控制字符
-                .trim()
-
             val title = filename.substringBeforeLast('.')
             val sb = StringBuilder("# $title\n\n")
+            var hasText = false
 
-            if (text.isNotEmpty()) {
-                sb.append(text)
+            for (pi in 0 until range.numParagraphs) {
+                val para = range.getParagraph(pi)
+                val text = para.text() ?: ""
+
+                // 跳过只含控制字符的空段落
+                if (text.replace(Regex("[\\x00-\\x09\\x0b-\\x1f]"), "").isBlank()) {
+                    if (hasText) sb.append('\n')
+                    continue
+                }
+
+                // ── 表格段落：\u0007 分隔单元格 ──
+                if (para.isInTable) {
+                    val allText = buildString {
+                        for (ri in 0 until para.numRuns) append(para.getRun(ri).text())
+                    }
+                    if (allText.contains("\u0007")) {
+                        val cells = allText.split("\u0007")
+                            .map { it.replace(Regex("[\\r\\u0007\\u000b]"), "").trim() }
+                            .filter { it.isNotEmpty() }
+                        if (cells.isNotEmpty()) {
+                            sb.append(formatDocTableRow(cells))
+                            hasText = true
+                        }
+                    }
+                    continue
+                }
+
+                // ── 普通段落：逐 CharacterRun 提取格式 ──
+                val paraSb = StringBuilder()
+                var hasBoldRun = false
+
+                for (ri in 0 until para.numRuns) {
+                    val run = para.getRun(ri)
+                    var runText = run.text() ?: continue
+                    // 去除段落终止符和控制字符
+                    runText = runText.replace(Regex("[\\x00-\\x09\\x0b-\\x1f]"), "")
+                    if (runText.isEmpty()) continue
+
+                    if (run.isBold) hasBoldRun = true
+
+                    val formatted = when {
+                        run.isBold && run.isItalic -> "***$runText***"
+                        run.isBold -> "**$runText**"
+                        run.isItalic -> "*$runText*"
+                        else -> runText
+                    }
+                    paraSb.append(formatted)
+                }
+
+                val paraText = paraSb.toString().trim()
+                if (paraText.isNotEmpty()) {
+                    val styleName = para.style?.name ?: ""
+                    val headingLevel = detectHeadingLevel(styleName)
+                    if (headingLevel > 0) {
+                        sb.append("#".repeat(headingLevel)).append(' ')
+                        sb.append(paraText).append("\n\n")
+                    } else if (hasBoldRun && looksLikeHeading(paraText)) {
+                        // 整段加粗 + 短文本 → 视为标题
+                        val level = headingLevelFromLength(paraText)
+                        sb.append("#".repeat(level)).append(' ')
+                        sb.append(paraText.trim('*')).append("\n\n")
+                    } else {
+                        sb.append(paraText).append("\n\n")
+                    }
+                    hasText = true
+                }
             }
 
-            // 提取文档中嵌入的图片（仅保留浏览器可渲染的格式：png/jpg/gif/bmp/webp）
-            // EMF/WMF 是 Windows 矢量格式，WebView 无法显示，需过滤掉
+            // 提取嵌入图片
             val picturesTable = doc.picturesTable
             @Suppress("UNCHECKED_CAST")
             val allPictures = picturesTable.allPictures as List<org.apache.poi.hwpf.usermodel.Picture>
@@ -362,27 +464,43 @@ object FileUtils {
                 it.suggestFileExtension().lowercase() in webCompatibleExts
             }
             if (displayablePics.isNotEmpty()) {
-                if (text.isNotEmpty()) sb.append("\n\n---\n\n")
+                if (hasText) sb.append("\n---\n\n")
                 sb.append("**文档内嵌图片：**\n\n")
                 for (pic in displayablePics) {
                     val imgBytes = pic.content
                     val ext = pic.suggestFileExtension().lowercase()
-                    val mime = when (ext) {
-                        "jpg" -> "jpeg"
-                        else -> ext
-                    }
+                    val mime = if (ext == "jpg") "jpeg" else ext
                     val dataUri = "data:image/$mime;base64," +
                         Base64.encodeToString(imgBytes, Base64.NO_WRAP)
                     sb.append("![]($dataUri)\n\n")
                 }
             }
 
-            if (text.isEmpty() && displayablePics.isEmpty())
+            if (!hasText && displayablePics.isEmpty())
                 "# $title\n\n（文档内容为空）"
             else sb.toString().trimEnd()
         }.getOrElse { e ->
             "# 解析失败\n\n（DOC 解析失败：${e.message}）"
         }
+    }
+
+    /** 表格单元格 → Markdown 表格行 */
+    private fun formatDocTableRow(cells: List<String>): String {
+        val row = cells.joinToString(" | ") { it.ifBlank { " " } }
+        return "| $row |\n"
+    }
+
+    /** 整段加粗的短文本可能实际是标题 */
+    private fun looksLikeHeading(text: String): Boolean {
+        val clean = text.trim('*')
+        return clean.length < 60 && '\n' !in clean && '。' !in clean
+    }
+
+    /** 根据文本长度推测标题级别 */
+    private fun headingLevelFromLength(text: String): Int = when {
+        text.length < 15 -> 1
+        text.length < 30 -> 2
+        else -> 3
     }
 
     /* ========== PDF 逐页渲染为图片 ========== */
