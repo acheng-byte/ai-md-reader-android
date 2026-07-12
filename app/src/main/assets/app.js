@@ -1476,7 +1476,11 @@
                 var lvl = levelOf(el);
                 while (stack.length && stack[stack.length - 1] >= lvl) stack.pop();
                 var hidden = stack.length > 0;
-                el.style.display = hidden ? 'none' : '';
+                if (el.classList.contains('title-hidden')) {
+                    el.style.display = 'none';
+                } else {
+                    el.style.display = hidden ? 'none' : '';
+                }
                 el.classList.toggle('collapsed', collapsed.has(el));
                 if (!hidden && collapsed.has(el)) stack.push(lvl);
             } else {
