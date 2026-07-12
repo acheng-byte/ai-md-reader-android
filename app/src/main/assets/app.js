@@ -1158,6 +1158,7 @@
 
         collapsed = new Set();
         indexHeadings();
+        setupAnchorLinks();
         setupCollapsible();
         buildToc();
         recompute();
@@ -1251,15 +1252,86 @@
         try { if (navigator.clipboard) navigator.clipboard.writeText(text); } catch (e) { }
     }
 
+    /* ---------- 标题索引 + 锚点链接支持 ---------- */
+    var _anchorClickHandler = null;
+
+    function slugify(text) {
+        return text.trim()
+            .toLowerCase()
+            .replace(/\s+/g, '-')
+            .replace(/[^\w\u4e00-\u9fff-]/g, '')
+            || 'heading';
+    }
+
     function indexHeadings() {
         headings = [];
+        var idCounts = {};
         var kids = previewEl.children;
         for (var i = 0; i < kids.length; i++) {
             if (isHeading(kids[i])) {
-                kids[i].id = 'sec-' + i;
+                var rawText = (kids[i].textContent || '').trim();
+                var baseId = slugify(rawText);
+                // 去重：相同文本的标题追加 -1, -2 ...
+                if (idCounts[baseId] !== undefined) {
+                    idCounts[baseId]++;
+                    kids[i].id = baseId + '-' + idCounts[baseId];
+                } else {
+                    idCounts[baseId] = 0;
+                    kids[i].id = baseId;
+                }
                 headings.push({ el: kids[i], level: levelOf(kids[i]), index: i });
             }
         }
+    }
+
+    /** 处理 [text](#heading-text) 锚点链接点击 → 滚动到对应标题 */
+    function setupAnchorLinks() {
+        // 移除旧监听器
+        if (_anchorClickHandler) {
+            previewEl.removeEventListener('click', _anchorClickHandler);
+        }
+        _anchorClickHandler = function (e) {
+            var target = e.target;
+            // 向上查找 <a> 元素（可能点击的是 <a> 内的子元素）
+            while (target && target !== previewEl) {
+                if (target.tagName === 'A') break;
+                target = target.parentElement;
+            }
+            if (!target || target === previewEl) return;
+            var href = target.getAttribute('href') || '';
+            if (!href.startsWith('#') || href === '#') return;
+            // 排除脚注链接（已有专门处理）
+            if (href.indexOf('#fn-') === 0 || href.indexOf('#fnref-') === 0) return;
+
+            e.preventDefault();
+            var anchorText = decodeURIComponent(href.substring(1));
+            // 尝试 ID 精确匹配
+            var el = document.getElementById(anchorText);
+            if (el && isHeading(el)) {
+                expandAncestors(el);
+                requestAnimationFrame(function () {
+                    requestAnimationFrame(function () {
+                        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    });
+                });
+                return;
+            }
+            // 回退：按文本内容匹配标题
+            var allHeadings = previewEl.querySelectorAll('h1,h2,h3,h4,h5,h6');
+            for (var i = 0; i < allHeadings.length; i++) {
+                var hText = (allHeadings[i].textContent || '').trim();
+                if (hText === anchorText || slugify(hText) === anchorText) {
+                    expandAncestors(allHeadings[i]);
+                    requestAnimationFrame(function () {
+                        requestAnimationFrame(function () {
+                            allHeadings[i].scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        });
+                    });
+                    return;
+                }
+            }
+        };
+        previewEl.addEventListener('click', _anchorClickHandler);
     }
 
     /* ---------- 折叠/展开 ---------- */
