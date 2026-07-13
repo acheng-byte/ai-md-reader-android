@@ -203,7 +203,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         webView.setBackgroundColor(bgColor())
         webView.loadUrl(VIEWER_URL)
 
-        // Back press: in source mode, check for unsaved changes
+        // Back press: 图片预览关闭 / 源码模式放弃确认 / 预览模式退出确认
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (currentMode == "code") {
@@ -220,8 +220,17 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                         invalidateOptionsMenu()
                     }
                 } else {
-                    isEnabled = false
-                    onBackPressedDispatcher.onBackPressed()
+                    // 预览模式：先检查是否有图片预览 overlay 打开
+                    webView.evaluateJavascript("window.isPreviewOverlayOpen && window.isPreviewOverlayOpen()") { result ->
+                        val overlayOpen = result?.trim()?.removeSurrounding("\"") == "true"
+                        if (overlayOpen) {
+                            // 关闭图片预览
+                            webView.evaluateJavascript("window.closeImagePreview && window.closeImagePreview()", null)
+                        } else {
+                            // 确认是否退出
+                            confirmExit()
+                        }
+                    }
                 }
             }
         })
@@ -924,6 +933,19 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                 invalidateOptionsMenu()
             }
             .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    /** 退出确认对话框，防止误触返回键退出 */
+    private fun confirmExit() {
+        AlertDialog.Builder(this)
+            .setTitle("退出阅读")
+            .setMessage("确定要退出当前文档吗？")
+            .setPositiveButton("退出") { _, _ ->
+                isEnabled = false
+                onBackPressedDispatcher.onBackPressed()
+            }
+            .setNegativeButton("取消", null)
             .show()
     }
 

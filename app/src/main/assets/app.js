@@ -646,6 +646,12 @@
         }
     }
 
+    // 暴露给 Android 返回键处理
+    window.isPreviewOverlayOpen = function () {
+        return previewOverlay && previewOverlay.style.display !== 'none';
+    };
+    window.closeImagePreview = closePreviewOverlay;
+
     /** 将表格元素直接渲染为 PNG data URL（纯 JS Canvas 绘制，完全绕过离屏 WebView）。
      *  解决 Android WebView view.draw(canvas) 输出空白的问题。 */
     function _captureTableToPng(tableEl) {
