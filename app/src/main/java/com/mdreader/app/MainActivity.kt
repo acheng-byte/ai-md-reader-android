@@ -2045,7 +2045,18 @@ body { background: var(--bg); color: var(--fg); font-family: -apple-system, "Pin
         private val WELCOME_MD = """
 # 欢迎使用 MD 阅读器
 
-这是一个功能丰富的本地 **Markdown 阅读器**（v2.2.3），支持多种文档格式与 Obsidian 兼容语法。
+这是一个功能丰富的本地 **Markdown 阅读器**，支持多种文档格式与 Obsidian 兼容语法。
+
+## 👨‍💻 关于作者
+
+你好，我是 **阿成**，一个酷爱 AI 编程的创作者。
+
+本项目是我经历一星期的持续迭代打磨而成，从文档解析到阅读体验，每一个细节都力求做到最好。
+
+如果你喜欢这款应用，欢迎到我的仓库点个免费的 Star ⭐，你的支持是我最大的动力！
+
+- 📦 **项目仓库**：[github.com/acheng-byte/ai-md-reader-android](https://github.com/acheng-byte/ai-md-reader-android)
+- 👤 **个人主页**：[github.com/acheng-byte](https://github.com/acheng-byte)
 
 ## 快速上手
 
