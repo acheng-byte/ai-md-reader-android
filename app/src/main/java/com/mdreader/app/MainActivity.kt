@@ -58,6 +58,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
     private lateinit var reading: ReadingProgress
     private lateinit var annotations: Annotations
     private lateinit var webView: WebView
+    private lateinit var backCallback: OnBackPressedCallback
 
     @Volatile private var currentMarkdown: String = ""
     @Volatile private var currentMode: String = Prefs.DEFAULT_MODE
@@ -204,7 +205,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         webView.loadUrl(VIEWER_URL)
 
         // Back press: 图片预览关闭 / 源码模式放弃确认 / 预览模式退出确认
-        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+        backCallback = object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (currentMode == "code") {
                     val edited = binding.editText.text.toString()
@@ -233,7 +234,8 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                     }
                 }
             }
-        })
+        }
+        onBackPressedDispatcher.addCallback(this, backCallback)
 
         checkForUpdates()
     }
@@ -942,8 +944,8 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             .setTitle("退出阅读")
             .setMessage("确定要退出当前文档吗？")
             .setPositiveButton("退出") { _, _ ->
-                isEnabled = false
-                onBackPressedDispatcher.onBackPressed()
+                backCallback.isEnabled = false
+                finish()
             }
             .setNegativeButton("取消", null)
             .show()
