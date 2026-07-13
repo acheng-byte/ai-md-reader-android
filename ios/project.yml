@@ -8,8 +8,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "2.1.7"
-    CURRENT_PROJECT_VERSION: "13"
+    MARKETING_VERSION: "2.2.5"
+    CURRENT_PROJECT_VERSION: "20"
     DEVELOPMENT_TEAM: ""          # 由发布者填入自己的 Team ID（TestFlight 阶段）
     CODE_SIGN_STYLE: Automatic
     TARGETED_DEVICE_FAMILY: "1,2" # iPhone + iPad

@@ -13,6 +13,12 @@ val keystoreProps = Properties().apply {
     if (hasReleaseKeystore) FileInputStream(keystorePropsFile).use { load(it) }
 }
 
+// 统一版本号：从项目根目录的 version.properties 读取
+val versionPropsFile = rootProject.file("version.properties")
+val versionProps = Properties().apply {
+    FileInputStream(versionPropsFile).use { load(it) }
+}
+
 android {
     namespace = "com.mdreader.app"
     compileSdk = 34
@@ -21,8 +27,8 @@ android {
         applicationId = "com.mdreader.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 49
-        versionName = "2.2.5"
+        versionCode = versionProps.getProperty("versionCode").toInt()
+        versionName = versionProps.getProperty("versionName")
         resourceConfigurations += listOf("zh", "en")
     }
 
