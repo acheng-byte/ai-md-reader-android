@@ -608,6 +608,8 @@ object FileUtils {
                 val bmp = Bitmap.createBitmap(
                     page.width * 2, page.height * 2, Bitmap.Config.ARGB_8888
                 )
+                // 填充白色背景：文字型 PDF 页面可能透明，不填充会在暗色主题下显示黑屏
+                bmp.eraseColor(android.graphics.Color.WHITE)
                 page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
                 page.close()
 

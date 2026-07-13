@@ -2021,7 +2021,7 @@ body { background: var(--bg); color: var(--fg); font-family: -apple-system, "Pin
         private val WELCOME_MD = """
 # 欢迎使用 MD 阅读器
 
-这是一个功能丰富的本地 **Markdown 阅读器**（v2.2.1），支持多种文档格式与 Obsidian 兼容语法。
+这是一个功能丰富的本地 **Markdown 阅读器**（v2.2.2），支持多种文档格式与 Obsidian 兼容语法。
 
 ## 快速上手
 
