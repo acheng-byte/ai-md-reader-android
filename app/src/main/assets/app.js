@@ -800,7 +800,7 @@
         document.body.appendChild(overlay);
     }
 
-    /** 为预览图片设置双指缩放 + 单指平移 */
+    /** 为预览图片设置双指缩放 + 单指平移 + 双击放大/还原 */
     function setupPinchZoom(img) {
         var scale = 1;
         var startDist = 0;
@@ -809,7 +809,9 @@
         var startPanX = 0, startPanY = 0;
         var startTouchX = 0, startTouchY = 0;
         var isPanning = false;
-        var wasPinching = false; // 跟踪是否刚完成捏合手势
+        var wasPinching = false;
+        var lastTapTime = 0;
+        var tapTimer = null;
 
         function getDist(t1, t2) {
             var dx = t1.clientX - t2.clientX;
@@ -821,15 +823,39 @@
             img.style.transform = 'translate(' + panX + 'px,' + panY + 'px) scale(' + scale + ')';
         }
 
+        function resetZoom() {
+            scale = 1; panX = 0; panY = 0;
+            img.style.transition = 'transform 0.25s ease-out';
+            applyTransform();
+            setTimeout(function () { img.style.transition = ''; }, 260);
+        }
+
+        function zoomIn(cx, cy) {
+            var targetScale = 2;
+            // 以点击位置为中心放大
+            var rect = img.getBoundingClientRect();
+            var imgCX = rect.left + rect.width / 2;
+            var imgCY = rect.top + rect.height / 2;
+            panX = (cx - imgCX) * (1 - targetScale);
+            panY = (cy - imgCY) * (1 - targetScale);
+            scale = targetScale;
+            img.style.transition = 'transform 0.25s ease-out';
+            applyTransform();
+            setTimeout(function () { img.style.transition = ''; }, 260);
+        }
+
         img.addEventListener('touchstart', function (e) {
             if (e.touches.length === 2) {
                 e.preventDefault();
                 isPanning = false;
                 wasPinching = true;
+                // 清除可能的单击定时器，避免与双击冲突
+                if (tapTimer) { clearTimeout(tapTimer); tapTimer = null; }
                 startDist = getDist(e.touches[0], e.touches[1]);
                 startScale = scale;
+                startPanX = panX;
+                startPanY = panY;
             } else if (e.touches.length === 1 && scale > 1) {
-                // 缩放状态下允许单指平移
                 isPanning = true;
                 wasPinching = false;
                 startTouchX = e.touches[0].clientX;
@@ -848,6 +874,14 @@
                 wasPinching = true;
                 var dist = getDist(e.touches[0], e.touches[1]);
                 scale = Math.max(0.5, Math.min(5, startScale * (dist / startDist)));
+                // 双指缩放时保持中心点
+                var midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+                var midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+                var rect = img.getBoundingClientRect();
+                var imgCX = rect.left + rect.width / 2;
+                var imgCY = rect.top + rect.height / 2;
+                panX = startPanX + (midX - imgCX) * (1 - scale / startScale);
+                panY = startPanY + (midY - imgCY) * (1 - scale / startScale);
                 applyTransform();
             } else if (e.touches.length === 1 && isPanning && scale > 1) {
                 e.preventDefault();
@@ -863,7 +897,6 @@
         img.addEventListener('touchend', function (e) {
             if (e.touches.length === 0) {
                 if (wasPinching) {
-                    // 捏合手势刚结束，阻止 overlay 点击关闭
                     recentPinch = true;
                     setTimeout(function () { recentPinch = false; }, 400);
                 }
@@ -872,15 +905,34 @@
             }
         });
 
-        // 双击重置缩放和平移
-        var lastTap = 0;
+        // 双击放大/还原（用 touchend 模拟，避免与 click 事件冲突）
         img.addEventListener('touchend', function (e) {
+            if (e.touches.length !== 0) return;
             var now = Date.now();
-            if (now - lastTap < 300 && e.touches.length === 0) {
-                scale = 1; panX = 0; panY = 0;
-                img.style.transform = 'scale(1)';
+            if (now - lastTapTime < 300) {
+                // 双击：切换缩放
+                if (tapTimer) { clearTimeout(tapTimer); tapTimer = null; }
+                if (scale > 1.1) {
+                    resetZoom();
+                } else {
+                    // 使用上次触摸位置作为放大中心
+                    var cx = window.innerWidth / 2;
+                    var cy = window.innerHeight / 2;
+                    if (e.changedTouches && e.changedTouches.length > 0) {
+                        cx = e.changedTouches[0].clientX;
+                        cy = e.changedTouches[0].clientY;
+                    }
+                    zoomIn(cx, cy);
+                }
+                lastTapTime = 0;
+            } else {
+                lastTapTime = now;
+                // 延迟执行单击逻辑，等待可能的双击
+                tapTimer = setTimeout(function () {
+                    tapTimer = null;
+                    // 单击不做任何事（点击背景关闭由 overlay 处理）
+                }, 310);
             }
-            lastTap = now;
         });
     }
 
