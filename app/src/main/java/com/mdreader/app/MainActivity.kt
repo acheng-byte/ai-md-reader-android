@@ -221,15 +221,22 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                     }
                 } else {
                     // 预览模式：先检查是否有图片预览 overlay 打开
-                    webView.evaluateJavascript("window.isPreviewOverlayOpen && window.isPreviewOverlayOpen()") { result ->
-                        val overlayOpen = result?.trim()?.removeSurrounding("\"") == "true"
-                        if (overlayOpen) {
-                            // 关闭图片预览
-                            webView.evaluateJavascript("window.closeImagePreview && window.closeImagePreview()", null)
-                        } else {
-                            // 确认是否退出
-                            confirmExit()
+                    if (!pageReady) return@handleOnBackPressed
+                    try {
+                        webView.evaluateJavascript("window.isPreviewOverlayOpen && window.isPreviewOverlayOpen()") { result ->
+                            val overlayOpen = result?.trim()?.removeSurrounding("\"") == "true"
+                            if (overlayOpen) {
+                                // 关闭图片预览
+                                try {
+                                    webView.evaluateJavascript("window.closeImagePreview && window.closeImagePreview()", null)
+                                } catch (_: Exception) {}
+                            } else {
+                                // 确认是否退出
+                                confirmExit()
+                            }
                         }
+                    } catch (_: Exception) {
+                        confirmExit()
                     }
                 }
             }
@@ -257,7 +264,42 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                 view: WebView, request: WebResourceRequest
             ): WebResourceResponse? {
                 val url = request.url
-                return assetLoader.shouldInterceptRequest(url)
+                // 先走 Asset Loader（/assets/ = 捆绑资源，/vault/ = Vault 资源）
+                val response = assetLoader.shouldInterceptRequest(url)
+                if (response != null) return response
+
+                // 回退：/assets/ 路径下未找到的 .md 或资源文件，尝试从 Vault 加载
+                // 这处理标准 markdown 链接如 [text](子目录/文件.md) 被 markdown-it
+                // 渲染为相对路径 /assets/子目录/文件.md 而 fixMdLinks 未覆盖的情况
+                if (url.host == ASSET_HOST) {
+                    val path = try { URLDecoder.decode(url.path?.trimStart('/') ?: "", "UTF-8") } catch (_: Exception) { "" }
+                    // 跳过真正的 assets 资源
+                    if (!path.startsWith("assets/")) return null
+                    val vaultPath = path.removePrefix("assets/")
+                    if (vaultPath.isEmpty()) return null
+                    val vaultUriStr = prefs.vaultUri ?: return null
+                    val vaultUri = Uri.parse(vaultUriStr)
+                    val found = runCatching {
+                        VaultSearch.findAssetInVault(this@MainActivity, vaultUri, vaultPath)
+                    }.getOrNull()
+                    if (found != null) {
+                        val mime = guessMime(vaultPath)
+                        val stream = runCatching { contentResolver.openInputStream(found.uri) }.getOrNull()
+                        if (stream != null) return WebResourceResponse(mime, null, stream)
+                    }
+                }
+                return null
+            }
+
+            override fun onReceivedError(
+                view: WebView, request: WebResourceRequest,
+                error: android.webkit.WebResourceError
+            ) {
+                // 防止 WebView 显示内置错误页面导致后续崩溃
+                // 对于主框架错误，加载空白页而不是让 WebView 进入错误状态
+                if (request.isForMainFrame) {
+                    view.loadUrl("about:blank")
+                }
             }
 
             override fun onPageFinished(view: WebView, url: String) {
@@ -1242,9 +1284,25 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         sheet.btnCheckUpdate.setOnClickListener { manualCheckForUpdates() }
 
         sheet.btnReset.setOnClickListener {
-            prefs.fontSize = Prefs.DEFAULT_FONT; prefs.lineHeight = Prefs.DEFAULT_LINE; prefs.paraGap = Prefs.DEFAULT_PARA
-            sheet.sliderFont.value = Prefs.DEFAULT_FONT; sheet.sliderLine.value = Prefs.DEFAULT_LINE; sheet.sliderPara.value = Prefs.DEFAULT_PARA
-            updateLabels(sheet); applySettingsToWeb()
+            prefs.fontSize = Prefs.DEFAULT_FONT
+            prefs.lineHeight = Prefs.DEFAULT_LINE
+            prefs.paraGap = Prefs.DEFAULT_PARA
+            prefs.themeMode = Prefs.DEFAULT_THEME
+            prefs.eyeProtection = false
+            prefs.fontFamily = "default"
+            prefs.showFrontmatter = false
+            prefs.showCitations = false
+            prefs.hideTitleHeading = true
+            // 更新 UI
+            sheet.sliderFont.value = Prefs.DEFAULT_FONT
+            sheet.sliderLine.value = Prefs.DEFAULT_LINE
+            sheet.sliderPara.value = Prefs.DEFAULT_PARA
+            sheet.toggleTheme.check(R.id.btn_theme_system)
+            sheet.switchEyeProtection.isChecked = false
+            sheet.spinnerFontFamily.setSelection(0)
+            updateLabels(sheet)
+            applySettingsToWeb()
+            Toast.makeText(this, R.string.settings_reset_done, Toast.LENGTH_SHORT).show()
         }
 
         BottomSheetDialog(this).apply { setContentView(sheet.root); show() }
@@ -1735,7 +1793,10 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
 
     /** 显示字符统计（由标题栏点击触发） */
     fun triggerCharCount() {
-        webView.evaluateJavascript("window.appShowCharCount && window.appShowCharCount()") {}
+        if (!pageReady) return
+        try {
+            webView.evaluateJavascript("window.appShowCharCount && window.appShowCharCount()") {}
+        } catch (_: Exception) {}
     }
 
     // ---- 字体辅助 ----

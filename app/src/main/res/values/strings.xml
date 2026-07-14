@@ -29,6 +29,7 @@
     <string name="font_lishu">隶书</string>
     <string name="font_yahei">微软雅黑</string>
     <string name="reset_default">恢复默认</string>
+    <string name="settings_reset_done">已恢复默认设置</string>
     <string name="advanced_settings">高级设置</string>
     <string name="label_content_options">内容解析</string>
     <string name="label_frontmatter">自动识别元数据（Frontmatter）</string>
