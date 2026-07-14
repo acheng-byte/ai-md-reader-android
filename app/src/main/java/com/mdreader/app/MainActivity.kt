@@ -64,6 +64,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
     @Volatile private var currentUri: String? = null
     @Volatile private var currentDocumentUri: Uri? = null
     private var pageReady: Boolean = false
+    private var prescanDone: Boolean = false
     private var elementSaveCounter: Int = 0
 
     // Edit mode state
@@ -222,19 +223,6 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         webView.setBackgroundColor(bgColor())
         webView.loadUrl(VIEWER_URL)
 
-        // 后台静默预扫描库文件夹（延迟 3 秒，等文档加载完再扫描，低优先级不抢 I/O）
-        val vaultUriForScan = prefs.vaultUri
-        if (vaultUriForScan != null) {
-            Thread {
-                android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_LOWEST)
-                try { Thread.sleep(3000) } catch (_: InterruptedException) {}
-                try {
-                    val encoded = VaultSearch.ensureEncoded(Uri.parse(vaultUriForScan))
-                    VaultSearch.search(this, encoded, "") // 触发 buildCache
-                } catch (_: Exception) {}
-            }.start()
-        }
-
         // Back press: 图片预览关闭 / 源码模式放弃确认 / 预览模式退出确认
         backCallback = object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
@@ -345,6 +333,22 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                 }
                 renderCurrent()
                 invalidateOptionsMenu()
+
+                // 首次页面加载完成后，延迟 5 秒后台预扫描库文件夹（低优先级不抢 I/O）
+                if (!prescanDone) {
+                    prescanDone = true
+                    val vaultUriForScan = prefs.vaultUri
+                    if (vaultUriForScan != null) {
+                        Thread {
+                            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_LOWEST)
+                            try { Thread.sleep(5000) } catch (_: InterruptedException) {}
+                            try {
+                                val encoded = VaultSearch.ensureEncoded(Uri.parse(vaultUriForScan))
+                                VaultSearch.search(this@MainActivity, encoded, "") // 触发 buildCache
+                            } catch (_: Exception) {}
+                        }.start()
+                    }
+                }
             }
 
             override fun shouldOverrideUrlLoading(
