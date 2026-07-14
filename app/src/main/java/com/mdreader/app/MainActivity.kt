@@ -385,7 +385,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                 val found = runCatching {
                     val docFile = DocumentFile.fromSingleUri(this@MainActivity, docUri)
                     val parent = docFile?.parentFile ?: return@runCatching null
-                    VaultSearch.findFileInDir(parent, filename)
+                    VaultSearch.findFileInDir(this@MainActivity, parent, filename)
                 }.getOrNull()
                 if (found != null) {
                     val stream = contentResolver.openInputStream(found.uri)
