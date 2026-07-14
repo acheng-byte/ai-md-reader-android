@@ -10,6 +10,51 @@ object VaultSearch {
 
     data class Result(val uri: String, val name: String, val excerpt: String)
 
+    /** 缓存：vaultUri -> (文件名小写 -> DocumentFile)，避免每次图片请求都递归扫描 */
+    private val fileCache = HashMap<String, HashMap<String, DocumentFile>>()
+    private var cacheVaultUri: String? = null
+
+    /** 清除缓存（vault 切换时调用） */
+    fun clearCache() {
+        fileCache.clear()
+        cacheVaultUri = null
+    }
+
+    /** 构建/获取缓存：递归扫描 vault，建立 文件名小写 -> DocumentFile 映射 */
+    private fun buildCache(context: Context, vaultUri: Uri): HashMap<String, DocumentFile> {
+        val uriStr = vaultUri.toString()
+        if (cacheVaultUri == uriStr && fileCache[uriStr] != null) {
+            return fileCache[uriStr]!!
+        }
+        val map = HashMap<String, DocumentFile>()
+        val root = DocumentFile.fromTreeUri(context, vaultUri)
+        if (root != null) {
+            scanDir(root, map)
+        }
+        fileCache[uriStr] = map
+        cacheVaultUri = uriStr
+        return map
+    }
+
+    private fun scanDir(dir: DocumentFile, map: HashMap<String, DocumentFile>) {
+        runCatching {
+            dir.listFiles().forEach { file ->
+                when {
+                    file.isDirectory -> scanDir(file, map)
+                    file.isFile -> {
+                        val name = file.name
+                        if (name != null) {
+                            // 用文件名小写作为 key（不含路径），支持快速查找
+                            map[name.lowercase()] = file
+                            // 也存一份含路径的 key，支持路径匹配
+                            map[name] = file
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     fun search(context: Context, vaultUri: Uri, query: String, maxResults: Int = 40): String {
         val root = DocumentFile.fromTreeUri(context, vaultUri)
             ?: return "[]"
@@ -102,6 +147,35 @@ object VaultSearch {
         return null
     }
 
+    /**
+     * 全库查找文件（支持图片等任意类型）。
+     * 优先用缓存快速匹配，找不到时回退到路径导航。
+     */
+    fun findAssetInVault(context: Context, vaultUri: Uri, relativePath: String): DocumentFile? {
+        val cleanPath = relativePath.replace('\\', '/').trimStart('/')
+        if (cleanPath.isEmpty()) return null
+
+        // 策略1：缓存快速查找 — 用文件名（最后一段）小写匹配
+        val fileName = cleanPath.substringAfterLast('/')
+        val cache = buildCache(context, vaultUri)
+        cache[fileName.lowercase()]?.let { return it }
+        cache[fileName]?.let { return it }
+
+        // 策略2：按完整相对路径从根目录导航
+        val root = DocumentFile.fromTreeUri(context, vaultUri) ?: return null
+        val pathFile = findFileInDir(root, cleanPath)
+        if (pathFile != null) return pathFile
+
+        // 策略3：路径导航失败时，用文件名在缓存中模糊匹配（去掉扩展名再试）
+        val nameNoExt = fileName.substringBeforeLast('.')
+        for ((key, file) in cache) {
+            val keyNoExt = key.substringBeforeLast('.')
+            if (keyNoExt.equals(nameNoExt, ignoreCase = true)) return file
+        }
+
+        return null
+    }
+
     /** Resolve an image path relative to the current document inside the vault tree. */
     fun resolveRelativeAsset(
         context: Context,
@@ -119,8 +193,8 @@ object VaultSearch {
                 if (candidate != null) return candidate
             }
         }
-        // Fallback: search anywhere in vault
-        return findInDir(root, relativePath.substringAfterLast('/'))
+        // Fallback: search entire vault using cache
+        return findAssetInVault(context, vaultUri, relativePath)
     }
 
     internal fun findFileInDir(dir: DocumentFile, name: String): DocumentFile? {

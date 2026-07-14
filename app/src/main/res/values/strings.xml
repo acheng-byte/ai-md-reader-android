@@ -103,19 +103,6 @@
     <string name="history_delete_item">删除</string>
     <string name="history_deleted_confirm">已从历史中删除</string>
 
-    <!-- Export -->
-    <string name="action_export_image">导出长图片</string>
-    <string name="action_export_html">导出 HTML</string>
-    <string name="action_export_doc">导出 DOC</string>
-    <string name="export_image_saving">正在生成长图片…</string>
-    <string name="export_image_saved">长图片已保存至 Download/MD阅读器/Picture</string>
-    <string name="export_image_failed">导出失败：%1$s</string>
-    <string name="export_html_saved">HTML 已保存至 Download/MD阅读器/HTML</string>
-    <string name="export_html_failed">HTML 导出失败：%1$s</string>
-    <string name="export_doc_saved">DOC 已保存至 Download/MD阅读器/DOC</string>
-    <string name="export_doc_failed">DOC 导出失败：%1$s</string>
-    <string name="export_doc_saving">正在生成 DOC 文件…</string>
-
     <!-- 标注功能 -->
     <string name="action_annotate">阅读标注</string>
     <string name="annotate_on">标注模式已开启（手指绘画标注）</string>

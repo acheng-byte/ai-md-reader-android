@@ -87,10 +87,4 @@ dependencies {
     implementation("com.google.android.material:material:1.12.0")
     implementation("androidx.webkit:webkit:1.11.0")
     implementation("androidx.documentfile:documentfile:1.0.1")
-    // Apache POI HWPF — 正确解析旧版 .doc（OLE2）格式，解决乱码问题
-    // poi-scratchpad 包含 HWPFDocument，poi 只包含核心模块不含 HWPF
-    implementation("org.apache.poi:poi:4.1.2")
-    implementation("org.apache.poi:poi-scratchpad:4.1.2")
-    // XWPF — 导出 .docx (OOXML) 格式
-    implementation("org.apache.poi:poi-ooxml:4.1.2")
 }

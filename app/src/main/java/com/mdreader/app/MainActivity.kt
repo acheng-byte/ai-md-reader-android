@@ -41,19 +41,11 @@ import com.mdreader.app.databinding.SheetFavoritesBinding
 import com.mdreader.app.databinding.SheetHistoryBinding
 import com.mdreader.app.databinding.SheetSettingsBinding
 import java.io.File
-import java.io.FileOutputStream
 import java.net.URLDecoder
 import java.util.Locale
-import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.roundToInt
-import org.apache.poi.xwpf.usermodel.XWPFDocument
-import org.apache.poi.xwpf.usermodel.XWPFParagraph
-import org.apache.poi.xwpf.usermodel.XWPFRun
-import org.apache.poi.xwpf.usermodel.XWPFTable
-import org.apache.poi.xwpf.usermodel.XWPFTableCell
-import org.apache.poi.xwpf.usermodel.ParagraphAlignment
 
 class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
 
@@ -147,6 +139,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                     )
                 }
                 prefs.vaultUri = uri.toString()
+                VaultSearch.clearCache()
                 Toast.makeText(this, getString(R.string.vault_set), Toast.LENGTH_SHORT).show()
             }
         }
@@ -328,22 +321,12 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             if (vaultUriStr != null) {
                 val vaultUri = Uri.parse(vaultUriStr)
 
-                // 尝试1：从 vault 根目录按完整相对路径直接查找
-                val root = DocumentFile.fromTreeUri(this@MainActivity, vaultUri)
-                if (root != null) {
-                    val file = runCatching { VaultSearch.findFileInDir(root, filename) }.getOrNull()
-                    if (file != null) {
-                        val stream = contentResolver.openInputStream(file.uri)
-                        if (stream != null) return WebResourceResponse(mime, null, stream)
-                    }
-                }
-
-                // 尝试2：resolveRelativeAsset（相对当前文档 + 全库文件名搜索）
-                val file2 = runCatching {
-                    VaultSearch.resolveRelativeAsset(this@MainActivity, vaultUri, currentDocumentUri, filename)
+                // 用缓存快速查找（全库文件名匹配 + 路径导航）
+                val file = runCatching {
+                    VaultSearch.findAssetInVault(this@MainActivity, vaultUri, filename)
                 }.getOrNull()
-                if (file2 != null) {
-                    val stream = contentResolver.openInputStream(file2.uri)
+                if (file != null) {
+                    val stream = contentResolver.openInputStream(file.uri)
                     if (stream != null) return WebResourceResponse(mime, null, stream)
                 }
             }
@@ -659,7 +642,6 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             R.id.action_toggle, R.id.action_favorite,
             R.id.action_open, R.id.action_favorites, R.id.action_history,
             R.id.action_add_shortcut,
-            R.id.action_export_image, R.id.action_export_html, R.id.action_export_doc,
             R.id.action_settings, R.id.action_reading_stats,
             R.id.action_annotate
         ).forEach { menu.findItem(it)?.isVisible = normalVisible }
@@ -749,9 +731,6 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         R.id.action_favorites -> { showFavorites(); true }
         R.id.action_history -> { showHistory(); true }
         R.id.action_add_shortcut -> { addShortcutToHomeScreen(); true }
-        R.id.action_export_image -> { requestStorageAndExportImage(); true }
-        R.id.action_export_html -> { exportHtml(); true }
-        R.id.action_export_doc -> { exportDocx(); true }
         R.id.action_settings -> { showSettings(); true }
         R.id.action_reading_stats -> { showReadingStats(); true }
         R.id.action_annotate -> { toggleAnnotationMode(); true }
@@ -1767,680 +1746,39 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         }
     }
 
-    // ---- 导出功能 ----
-
-    /** Android 9 及以下需要 WRITE_EXTERNAL_STORAGE 权限，先检查再导出 */
-    private fun requestStorageAndExportImage() {
-        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P &&
-            checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
-                != android.content.pm.PackageManager.PERMISSION_GRANTED
-        ) {
-            requestPermissions(arrayOf(android.Manifest.permission.WRITE_EXTERNAL_STORAGE), REQ_WRITE_STORAGE)
-        } else {
-            exportLongImage()
+    /** 保存 Bitmap 到系统相册（Pictures/MD阅读器），返回保存的文件路径 */
+    private fun saveImageToGallery(bitmap: Bitmap, fileName: String): String? {
+        val resolver = contentResolver
+        val collection = android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+        val values = android.content.ContentValues().apply {
+            put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, "$fileName.png")
+            put(android.provider.MediaStore.Images.Media.MIME_TYPE, "image/png")
+            put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, "Pictures/MD阅读器")
         }
-    }
-
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == REQ_WRITE_STORAGE) {
-            if (grantResults.isNotEmpty() && grantResults[0] == android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                exportLongImage()
-            } else {
-                Toast.makeText(this, getString(R.string.export_image_failed, "需要存储权限"), Toast.LENGTH_LONG).show()
-            }
-        }
-    }
-
-    /** 导出当前渲染内容为长图片（滚动截图拼接） */
-    private fun exportLongImage() {
-        if (currentMode != "preview") {
-            toggleMode()
-            webView.postDelayed({ exportLongImage() }, 300)
-            return
-        }
-        Toast.makeText(this, R.string.export_image_saving, Toast.LENGTH_SHORT).show()
-        // 通过 JS 获取内容实际高度
-        webView.evaluateJavascript(
-            "(function(){ return JSON.stringify({h: document.documentElement.scrollHeight, w: document.documentElement.clientWidth, vh: window.innerHeight}); })()"
-        ) { result ->
-            try {
-                val json = org.json.JSONObject(result.trim().removeSurrounding("\"").replace("\\\"", "\""))
-                val contentHeight = json.getInt("h")
-                val viewWidth = json.getInt("w")
-                val viewHeight = json.getInt("vh")
-                if (contentHeight <= 0 || viewHeight <= 0) {
-                    Toast.makeText(this, getString(R.string.export_image_failed, "内容为空"), Toast.LENGTH_LONG).show()
-                    return@evaluateJavascript
-                }
-
-                // 限制最大高度防止 OOM（32768px ≈ 128MB @1080px，现代设备可承受）
-                // 正常长文档（<32768px）使用 scale=1.0 保证完整清晰度
-                val maxBitmapHeight = 32768
-                val scale = if (contentHeight > maxBitmapHeight) maxBitmapHeight.toFloat() / contentHeight else 1f
-                val finalHeight = (contentHeight * scale).toInt()
-                val finalWidth = (viewWidth * scale).toInt()
-                val bgColor = if (prefs.isDark(this)) 0xFF0D1117.toInt() else 0xFFFFFFFF.toInt()
-                val savedTitle = currentTitle
-
-                Thread {
-                    try {
-                        val bitmap = Bitmap.createBitmap(finalWidth, finalHeight, Bitmap.Config.ARGB_8888)
-                        val canvas = Canvas(bitmap)
-                        canvas.drawColor(bgColor)
-
-                        if (contentHeight <= viewHeight) {
-                            // 内容不超过一屏，直接截图
-                            val latch = CountDownLatch(1)
-                            runOnUiThread {
-                                webView.scrollTo(0, 0)
-                                webView.postDelayed({
-                                    webView.draw(canvas)
-                                    latch.countDown()
-                                }, 300)
-                            }
-                            latch.await(5, TimeUnit.SECONDS)
-                        } else {
-                            // 滚动截图拼接：使用 75% 视口高度作为步长
-                            // 修复：只复制每张截图的非重叠部分，避免拼接缝隙和内容覆盖
-                            val step = (viewHeight * 0.75).toInt()
-                            val overlap = viewHeight - step
-                            var scrollY = 0
-                            var isFirstCapture = true
-                            while (scrollY < contentHeight) {
-                                val currentScroll = scrollY
-                                // 计算在最终位图中的目标位置
-                                val dstTop = (scrollY * scale).toInt()
-                                val dstBottom = minOf(((scrollY + viewHeight) * scale).toInt(), finalHeight)
-                                // 只复制非重叠区域：第一张截图从头开始，后续跳过重叠部分
-                                val srcTopInViewport = if (isFirstCapture) 0 else overlap
-                                if (dstBottom > dstTop && (viewHeight - srcTopInViewport) > 0) {
-                                    val tempBmp = Bitmap.createBitmap(viewWidth, viewHeight, Bitmap.Config.ARGB_8888)
-                                    val tempCanvas = Canvas(tempBmp)
-                                    val latch = CountDownLatch(1)
-                                    runOnUiThread {
-                                        webView.scrollTo(0, currentScroll)
-                                        // 等待 400ms 让 WebView 完成重绘（含图片/代码块等复杂内容）
-                                        webView.postDelayed({
-                                            tempCanvas.drawColor(bgColor)
-                                            webView.draw(tempCanvas)
-                                            // 仅复制非重叠部分：srcRect 从 srcTopInViewport 开始
-                                            val srcRect = android.graphics.Rect(0, srcTopInViewport, viewWidth, viewHeight)
-                                            val dstRect = android.graphics.Rect(0, dstTop, finalWidth, dstBottom)
-                                            canvas.drawBitmap(tempBmp, srcRect, dstRect, null)
-                                            tempBmp.recycle()
-                                            latch.countDown()
-                                        }, 400)
-                                    }
-                                    latch.await(6, TimeUnit.SECONDS)
-                                }
-                                isFirstCapture = false
-                                scrollY += step
-                            }
-                            // 确保最后一屏也被完整捕获
-                            if (scrollY - step < contentHeight - viewHeight) {
-                                val lastScroll = contentHeight - viewHeight
-                                val dstTop = (lastScroll * scale).toInt()
-                                val dstBottom = finalHeight
-                                val srcTopInViewport = overlap
-                                if (dstBottom > dstTop && (viewHeight - srcTopInViewport) > 0) {
-                                    val tempBmp = Bitmap.createBitmap(viewWidth, viewHeight, Bitmap.Config.ARGB_8888)
-                                    val tempCanvas = Canvas(tempBmp)
-                                    val latch = CountDownLatch(1)
-                                    runOnUiThread {
-                                        webView.scrollTo(0, lastScroll)
-                                        webView.postDelayed({
-                                            tempCanvas.drawColor(bgColor)
-                                            webView.draw(tempCanvas)
-                                            val srcRect = android.graphics.Rect(0, srcTopInViewport, viewWidth, viewHeight)
-                                            val dstRect = android.graphics.Rect(0, dstTop, finalWidth, dstBottom)
-                                            canvas.drawBitmap(tempBmp, srcRect, dstRect, null)
-                                            tempBmp.recycle()
-                                            latch.countDown()
-                                        }, 400)
-                                    }
-                                    latch.await(6, TimeUnit.SECONDS)
-                                }
-                            }
-                            runOnUiThread { webView.scrollTo(0, 0) }
-                        }
-
-                        // 保存到 Pictures/MD阅读器/
-                        val safeName = exportFileName(savedTitle)
-                        val saved = saveImageToGallery(bitmap, safeName)
-                        bitmap.recycle()
-
-                        if (saved == null) {
-                            runOnUiThread {
-                                Toast.makeText(this, getString(R.string.export_image_failed, "无法创建文件"), Toast.LENGTH_LONG).show()
-                            }
-                            return@Thread
-                        }
-
-                        runOnUiThread {
-                            Toast.makeText(this, getString(R.string.export_image_saved), Toast.LENGTH_LONG).show()
-                        }
-                    } catch (e: Exception) {
-                        runOnUiThread {
-                            Toast.makeText(this, getString(R.string.export_image_failed, e.message ?: ""), Toast.LENGTH_LONG).show()
-                        }
-                    }
-                }.start()
-            } catch (e: Exception) {
-                Toast.makeText(this, getString(R.string.export_image_failed, e.message ?: ""), Toast.LENGTH_LONG).show()
-            }
-        }
-    }
-
-    /** 导出当前渲染结果为独立 HTML 文件（保留加粗、表格、图片、Mermaid 等格式） */
-    private fun exportHtml() {
-        if (currentMode != "preview") {
-            toggleMode()
-            webView.postDelayed({ exportHtml() }, 300)
-            return
-        }
-        // 获取 preview 的完整 innerHTML，通过 JSON 编码安全传回
-        webView.evaluateJavascript(
-            "(function(){ var el = document.getElementById('preview'); return el ? el.innerHTML : ''; })()"
-        ) { htmlContent ->
-            if (htmlContent.isNullOrBlank() || htmlContent == "null" || htmlContent == "\"\"") {
-                Toast.makeText(this, getString(R.string.export_html_failed, "内容为空"), Toast.LENGTH_LONG).show()
-                return@evaluateJavascript
-            }
-            try {
-                // 安全解码 JS 返回的 JSON 字符串
-                var cleanHtml = decodeJsString(htmlContent)
-
-                // 将 vault 图片 URL 转换为 base64 data URI，使导出 HTML 自包含
-                cleanHtml = convertVaultImagesToBase64(cleanHtml)
-
-                val fullHtml = buildString {
-                    appendLine("<!DOCTYPE html>")
-                    appendLine("<html lang=\"zh-CN\">")
-                    appendLine("<head>")
-                    appendLine("<meta charset=\"utf-8\">")
-                    appendLine("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">")
-                    appendLine("<title>${escapeHtml(currentTitle)}</title>")
-                    appendLine("<style>")
-                    appendLine(EXPORT_CSS)
-                    appendLine("</style>")
-                    appendLine("<script src=\"https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js\"></script>")
-                    appendLine("<script src=\"https://cdn.jsdelivr.net/npm/katex@0.16/dist/katex.min.js\"></script>")
-                    appendLine("<script src=\"https://cdn.jsdelivr.net/npm/katex@0.16/dist/contrib/auto-render.min.js\"></script>")
-                    appendLine("<link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/katex@0.16/dist/katex.min.css\">")
-                    appendLine("</head>")
-                    appendLine("<body>")
-                    appendLine("<div class=\"markdown-body\">")
-                    appendLine(cleanHtml)
-                    appendLine("</div>")
-                    appendLine("<script>")
-                    appendLine("if(window.mermaid){mermaid.initialize({startOnLoad:true,theme:'default'});}")
-                    appendLine("if(window.renderMathInElement){renderMathInElement(document.body,{delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false},{left:'\\\\(',right:'\\\\)',display:false},{left:'\\\\[',right:'\\\\]',display:true}]});}")
-                    appendLine("</script>")
-                    appendLine("</body>")
-                    appendLine("</html>")
-                }
-
-                val safeName = exportFileName(currentTitle)
-                val saved = saveHtmlToGallery(fullHtml, safeName)
-
-                if (saved == null) {
-                    runOnUiThread {
-                        Toast.makeText(this, getString(R.string.export_html_failed, "无法创建文件"), Toast.LENGTH_LONG).show()
-                    }
-                    return@evaluateJavascript
-                }
-
-                runOnUiThread {
-                    Toast.makeText(this, getString(R.string.export_html_saved), Toast.LENGTH_LONG).show()
-                }
-            } catch (e: Exception) {
-                runOnUiThread {
-                    Toast.makeText(this, getString(R.string.export_html_failed, e.message ?: ""), Toast.LENGTH_LONG).show()
-                }
-            }
-        }
-    }
-
-    /** 将 HTML 中的 vault 图片 URL 替换为 base64 data URI */
-    private fun convertVaultImagesToBase64(html: String): String {
-        val vaultBase = "https://appassets.androidplatform.net/vault/"
-        val vaultUri = prefs.vaultUri ?: return html
-        if (!html.contains(vaultBase)) return html
-
-        return IMG_SRC_REGEX.replace(html) { match ->
-            val prefix = match.groupValues[1]
-            val src = match.groupValues[2]
-            val suffix = match.groupValues[3]
-            if (src.startsWith(vaultBase)) {
-                val fileName = java.net.URLDecoder.decode(src.removePrefix(vaultBase), "UTF-8")
-                val dataUri = vaultImageToBase64(vaultUri, fileName)
-                if (dataUri != null) "$prefix$dataUri$suffix" else match.value
-            } else {
-                match.value
-            }
-        }
-    }
-
-    /** 导出当前渲染结果为 DOCX 文件（加粗、斜体、标题、列表、表格、代码块、数学公式、过滤 Mermaid） */
-    private fun exportDocx() {
-        if (currentMode != "preview") {
-            toggleMode()
-            webView.postDelayed({ exportDocx() }, 300)
-            return
-        }
-        Toast.makeText(this, R.string.export_doc_saving, Toast.LENGTH_SHORT).show()
-        webView.evaluateJavascript(
-            "(function(){ var el = document.getElementById('preview'); return el ? el.innerText : ''; })()"
-        ) { textContent ->
-            if (textContent.isNullOrBlank() || textContent == "null" || textContent == "\"\"") {
-                runOnUiThread { Toast.makeText(this, getString(R.string.export_doc_failed, "内容为空"), Toast.LENGTH_LONG).show() }
-                return@evaluateJavascript
-            }
-            Thread {
-                try {
-                    val plainText = decodeJsString(textContent)
-                    val doc = XWPFDocument()
-                    // 按段落分割纯文本，逐段写入 DOCX
-                    val paragraphs = plainText.split("\n\n", "\n")
-                    for (para in paragraphs) {
-                        val trimmed = para.trim()
-                        if (trimmed.isEmpty()) continue
-                        val p = doc.createParagraph()
-                        val run = p.createRun()
-                        run.setText(trimmed)
-                    }
-
-                    val safeName = exportFileName(currentTitle)
-                    val saved = saveDocToGallery(doc, safeName)
-                    doc.close()
-
-                    if (saved == null) {
-                        runOnUiThread { Toast.makeText(this, getString(R.string.export_doc_failed, "无法创建文件"), Toast.LENGTH_LONG).show() }
-                        return@Thread
-                    }
-                    runOnUiThread { Toast.makeText(this, getString(R.string.export_doc_saved), Toast.LENGTH_LONG).show() }
-                } catch (e: Throwable) {
-                    runOnUiThread { Toast.makeText(this, getString(R.string.export_doc_failed, e.message ?: "未知错误"), Toast.LENGTH_LONG).show() }
-                }
-            }.start()
-        }
-    }
-
-    /** 解析 HTML 并填充 DOCX 文档 */
-    private fun parseHtmlToDocx(doc: XWPFDocument, html: String) {
-        val cleanedHtml = preprocessHtmlForXml(html)
-        val wrappedHtml = "<root>$cleanedHtml</root>"
-        val parser = android.util.Xml.newPullParser()
-        parser.setInput(wrappedHtml.byteInputStream(), "UTF-8")
-
-        var inMermaid = false
-        var inCodeBlock = false
-        var codeBuffer = StringBuilder()
-        var headingLevel = 0
-        var inTable = false
-        var tableRows = mutableListOf<MutableList<String>>()
-        var currentRow = mutableListOf<String>()
-        var cellBuffer = StringBuilder()
-        var inCell = false
-        var inListItem = false
-        var listItemCounter = 0
-        var isOrderedList = false
-        var paragraphRuns = mutableListOf<Triple<String, Boolean, Boolean>>()
-        var currentBold = false
-        var currentItalic = false
-        var currentStrikethrough = false
-        var currentCode = false
-        var inBlockquote = false
-        var tagDepth = 0
-        var skipMermaidContent = false
-        var mermaidDepth = 0
-
-        // 辅助：将当前累积的纯文本先刷入 runs，确保顺序正确
-        fun flushRuns(text: String, bold: Boolean = false, italic: Boolean = false, strike: Boolean = false) {
-            if (text.isEmpty()) return
-            paragraphRuns.add(Triple(text, bold, italic))
-        }
-
-        fun flushParagraph() {
-            if (paragraphRuns.isEmpty()) return
-            val p = doc.createParagraph()
-            if (headingLevel > 0) {
-                try { p.style = "Heading$headingLevel" } catch (_: Exception) {
-                    // 回退：直接设置字号
-                }
-            }
-            if (inBlockquote) {
-                p.indentationLeft = 720
-            }
-            if (inListItem) {
-                p.indentationLeft = 720
-                if (isOrderedList) {
-                    val run = p.createRun()
-                    run.setText("$listItemCounter. ")
-                } else {
-                    val run = p.createRun()
-                    run.setText("• ")
-                }
-            }
-            for ((text, bold, italic) in paragraphRuns) {
-                if (text == "\u0000BR\u0000") {
-                    // 换行标记
-                    val run = p.createRun()
-                    run.addBreak()
-                    continue
-                }
-                val run = p.createRun()
-                run.setText(text)
-                if (bold) run.isBold = true
-                if (italic) run.isItalic = true
-                // 删除线通过第4个字段判断，这里用 bold+italic 同时为 false 且 text 以特殊标记区分
-            }
-            paragraphRuns.clear()
-        }
-
-        fun flushCodeBlock() {
-            if (codeBuffer.isEmpty()) return
-            val p = doc.createParagraph()
-            val shd = p.ctp.addNewPPr().addNewShd()
-            shd.fill = "F6F8FA"
-            val run = p.createRun()
-            run.fontFamily = "Courier New"
-            run.fontSize = 9
-            run.setText(codeBuffer.toString().trimEnd())
-            codeBuffer.clear()
-        }
-
-        fun flushTable() {
-            if (tableRows.isEmpty()) return
-            val colCount = tableRows.maxOf { it.size }
-            if (colCount == 0) { tableRows.clear(); return }
-            val table = doc.createTable(tableRows.size, colCount)
-            for ((rowIdx, row) in tableRows.withIndex()) {
-                for ((colIdx, cellText) in row.withIndex()) {
-                    if (colIdx < colCount) {
-                        val cell = table.getRow(rowIdx).getCell(colIdx)
-                        cell.text = cellText
-                        if (rowIdx == 0) {
-                            for (pp in cell.paragraphs) {
-                                for (r in pp.runs) { r.isBold = true }
-                            }
-                        }
-                    }
-                }
-            }
-            tableRows.clear()
-        }
-
-        var event = parser.eventType
-        while (event != org.xmlpull.v1.XmlPullParser.END_DOCUMENT) {
-            val tn = parser.name ?: ""
-            val lt = tn.lowercase()
-            when (event) {
-                org.xmlpull.v1.XmlPullParser.START_TAG -> {
-                    tagDepth++
-                    when (lt) {
-                        "h1" -> { flushParagraph(); headingLevel = 1 }
-                        "h2" -> { flushParagraph(); headingLevel = 2 }
-                        "h3" -> { flushParagraph(); headingLevel = 3 }
-                        "h4" -> { flushParagraph(); headingLevel = 4 }
-                        "h5" -> { flushParagraph(); headingLevel = 5 }
-                        "h6" -> { flushParagraph(); headingLevel = 6 }
-                        "p" -> { if (!inCell) flushParagraph() }
-                        "strong", "b" -> { currentBold = true }
-                        "em", "i" -> { currentItalic = true }
-                        "del", "s", "strike" -> { currentStrikethrough = true }
-                        "code" -> { if (!inCodeBlock) currentCode = true }
-                        "pre" -> { inCodeBlock = true; codeBuffer.clear() }
-                        "blockquote" -> { inBlockquote = true; flushParagraph() }
-                        "ul" -> { isOrderedList = false; listItemCounter = 0 }
-                        "ol" -> { isOrderedList = true; listItemCounter = 0 }
-                        "li" -> { inListItem = true; listItemCounter++; flushParagraph() }
-                        "table" -> { inTable = true; tableRows.clear() }
-                        "tr" -> { currentRow.clear() }
-                        "td", "th" -> { inCell = true; cellBuffer.clear() }
-                        "br" -> {
-                            if (inCell) cellBuffer.append(' ')
-                            else paragraphRuns.add(Triple("\u0000BR\u0000", false, false))
-                        }
-                        "hr" -> {
-                            flushParagraph()
-                            val p = doc.createParagraph()
-                            p.alignment = ParagraphAlignment.CENTER
-                            val run = p.createRun()
-                            run.setText("————————————————")
-                        }
-                        "div" -> {
-                            val cls = parser.getAttributeValue(null, "class") ?: ""
-                            if (cls.contains("mermaid")) {
-                                inMermaid = true; mermaidDepth = tagDepth; skipMermaidContent = true
-                            }
-                        }
-                        "svg" -> { if (inMermaid) skipMermaidContent = true }
-                        "img" -> {
-                            val alt = parser.getAttributeValue(null, "alt") ?: ""
-                            if (alt.isNotEmpty()) paragraphRuns.add(Triple("[图片: $alt]", false, true))
-                        }
-                    }
-                }
-                org.xmlpull.v1.XmlPullParser.TEXT -> {
-                    val text = parser.text ?: ""
-                    if (skipMermaidContent || inMermaid) {
-                        // 跳过 Mermaid 内容
-                    } else if (inCodeBlock) {
-                        codeBuffer.append(text)
-                    } else if (inCell) {
-                        cellBuffer.append(text)
-                    } else {
-                        if (text.isNotEmpty()) {
-                            val isBold = currentBold || currentCode
-                            val isItalic = currentItalic
-                            paragraphRuns.add(Triple(text, isBold, isItalic))
-                        }
-                    }
-                }
-                org.xmlpull.v1.XmlPullParser.END_TAG -> {
-                    when (lt) {
-                        "h1", "h2", "h3", "h4", "h5", "h6" -> { flushParagraph(); headingLevel = 0 }
-                        "p" -> { if (!inCell) flushParagraph() }
-                        "strong", "b" -> { currentBold = false }
-                        "em", "i" -> { currentItalic = false }
-                        "del", "s", "strike" -> { currentStrikethrough = false }
-                        "code" -> { currentCode = false }
-                        "pre" -> { inCodeBlock = false; flushCodeBlock() }
-                        "blockquote" -> { inBlockquote = false; flushParagraph() }
-                        "li" -> { inListItem = false; flushParagraph() }
-                        "ul", "ol" -> { isOrderedList = false; listItemCounter = 0 }
-                        "tr" -> { if (currentRow.isNotEmpty()) tableRows.add(currentRow.toMutableList()) }
-                        "td", "th" -> { currentRow.add(cellBuffer.toString().trim()); inCell = false }
-                        "table" -> { inTable = false; flushTable() }
-                        "div" -> {
-                            if (inMermaid && tagDepth <= mermaidDepth) {
-                                inMermaid = false; skipMermaidContent = false
-                                val p = doc.createParagraph()
-                                p.alignment = ParagraphAlignment.CENTER
-                                val run = p.createRun()
-                                run.setText("[Mermaid 图表已过滤]")
-                                run.isItalic = true
-                                run.color = "999999"
-                            }
-                        }
-                        "svg" -> { if (inMermaid) skipMermaidContent = false }
-                    }
-                    tagDepth--
-                }
-            }
-            event = try { parser.next() } catch (e: Exception) { break }
-        }
-        flushParagraph()
-        if (inCodeBlock) flushCodeBlock()
-        if (inTable) flushTable()
-    }
-
-    /** 保存 DOCX 到 Download/MD阅读器/DOC/ */
-    private fun saveDocToGallery(doc: XWPFDocument, fileName: String): File? {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val resolver = contentResolver
-            val contentValues = android.content.ContentValues().apply {
-                put(android.provider.MediaStore.Downloads.DISPLAY_NAME, "$fileName.docx")
-                put(android.provider.MediaStore.Downloads.MIME_TYPE,
-                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
-                put(android.provider.MediaStore.Downloads.RELATIVE_PATH, "Download/MD阅读器/DOC")
-            }
-            val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
-                ?: return null
-            resolver.openOutputStream(uri, "wt")?.use { out -> doc.write(out) }
-            return File(uri.path ?: "")
-        } else {
-            val dir = getExportDir("DOC")
-            val file = File(dir, "$fileName.docx")
-            FileOutputStream(file).use { out -> doc.write(out) }
-            scanExportedFile(file)
-            return file
-        }
-    }
-
-    /** 从 Vault 读取图片并转为 base64 data URI */
-    private fun vaultImageToBase64(vaultUriStr: String, fileName: String): String? {
+        val uri = resolver.insert(collection, values) ?: return null
         return try {
-            val vaultUri = Uri.parse(vaultUriStr)
-            val asset = VaultSearch.resolveRelativeAsset(this, vaultUri, currentUri?.let { Uri.parse(it) }, fileName)
-                ?: return null
-            val mimeType = when {
-                fileName.endsWith(".png", true) -> "image/png"
-                fileName.endsWith(".jpg", true) || fileName.endsWith(".jpeg", true) -> "image/jpeg"
-                fileName.endsWith(".gif", true) -> "image/gif"
-                fileName.endsWith(".webp", true) -> "image/webp"
-                fileName.endsWith(".svg", true) -> "image/svg+xml"
-                fileName.endsWith(".bmp", true) -> "image/bmp"
-                else -> "image/png"
-            }
-            val bytes = contentResolver.openInputStream(asset.uri)?.use { it.readBytes() } ?: return null
-            val b64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
-            "data:$mimeType;base64,$b64"
-        } catch (e: Exception) {
-            null
-        }
-    }
-
-    /**
-     * 安全解码 evaluateJavascript 返回的 JSON 字符串。
-     * evaluateJavascript 返回值是一个 JSON 编码的字符串（带外层引号，内部转义）。
-     * 特别注意：WebView 会将 < > 编码为 \u003C \u003E，必须显式还原。
-     */
-    private fun decodeJsString(raw: String): String {
-        val decoded = try {
-            // raw 形如 "\"<div>...</div>\""，用 JSONArray 安全解码
-            val arr = org.json.JSONArray("[$raw]")
-            arr.getString(0)
-        } catch (e: Exception) {
-            // 降级：手动去除外层引号和转义
-            raw.trim()
-                .removeSurrounding("\"")
-                .replace("\\\"", "\"")
-                .replace("\\\\", "\\")
-                .replace("\\n", "\n")
-                .replace("\\/", "/")
-        }
-        // WebView evaluateJavascript 总是将 < > / 编码为 unicode 转义
-        // JSONArray 解码后有时仍保留这些转义，需要显式还原
-        return decoded
-            .replace("\\u003C", "<")
-            .replace("\\u003c", "<")
-            .replace("\\u003E", ">")
-            .replace("\\u003e", ">")
-            .replace("\\u0026", "&")
-    }
-
-    /** 获取导出目录（Android 9 及以下使用公共目录） */
-    private fun getExportDir(subDir: String): File {
-        val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-        val target = File(dir, "MD阅读器/$subDir")
-        target.mkdirs()
-        return target
-    }
-
-    /** 保存长图片到 Download/MD阅读器/Picture/ （Android 10+ 用 MediaStore，9 及以下用 File） */
-    private fun saveImageToGallery(bitmap: Bitmap, fileName: String): File? {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            // Android 10+：使用 MediaStore 保存到 Download/MD阅读器/Picture/
-            val resolver = contentResolver
-            val contentValues = android.content.ContentValues().apply {
-                put(android.provider.MediaStore.Downloads.DISPLAY_NAME, "$fileName.png")
-                put(android.provider.MediaStore.Downloads.MIME_TYPE, "image/png")
-                put(android.provider.MediaStore.Downloads.RELATIVE_PATH, "Download/MD阅读器/Picture")
-            }
-            val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
-                ?: return null
             resolver.openOutputStream(uri)?.use { out ->
-                bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+                bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out)
             }
-            return File(uri.path ?: "")
-        } else {
-            // Android 9 及以下：直接写文件
-            val dir = getExportDir("Picture")
-            val file = File(dir, "$fileName.png")
-            FileOutputStream(file).use { out ->
-                bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
-            }
-            scanExportedFile(file)
-            return file
+            val path = android.os.Environment.getExternalStorageDirectory()
+                .absolutePath + "/Pictures/MD阅读器/$fileName.png"
+            path
+        } catch (e: Exception) {
+            resolver.delete(uri, null, null)
+            throw e
         }
     }
 
-    /** 保存 HTML 到 Download/MD阅读器/HTML/ （Android 10+ 用 MediaStore，9 及以下用 File） */
-    private fun saveHtmlToGallery(htmlContent: String, fileName: String): File? {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val resolver = contentResolver
-            val contentValues = android.content.ContentValues().apply {
-                put(android.provider.MediaStore.Downloads.DISPLAY_NAME, "$fileName.html")
-                put(android.provider.MediaStore.Downloads.MIME_TYPE, "text/html")
-                put(android.provider.MediaStore.Downloads.RELATIVE_PATH, "Download/MD阅读器/HTML")
-            }
-            val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
-                ?: return null
-            resolver.openOutputStream(uri, "wt")?.use { out ->
-                out.write(htmlContent.toByteArray(Charsets.UTF_8))
-            }
-            return File(uri.path ?: "")
-        } else {
-            val dir = getExportDir("HTML")
-            val file = File(dir, "$fileName.html")
-            FileOutputStream(file).use { out ->
-                out.write(htmlContent.toByteArray(Charsets.UTF_8))
-            }
-            scanExportedFile(file)
-            return file
-        }
-    }
-
-    /** 生成导出文件名：日期前缀 + 笔记名，仅保留文件系统允许的字符 */
+    /** 生成文件名：日期前缀 + 笔记名，仅保留文件系统允许的字符 */
     private fun exportFileName(title: String): String {
         val datePrefix = java.text.SimpleDateFormat("yyyyMMdd", Locale.ROOT).format(java.util.Date())
         var name = title.trim().ifEmpty { "document" }
-        // 仅去除文件系统禁止的字符：\ / : * ? " < > | 和换行
         name = name.replace(FILENAME_UNSAFE_REGEX, "")
-        // 去除首尾空格和点（Windows 不允许）
         name = name.trim(' ', '.')
         if (name.isEmpty()) name = "document"
-        // 限制长度防止文件名过长（日期前缀8字符 + 下划线 + 名称）
         if (name.length > 80) name = name.substring(0, 80)
         return "${datePrefix}_${name}"
     }
-
-    /** 通知系统媒体扫描器，使导出文件在「下载」中可见 */
-    private fun scanExportedFile(file: File) {
-        try {
-            val uri = Uri.fromFile(file)
-            val intent = Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, uri)
-            sendBroadcast(intent)
-        } catch (_: Exception) {
-            // 忽略扫描失败，文件已成功保存
-        }
-    }
-
-    private fun escapeHtml(s: String): String =
-        s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
     companion object {
         private const val ASSET_HOST = "appassets.androidplatform.net"
@@ -2450,130 +1788,6 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         /** 预编译 Regex：文件名非法字符替换 */
         private val FILENAME_UNSAFE_REGEX = Regex("""[\\/:*?"<>|\r\n]""")
         /** 预编译 Regex：HTML 中 img 标签 src 提取 */
-        private val IMG_SRC_REGEX = Regex("""(<img[^>]+src=")([^"]+)("[^>]*>)""")
-
-        /** 将 HTML 预处理为合法 XML：闭合 void 元素（br/hr/img/input/meta/link/col/area/base/embed/source/track/wbr） */
-        private fun preprocessHtmlForXml(html: String): String {
-            var result = html
-            val voidElements = listOf("br", "hr", "img", "input", "meta", "link", "col", "area", "base", "embed", "source", "track", "wbr")
-            for (tag in voidElements) {
-                // 只处理未自闭合的标签：匹配 <tag ... > 但不匹配 <tag ... /> 或 <tag.../>
-                val regex = Regex("<$tag(\\s[^>]*?)(?<!/)\\s*>", RegexOption.IGNORE_CASE)
-                result = regex.replace(result) { m -> "<${m.groupValues[0].substring(1).trimEnd().removeSuffix(">")} />" }
-                // 简单版本：<tag> -> <tag />
-                result = result.replace(Regex("<$tag\\s*>", RegexOption.IGNORE_CASE), "<$tag />")
-            }
-            // 去除 HTML 注释（可能包含未闭合标签）
-            result = result.replace(Regex("<!--[\\s\\S]*?-->"), "")
-            // 先处理已知的 HTML 实体（XmlPullParser 只认识 XML 标准实体 &amp; &lt; &gt; &quot; &apos;）
-            result = result.replace("&nbsp;", "\u00A0")
-            result = result.replace("&mdash;", "\u2014")
-            result = result.replace("&ndash;", "\u2013")
-            result = result.replace("&hellip;", "\u2026")
-            result = result.replace("&laquo;", "\u00AB")
-            result = result.replace("&raquo;", "\u00BB")
-            result = result.replace("&lsquo;", "\u2018")
-            result = result.replace("&rsquo;", "\u2019")
-            result = result.replace("&ldquo;", "\u201C")
-            result = result.replace("&rdquo;", "\u201D")
-            result = result.replace("&bull;", "\u2022")
-            result = result.replace("&trade;", "\u2122")
-            result = result.replace("&copy;", "\u00A9")
-            result = result.replace("&reg;", "\u00AE")
-            // 额外的常见 HTML 实体
-            result = result.replace("&euro;", "\u20AC")
-            result = result.replace("&pound;", "\u00A3")
-            result = result.replace("&yen;", "\u00A5")
-            result = result.replace("&cent;", "\u00A2")
-            result = result.replace("&rarr;", "\u2192")
-            result = result.replace("&larr;", "\u2190")
-            result = result.replace("&uarr;", "\u2191")
-            result = result.replace("&darr;", "\u2193")
-            result = result.replace("&harr;", "\u2194")
-            result = result.replace("&times;", "\u00D7")
-            result = result.replace("&divide;", "\u00F7")
-            result = result.replace("&plusmn;", "\u00B1")
-            result = result.replace("&deg;", "\u00B0")
-            result = result.replace("&micro;", "\u00B5")
-            result = result.replace("&para;", "\u00B6")
-            result = result.replace("&sect;", "\u00A7")
-            result = result.replace("&infin;", "\u221E")
-            result = result.replace("&ne;", "\u2260")
-            result = result.replace("&le;", "\u2264")
-            result = result.replace("&ge;", "\u2265")
-            result = result.replace("&sum;", "\u2211")
-            result = result.replace("&prod;", "\u220F")
-            result = result.replace("&radic;", "\u221A")
-            result = result.replace("&pi;", "\u03C0")
-            result = result.replace("&alpha;", "\u03B1")
-            result = result.replace("&beta;", "\u03B2")
-            result = result.replace("&gamma;", "\u03B3")
-            result = result.replace("&delta;", "\u03B4")
-            result = result.replace("&theta;", "\u03B8")
-            result = result.replace("&lambda;", "\u03BB")
-            result = result.replace("&sigma;", "\u03C3")
-            result = result.replace("&omega;", "\u03C9")
-            result = result.replace("&Prime;", "\u2033")
-            result = result.replace("&prime;", "\u2032")
-            // 将未识别的命名实体替换为占位符，避免 XmlPullParser 崩溃
-            result = result.replace(Regex("&([a-zA-Z][a-zA-Z0-9]*);")) { m ->
-                "[${m.groupValues[1]}]" // 保留实体名作为占位符
-            }
-            // 关键修复：转义文本中裸露的 & 字符（不是实体的一部分），防止 XML 解析崩溃
-            // 匹配 & 后面不跟 #（数字实体）或已知 XML 实体名的情况
-            result = result.replace(Regex("&(?!(?:amp|lt|gt|quot|apos|#);)")) { "&amp;" }
-            return result
-        }
-
-        /** 导出 HTML 时内嵌的样式表 */
-        private val EXPORT_CSS = """
-:root { --font-size: 16px; --line-height: 1.7; --para-gap: 1em; --max-width: 880px;
-  --bg: #ffffff; --fg: #1f2328; --muted: #656d76; --border: #d0d7de;
-  --code-bg: #f6f8fa; --code-fg: #1f2328; --link: #0969da; --table-stripe: #f6f8fa; }
-* { box-sizing: border-box; }
-body { background: var(--bg); color: var(--fg); font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", "Helvetica Neue", Arial, sans-serif;
-  font-size: var(--font-size); line-height: var(--line-height); margin: 0; padding: 0; }
-.markdown-body { max-width: var(--max-width); margin: 0 auto; padding: 24px 16px 48px; }
-.markdown-body p, .markdown-body ul, .markdown-body ol, .markdown-body blockquote,
-.markdown-body table, .markdown-body pre, .markdown-body dl { margin-top: 0; margin-bottom: var(--para-gap); }
-.markdown-body h1, .markdown-body h2, .markdown-body h3, .markdown-body h4, .markdown-body h5, .markdown-body h6 { margin: 1.4em 0 0.6em; line-height: 1.3; font-weight: 600; }
-.markdown-body h1 { font-size: 1.8em; padding-bottom: 0.3em; border-bottom: 1px solid var(--border); }
-.markdown-body h2 { font-size: 1.5em; padding-bottom: 0.3em; border-bottom: 1px solid var(--border); }
-.markdown-body h3 { font-size: 1.25em; }
-.markdown-body a { color: var(--link); text-decoration: none; }
-.markdown-body ul, .markdown-body ol { padding-left: 2em; }
-.markdown-body blockquote { margin-left: 0; margin-right: 0; padding: 0 1em; color: var(--muted); border-left: 0.25em solid var(--border); }
-.markdown-body img { max-width: 100%; height: auto; }
-.markdown-body code { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; background: var(--code-bg); padding: 0.2em 0.4em; border-radius: 6px; font-size: 0.88em; }
-.markdown-body pre { background: var(--code-bg); padding: 14px 16px; border-radius: 8px; overflow: auto; line-height: 1.5; }
-.markdown-body pre code { background: transparent; padding: 0; font-size: 0.86em; }
-.markdown-body table { border-collapse: collapse; width: 100%; }
-.markdown-body th, .markdown-body td { border: 1px solid var(--border); padding: 6px 13px; }
-.markdown-body th { font-weight: 600; background: var(--table-stripe); }
-.markdown-body tr:nth-child(2n) td { background: var(--table-stripe); }
-.markdown-body hr { border: 0; height: 1px; background: var(--border); margin: 1.6em 0; }
-.ob-highlight { background: #fff176; border-radius: 2px; padding: 0 2px; }
-.ob-tag { display: inline-block; font-size: 0.82em; color: var(--link); background: rgba(9,105,218,0.12); border-radius: 10px; padding: 1px 7px; }
-.task-list-item { list-style: none; margin-left: -1.4em; }
-.task-checkbox { margin-right: 0.4em; }
-.callout { border-left: 4px solid var(--link); border-radius: 6px; background: var(--code-bg); padding: 0; margin-bottom: var(--para-gap); overflow: hidden; }
-.callout-title { display: flex; align-items: center; gap: 6px; padding: 8px 14px; font-weight: 600; background: rgba(0,0,0,0.06); border-bottom: 1px solid var(--border); }
-.callout > *:not(.callout-title) { padding: 8px 14px; margin: 0; }
-.frontmatter { margin-bottom: var(--para-gap); border: 1px solid var(--border); border-radius: 8px; background: var(--code-bg); }
-.frontmatter table { width: 100%; border-collapse: collapse; display: table; }
-.frontmatter .fm-key { font-weight: 600; color: var(--muted); font-size: 0.85em; padding: 5px 12px; border: 1px solid var(--border); width: 30%; }
-.frontmatter .fm-val { padding: 5px 12px; font-size: 0.88em; border: 1px solid var(--border); }
-.frontmatter .fm-tag { display: inline-block; background: var(--link); color: #fff; border-radius: 4px; padding: 1px 7px; font-size: 0.8em; margin: 2px 3px; }
-.markdown-body mark { background: #fff176; border-radius: 2px; padding: 0 2px; }
-.markdown-body .ob-highlight { background: #fff176; border-radius: 2px; padding: 0 2px; }
-.mermaid-container { text-align: center; margin: var(--para-gap) 0; overflow: auto; }
-.mermaid-container svg { max-width: 100%; height: auto; }
-.markdown-body details { margin-bottom: var(--para-gap); border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; }
-.markdown-body details summary { cursor: pointer; font-weight: 600; }
-.markdown-body details[open] summary { margin-bottom: 8px; }
-.footnotes { font-size: 0.88em; color: var(--muted); border-top: 1px solid var(--border); margin-top: 2em; padding-top: 1em; }
-.footnotes ol { padding-left: 1.5em; }
-        """.trimIndent()
 
         private val WELCOME_MD = """
 # 欢迎使用 MD 阅读器
@@ -2600,7 +1814,7 @@ body { background: var(--bg); color: var(--fg); font-family: -apple-system, "Pin
 - 在设置中选择 **Vault 文件夹** 后，可使用 `[[wikilink]]` 导航与全库搜索
 - 重新打开同一文档时，会自动回到上次阅读位置（断点续读）
 - 启动时自动弹出打开历史，快速继续阅读
-- 点击右上角 **⋮** 菜单：转发分享、收藏、添加桌面快捷方式、导出长图/HTML 等
+- 点击右上角 **⋮** 菜单：转发分享、收藏、添加桌面快捷方式等
 - 设置中可手动 **检查更新**，下载最新版本
 
 ## 支持的 Markdown 语法
@@ -2809,8 +2023,6 @@ graph TD
 - **字符统计**：点击标题栏查看总字符、纯文字（去除标点和 Markdown 语法）、总行数、代码字符数
 - **表格预览**：单击表格全屏预览，支持双指缩放和预览内下载
 - **源码直接编辑**：源码模式即可编辑，停止输入 2 秒后自动保存
-- **导出长图片**：滚动截图拼接（最大 32768px），保存至 `Download/MD阅读器/Picture`
-- **导出 HTML**：包含完整样式的独立 HTML 文件，保存至 `Download/MD阅读器/HTML`
 - **转发分享**：一键把完整文档经系统分享转发到微信等应用
 - **桌面快捷方式**：将当前文档添加为桌面快捷方式，一键直达
 - **收藏夹**：收藏常用文档，原文件被删除后仍可打开
