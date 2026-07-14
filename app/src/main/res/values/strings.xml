@@ -150,9 +150,9 @@
     <string name="reading_stats_title">阅读统计</string>
     <string name="reading_stats_companion">MD阅读器已经陪你读了 %1$d 天</string>
     <string name="reading_stats_active_days">活跃天数：%1$d 天</string>
-    <string name="reading_stats_sessions">阅读场次：%1$d 次</string>
+    <string name="reading_stats_sessions">阅读次数：%1$d 次</string>
     <string name="reading_stats_minutes">累计时长：%1$d 分钟</string>
-    <string name="reading_stats_books">触达书籍：%1$d 本</string>
+    <string name="reading_stats_books">触达文件：%1$d 个</string>
     <string name="reading_stats_since">从 %1$s 开始，阅读已经成为你的习惯。</string>
     <string name="shortcut_no_doc">请先打开一个文件</string>
     <string name="shortcut_not_supported">当前设备不支持快捷方式</string>

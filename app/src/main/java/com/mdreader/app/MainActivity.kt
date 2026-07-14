@@ -324,15 +324,26 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             val filename = try { URLDecoder.decode(path.trimStart('/'), "UTF-8") } catch (e: Exception) { path.trimStart('/') }
             val mime = guessMime(filename)
 
-            // 优先从 vault 查找
             val vaultUriStr = prefs.vaultUri
             if (vaultUriStr != null) {
                 val vaultUri = Uri.parse(vaultUriStr)
-                val file = runCatching {
+
+                // 尝试1：从 vault 根目录按完整相对路径直接查找
+                val root = DocumentFile.fromTreeUri(this@MainActivity, vaultUri)
+                if (root != null) {
+                    val file = runCatching { VaultSearch.findFileInDir(root, filename) }.getOrNull()
+                    if (file != null) {
+                        val stream = contentResolver.openInputStream(file.uri)
+                        if (stream != null) return WebResourceResponse(mime, null, stream)
+                    }
+                }
+
+                // 尝试2：resolveRelativeAsset（相对当前文档 + 全库文件名搜索）
+                val file2 = runCatching {
                     VaultSearch.resolveRelativeAsset(this@MainActivity, vaultUri, currentDocumentUri, filename)
                 }.getOrNull()
-                if (file != null) {
-                    val stream = contentResolver.openInputStream(file.uri)
+                if (file2 != null) {
+                    val stream = contentResolver.openInputStream(file2.uri)
                     if (stream != null) return WebResourceResponse(mime, null, stream)
                 }
             }
@@ -1442,7 +1453,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         sessionStartTime = System.currentTimeMillis()
         sessionDocName = docName
         prefs.totalReadingSessions = prefs.totalReadingSessions + 1
-        // 更新触达书籍数
+        // 更新触达文件数
         prefs.addKnownBook(docName)
     }
 

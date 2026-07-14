@@ -1227,6 +1227,19 @@
         }
         previewEl.innerHTML = html;
 
+        // 图片懒加载 + 淡入效果
+        var allImgs = previewEl.querySelectorAll('img');
+        for (var j = 0; j < allImgs.length; j++) {
+            allImgs[j].setAttribute('loading', 'lazy');
+            allImgs[j].style.opacity = '0';
+            allImgs[j].style.transition = 'opacity 0.3s ease';
+            (function (im) {
+                if (im.complete) { im.style.opacity = '1'; return; }
+                im.onload = function () { im.style.opacity = '1'; };
+                im.onerror = function () { im.style.opacity = '0.3'; };
+            })(allImgs[j]);
+        }
+
         postprocessCallouts(previewEl, showFm);
         addCopyButtons();
         renderMermaid();
