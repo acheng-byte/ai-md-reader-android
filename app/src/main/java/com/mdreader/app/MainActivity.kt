@@ -1194,7 +1194,17 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         val vaultStr = prefs.vaultUri
         sheet.tvVaultPath.text = if (vaultStr != null) {
             runCatching {
-                DocumentFile.fromTreeUri(this, Uri.parse(vaultStr))?.name ?: vaultStr
+                val treeUri = Uri.parse(vaultStr)
+                val docFile = DocumentFile.fromTreeUri(this, treeUri)
+                val name = docFile?.name
+                if (!name.isNullOrBlank()) {
+                    name
+                } else {
+                    // 回退：从 URI 路径提取文件夹名
+                    treeUri.lastPathSegment?.substringAfterLast(':')
+                        ?: treeUri.lastPathSegment?.substringAfterLast('/')
+                        ?: vaultStr
+                }
             }.getOrDefault(vaultStr)
         } else getString(R.string.vault_not_set)
 
