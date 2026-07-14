@@ -253,53 +253,53 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
     }
 
     private fun setupWebView() {
-        // Use WebViewAssetLoader for both bundled assets AND vault assets
-        val assetLoader = WebViewAssetLoader.Builder()
-            .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(this))
-            .addPathHandler("/vault/", VaultPathHandler())
-            .build()
+        // /vault/ 路径专用处理器
+        val vaultPathHandler = VaultPathHandler()
+        // /assets/ 路径走 APK 捆绑资源（viewer.html / app.js / 第三方库等）
+        val assetsPathHandler = WebViewAssetLoader.AssetsPathHandler(this)
 
         webView.webViewClient = object : WebViewClientCompat() {
             override fun shouldInterceptRequest(
                 view: WebView, request: WebResourceRequest
             ): WebResourceResponse? {
                 val url = request.url
-                // 先走 Asset Loader（/assets/ = 捆绑资源，/vault/ = Vault 资源）
-                val response = assetLoader.shouldInterceptRequest(url)
-                if (response != null) return response
+                if (url.host != ASSET_HOST) return null
+                val path = try {
+                    URLDecoder.decode(url.path?.trimStart('/') ?: "", "UTF-8")
+                } catch (_: Exception) { return null }
 
-                // 回退：/assets/ 路径下未找到的 .md 或资源文件，尝试从 Vault 加载
-                // 这处理标准 markdown 链接如 [text](子目录/文件.md) 被 markdown-it
-                // 渲染为相对路径 /assets/子目录/文件.md 而 fixMdLinks 未覆盖的情况
-                if (url.host == ASSET_HOST) {
-                    val path = try { URLDecoder.decode(url.path?.trimStart('/') ?: "", "UTF-8") } catch (_: Exception) { "" }
-                    // 跳过真正的 assets 资源
-                    if (!path.startsWith("assets/")) return null
-                    val vaultPath = path.removePrefix("assets/")
-                    if (vaultPath.isEmpty()) return null
-                    val vaultUriStr = prefs.vaultUri ?: return null
-                    val vaultUri = Uri.parse(vaultUriStr)
-                    val found = runCatching {
-                        VaultSearch.findAssetInVault(this@MainActivity, vaultUri, vaultPath)
-                    }.getOrNull()
-                    if (found != null) {
-                        val mime = guessMime(vaultPath)
-                        val stream = runCatching { contentResolver.openInputStream(found.uri) }.getOrNull()
-                        if (stream != null) return WebResourceResponse(mime, null, stream)
+                // /vault/ 路径 → 直接从 Vault 加载
+                if (path.startsWith("vault/")) {
+                    return vaultPathHandler.handle(path.removePrefix("vault/"))
+                }
+
+                // /assets/ 路径 → 先查 Vault，找不到再回退 APK 捆绑资源
+                if (path.startsWith("assets/")) {
+                    val relativePath = path.removePrefix("assets/")
+                    if (relativePath.isEmpty()) return null
+
+                    // 先查 Vault（用户文件优先）
+                    val vaultUriStr = prefs.vaultUri
+                    if (vaultUriStr != null && relativePath.isNotEmpty()) {
+                        val vaultUri = Uri.parse(vaultUriStr)
+                        val found = runCatching {
+                            VaultSearch.findAssetInVault(this@MainActivity, vaultUri, relativePath)
+                        }.getOrNull()
+                        if (found != null) {
+                            val mime = guessMime(relativePath)
+                            val stream = runCatching { contentResolver.openInputStream(found.uri) }.getOrNull()
+                            if (stream != null) return WebResourceResponse(mime, null, stream)
+                        }
                     }
-                }
-                return null
-            }
 
-            override fun onReceivedError(
-                view: WebView, request: WebResourceRequest,
-                error: android.webkit.WebResourceError
-            ) {
-                // 防止 WebView 显示内置错误页面导致后续崩溃
-                // 对于主框架错误，加载空白页而不是让 WebView 进入错误状态
-                if (request.isForMainFrame) {
-                    view.loadUrl("about:blank")
+                    // 回退：APK 捆绑资源（viewer.html / app.js / 第三方库等）
+                    val fakeUrl = "https://$ASSET_HOST/assets/$relativePath"
+                    return assetsPathHandler.handle(
+                        Uri.parse(fakeUrl).path?.trimStart('/') ?: relativePath
+                    )
                 }
+
+                return null
             }
 
             override fun onPageFinished(view: WebView, url: String) {
