@@ -106,11 +106,15 @@
     <!-- Export -->
     <string name="action_export_image">导出长图片</string>
     <string name="action_export_html">导出 HTML</string>
+    <string name="action_export_doc">导出 DOC</string>
     <string name="export_image_saving">正在生成长图片…</string>
     <string name="export_image_saved">长图片已保存至 Download/MD阅读器/Picture</string>
     <string name="export_image_failed">导出失败：%1$s</string>
     <string name="export_html_saved">HTML 已保存至 Download/MD阅读器/HTML</string>
     <string name="export_html_failed">HTML 导出失败：%1$s</string>
+    <string name="export_doc_saved">DOC 已保存至 Download/MD阅读器/DOC</string>
+    <string name="export_doc_failed">DOC 导出失败：%1$s</string>
+    <string name="export_doc_saving">正在生成 DOC 文件…</string>
 
     <!-- 标注功能 -->
     <string name="action_annotate">阅读标注</string>
@@ -142,6 +146,14 @@
 
     <!-- 桌面快捷方式 -->
     <string name="action_add_shortcut">添加到桌面</string>
+    <string name="action_reading_stats">阅读统计</string>
+    <string name="reading_stats_title">阅读统计</string>
+    <string name="reading_stats_companion">ReadAny 已经陪你读了 %1$d 天</string>
+    <string name="reading_stats_active_days">活跃天数：%1$d 天</string>
+    <string name="reading_stats_sessions">阅读场次：%1$d 次</string>
+    <string name="reading_stats_minutes">累计时长：%1$d 分钟</string>
+    <string name="reading_stats_books">触达书籍：%1$d 本</string>
+    <string name="reading_stats_since">从 %1$s 开始，阅读已经成为你的习惯。</string>
     <string name="shortcut_no_doc">请先打开一个文件</string>
     <string name="shortcut_not_supported">当前设备不支持快捷方式</string>
     <string name="shortcut_added">已添加到桌面：%1$s</string>
