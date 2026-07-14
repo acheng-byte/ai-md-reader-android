@@ -132,28 +132,29 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
     private val vaultPicker =
         registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
             if (uri != null) {
-                Logger.i("MainActivity", "vaultPicker: selected URI = ${uri.toString().take(100)}")
+                val encoded = VaultSearch.ensureEncoded(uri)
+                Logger.i("MainActivity", "【选择文件夹】URI = ${encoded.toString().take(100)}")
                 runCatching {
                     contentResolver.takePersistableUriPermission(
                         uri,
                         Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                     )
-                    Logger.i("MainActivity", "vaultPicker: persistable permission granted")
+                    Logger.i("MainActivity", "【选择文件夹】权限获取成功")
                 }.onFailure {
-                    Logger.e("MainActivity", "vaultPicker: persistable permission failed: ${it.message}")
+                    Logger.e("MainActivity", "【选择文件夹】权限获取失败: ${it.message}")
                 }
-                prefs.vaultUri = uri.toString()
+                prefs.vaultUri = encoded.toString()
                 VaultSearch.clearCache()
                 // 验证：尝试列出根目录
-                val root = androidx.documentfile.provider.DocumentFile.fromTreeUri(this, uri)
+                val root = androidx.documentfile.provider.DocumentFile.fromTreeUri(this, encoded)
                 if (root != null) {
-                    Logger.i("MainActivity", "vaultPicker: root=${root.name}, canRead=${root.canRead()}, uri=${uri.toString().take(80)}")
+                    Logger.i("MainActivity", "【选择文件夹】验证通过: name=${root.name}, canRead=${root.canRead()}")
                 } else {
-                    Logger.e("MainActivity", "vaultPicker: fromTreeUri returned NULL!")
+                    Logger.e("MainActivity", "【选择文件夹】验证失败: fromTreeUri 返回 NULL!")
                 }
                 Toast.makeText(this, getString(R.string.vault_set), Toast.LENGTH_SHORT).show()
             } else {
-                Logger.w("MainActivity", "vaultPicker: user cancelled")
+                Logger.w("MainActivity", "【选择文件夹】用户取消")
             }
         }
 
@@ -175,15 +176,16 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         // 启动时记录 Vault 状态
         val vaultUriStr = prefs.vaultUri
         if (vaultUriStr != null) {
-            Logger.i("MainActivity", "onCreate: vaultUri = ${vaultUriStr.take(80)}")
-            val root = androidx.documentfile.provider.DocumentFile.fromTreeUri(this, Uri.parse(vaultUriStr))
+            val encoded = VaultSearch.ensureEncoded(Uri.parse(vaultUriStr))
+            Logger.i("MainActivity", "【启动】Vault URI = ${encoded.toString().take(80)}")
+            val root = androidx.documentfile.provider.DocumentFile.fromTreeUri(this, encoded)
             if (root != null) {
-                Logger.i("MainActivity", "onCreate: root=${root.name}, canRead=${root.canRead()}")
+                Logger.i("MainActivity", "【启动】Vault 根目录有效: name=${root.name}, canRead=${root.canRead()}")
             } else {
-                Logger.e("MainActivity", "onCreate: fromTreeUri returned NULL — vault URI may be invalid")
+                Logger.e("MainActivity", "【启动】Vault 根目录无效 (fromTreeUri=null) — 请重新选择文件夹")
             }
         } else {
-            Logger.w("MainActivity", "onCreate: vaultUri is NULL — no vault set")
+            Logger.w("MainActivity", "【启动】未设置 Vault 文件夹")
         }
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
@@ -307,7 +309,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                     // 先查 Vault（用户文件优先）
                     val vaultUriStr = prefs.vaultUri
                     if (vaultUriStr != null && relativePath.isNotEmpty()) {
-                        val vaultUri = Uri.parse(vaultUriStr)
+                        val vaultUri = VaultSearch.ensureEncoded(Uri.parse(vaultUriStr))
                         val found = runCatching {
                             VaultSearch.findAssetInVault(this@MainActivity, vaultUri, relativePath)
                         }.getOrNull()
@@ -393,7 +395,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
 
             val vaultUriStr = prefs.vaultUri
             if (vaultUriStr != null) {
-                val vaultUri = Uri.parse(vaultUriStr)
+                val vaultUri = VaultSearch.ensureEncoded(Uri.parse(vaultUriStr))
 
                 // 用缓存快速查找（全库文件名匹配 + 路径导航）
                 val file = runCatching {
@@ -1514,7 +1516,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                 // 同时刷新 Vault URI 权限
                 prefs.vaultUri?.let { vaultUriStr ->
                     try {
-                        val vaultUri = Uri.parse(vaultUriStr)
+                        val vaultUri = VaultSearch.ensureEncoded(Uri.parse(vaultUriStr))
                         contentResolver.takePersistableUriPermission(
                             vaultUri,
                             Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
@@ -1529,18 +1531,18 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         }.start()
     }
 
-    /** 检查并修复 Vault URI 编码问题（乱码） */
+    /** 规范化 Vault URI：确保非 ASCII 字符（如中文）已正确编码 */
     private fun fixVaultUriEncoding() {
         val vaultUri = prefs.vaultUri ?: return
         try {
-            val uri = Uri.parse(vaultUri)
-            // 尝试解码 URI，如果解码后与原始不同，说明有编码问题
-            val decoded = java.net.URLDecoder.decode(vaultUri, "UTF-8")
-            if (decoded != vaultUri && Uri.parse(decoded).scheme != null) {
-                prefs.vaultUri = decoded
+            val encoded = VaultSearch.ensureEncoded(Uri.parse(vaultUri))
+            val encodedStr = encoded.toString()
+            if (encodedStr != vaultUri) {
+                prefs.vaultUri = encodedStr
+                Logger.i("MainActivity", "【URI规范化】已修复编码: ${encodedStr.take(80)}")
             }
         } catch (_: Exception) {
-            // 忽略解码失败
+            // 忽略失败
         }
     }
 
@@ -1619,7 +1621,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             return
         }
         Thread {
-            val file = VaultSearch.findFile(this, Uri.parse(vaultUriStr), noteName)
+            val file = VaultSearch.findFile(this, VaultSearch.ensureEncoded(Uri.parse(vaultUriStr)), noteName)
             runOnUiThread {
                 if (file != null) {
                     loadDocument(file.uri, file.name)
@@ -1632,7 +1634,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
 
     override fun searchVault(query: String): String {
         val vaultUriStr = prefs.vaultUri ?: return "[]"
-        return VaultSearch.search(this, Uri.parse(vaultUriStr), query)
+        return VaultSearch.search(this, VaultSearch.ensureEncoded(Uri.parse(vaultUriStr)), query)
     }
 
     override fun searchVaultAsync(query: String, callbackId: String) {
@@ -1643,7 +1645,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             return
         }
         Thread {
-            val result = VaultSearch.search(this, Uri.parse(vaultUriStr), query)
+            val result = VaultSearch.search(this, VaultSearch.ensureEncoded(Uri.parse(vaultUriStr)), query)
             runOnUiThread {
                 js("window.appVaultSearchResult && window.appVaultSearchResult('${escapeJs(callbackId)}', ${org.json.JSONObject.quote(result)})")
             }
@@ -1657,23 +1659,22 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
     override fun searchVaultForEmbed(ref: String): String {
         val vaultUriStr = prefs.vaultUri
         if (vaultUriStr == null) {
-            Logger.w("MainActivity", "searchVaultForEmbed: vaultUri is NULL, ref='$ref'")
+            Logger.w("MainActivity", "【嵌入搜索】Vault 未设置, ref='$ref'")
             return ""
         }
-        Logger.i("MainActivity", "searchVaultForEmbed: ref='$ref', vaultUri=${vaultUriStr.take(60)}")
         val searchName = ref.substringBeforeLast('.')
-        Logger.d("MainActivity", "searchVaultForEmbed: searchName='$searchName'")
+        Logger.i("MainActivity", "【嵌入搜索】ref='$ref', 搜索名='$searchName'")
         return runCatching {
-            val result = VaultSearch.findFile(this, Uri.parse(vaultUriStr), searchName)
+            val result = VaultSearch.findFile(this, VaultSearch.ensureEncoded(Uri.parse(vaultUriStr)), searchName)
             if (result != null) {
-                Logger.i("MainActivity", "searchVaultForEmbed FOUND: ${result.name}")
+                Logger.i("MainActivity", "【嵌入搜索·找到】${result.name}")
                 result.uri.toString()
             } else {
-                Logger.e("MainActivity", "searchVaultForEmbed NOT FOUND: '$searchName'")
+                Logger.e("MainActivity", "【嵌入搜索·未找到】'$searchName'")
                 ""
             }
         }.onFailure {
-            Logger.e("MainActivity", "searchVaultForEmbed ERROR: ${it.message}")
+            Logger.e("MainActivity", "【嵌入搜索·出错】${it.message}")
         }.getOrDefault("")
     }
 

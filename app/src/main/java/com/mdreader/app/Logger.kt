@@ -5,12 +5,12 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * 轻量日志系统：环状缓冲区，保留最近 500 条。
+ * 轻量日志系统：环状缓冲区，保留最近 5000 条。
  * 用于诊断 Vault 文件查找等问题。
  */
 object Logger {
 
-    private const val MAX_ENTRIES = 500
+    private const val MAX_ENTRIES = 5000
     private val entries = ArrayDeque<String>(MAX_ENTRIES)
     private val timeFormat = SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault())
 
