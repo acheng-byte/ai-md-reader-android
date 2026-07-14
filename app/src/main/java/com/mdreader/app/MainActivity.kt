@@ -280,7 +280,16 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                 view: WebView, request: WebResourceRequest
             ): Boolean {
                 val url = request.url
-                if (url.host == ASSET_HOST) return false
+                // 拦截指向 .md 文件的 asset URL，转为 vault 内导航
+                if (url.host == ASSET_HOST) {
+                    val path = URLDecoder.decode(url.path?.trimStart('/') ?: "", "UTF-8")
+                    val assetPath = path.removePrefix("assets/").removePrefix("vault/")
+                    if (assetPath.endsWith(".md", ignoreCase = true) || assetPath.endsWith(".markdown", ignoreCase = true)) {
+                        runOnUiThread { openWikiLink(assetPath) }
+                        return true
+                    }
+                    return false
+                }
                 if (url.scheme == "mdreader" && url.host == "open") {
                     val noteName = try {
                         URLDecoder.decode(url.path?.trimStart('/') ?: "", "UTF-8")

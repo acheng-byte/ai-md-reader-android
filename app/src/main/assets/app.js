@@ -316,6 +316,21 @@
         return source;
     }
 
+    /* ---------- .md 文件链接 → mdreader://open/ 协议 ---------- */
+    function fixMdLinks(container) {
+        container.querySelectorAll('a').forEach(function (a) {
+            var href = a.getAttribute('href') || '';
+            // 跳过已有协议的链接
+            if (/^(https?:|data:|mdreader:|javascript:|#|mailto:)/.test(href)) return;
+            // 匹配 .md / .markdown 结尾的链接（可能带 #anchor）
+            var m = href.match(/^([^#]*\.md(?:arkdown)?)(#.*)?$/i);
+            if (!m) return;
+            var mdPath = m[1];
+            var anchor = m[2] || '';
+            a.setAttribute('href', 'mdreader://open/' + encodeURIComponent(mdPath + anchor));
+        });
+    }
+
     /* ---------- 普通 Markdown 图片路径 → Vault URL ---------- */
     function preprocessImages(source) {
         return source.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, function (match, alt, src) {
@@ -1241,6 +1256,7 @@
         }
 
         postprocessCallouts(previewEl, showFm);
+        fixMdLinks(previewEl);
         addCopyButtons();
         renderMermaid();
         setupTableInteractions();
