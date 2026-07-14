@@ -1024,9 +1024,28 @@
         for (var i = 0; i < imgs.length; i++) {
             (function (img) {
                 var lastTapTime = 0;
+                var touchStartX = 0, touchStartY = 0;
+                var touchMoved = false;
                 img.style.cursor = 'zoom-in';
+
+                img.addEventListener('touchstart', function (e) {
+                    touchStartX = e.touches[0].clientX;
+                    touchStartY = e.touches[0].clientY;
+                    touchMoved = false;
+                }, { passive: true });
+
+                img.addEventListener('touchmove', function (e) {
+                    var dx = e.touches[0].clientX - touchStartX;
+                    var dy = e.touches[0].clientY - touchStartY;
+                    if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
+                        touchMoved = true;
+                    }
+                }, { passive: true });
+
                 img.addEventListener('click', function (e) {
                     e.stopPropagation();
+                    // 滑动过程中不触发预览（防误触）
+                    if (touchMoved) { touchMoved = false; return; }
                     // 优化：如果点击位置在屏幕中央区域，不触发图片预览，让设置面板打开
                     var w = window.innerWidth, h = window.innerHeight;
                     if (e.clientX > w * 0.3 && e.clientX < w * 0.7 &&

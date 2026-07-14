@@ -322,15 +322,36 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
     private inner class VaultPathHandler : WebViewAssetLoader.PathHandler {
         override fun handle(path: String): WebResourceResponse? {
             val filename = try { URLDecoder.decode(path.trimStart('/'), "UTF-8") } catch (e: Exception) { path.trimStart('/') }
-            val vaultUriStr = prefs.vaultUri ?: return null
-            val vaultUri = Uri.parse(vaultUriStr)
-            return runCatching {
-                val file = VaultSearch.resolveRelativeAsset(this@MainActivity, vaultUri, currentDocumentUri, filename)
-                    ?: return null
-                val mime = guessMime(filename)
-                val stream = contentResolver.openInputStream(file.uri) ?: return null
-                WebResourceResponse(mime, null, stream)
-            }.getOrNull()
+            val mime = guessMime(filename)
+
+            // 优先从 vault 查找
+            val vaultUriStr = prefs.vaultUri
+            if (vaultUriStr != null) {
+                val vaultUri = Uri.parse(vaultUriStr)
+                val file = runCatching {
+                    VaultSearch.resolveRelativeAsset(this@MainActivity, vaultUri, currentDocumentUri, filename)
+                }.getOrNull()
+                if (file != null) {
+                    val stream = contentResolver.openInputStream(file.uri)
+                    if (stream != null) return WebResourceResponse(mime, null, stream)
+                }
+            }
+
+            // 回退：从当前文档所在目录加载（支持非 vault 内的本地图片）
+            val docUri = currentDocumentUri
+            if (docUri != null) {
+                val found = runCatching {
+                    val docFile = DocumentFile.fromSingleUri(this@MainActivity, docUri)
+                    val parent = docFile?.parentFile ?: return@runCatching null
+                    VaultSearch.findFileInDir(parent, filename)
+                }.getOrNull()
+                if (found != null) {
+                    val stream = contentResolver.openInputStream(found.uri)
+                    if (stream != null) return WebResourceResponse(mime, null, stream)
+                }
+            }
+
+            return null
         }
     }
 

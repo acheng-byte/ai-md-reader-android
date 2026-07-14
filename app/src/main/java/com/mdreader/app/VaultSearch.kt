@@ -123,7 +123,7 @@ object VaultSearch {
         return findInDir(root, relativePath.substringAfterLast('/'))
     }
 
-    private fun findFileInDir(dir: DocumentFile, name: String): DocumentFile? {
+    internal fun findFileInDir(dir: DocumentFile, name: String): DocumentFile? {
         val parts = name.replace('\\', '/').split('/')
         var current: DocumentFile? = dir
         for (part in parts) {
