@@ -23,9 +23,30 @@ object VaultSearch {
     }
 
     /**
-     * 列出目录子项。三种方式依次尝试。
+     * 从 DocumentFile 提取 document ID（多种方式尝试）。
      */
-    private fun listDir(context: Context, dir: DocumentFile): List<DocumentFile> {
+    private fun extractDocId(uri: Uri): String? {
+        // 方式1: 标准 API
+        runCatching { return DocumentsContract.getDocumentId(uri) }
+        // 方式2: 从 lastPathSegment 提取 tree/ 后面部分
+        uri.lastPathSegment?.let { segment ->
+            val afterTree = segment.substringAfter("tree/", "")
+            if (afterTree.isNotEmpty() && afterTree != segment) {
+                return try { java.net.URLDecoder.decode(afterTree, "UTF-8") } catch (_: Exception) { null }
+            }
+            val afterDoc = segment.substringAfter("document/", "")
+            if (afterDoc.isNotEmpty() && afterDoc != segment) {
+                return try { java.net.URLDecoder.decode(afterDoc, "UTF-8") } catch (_: Exception) { null }
+            }
+        }
+        return null
+    }
+
+    /**
+     * 列出目录子项。三种方式依次尝试。
+     * treeUri: 原始 vault 的 tree URI，递归时始终保持不变，确保子目录也能走 DocumentsContract 回退。
+     */
+    private fun listDir(context: Context, treeUri: Uri, dir: DocumentFile): List<DocumentFile> {
         val dirName = dir.name ?: dir.uri.toString().take(60)
 
         // 方式1: DocumentFile.listFiles()
@@ -36,46 +57,24 @@ object VaultSearch {
         }
         Logger.w(TAG, "listDir DF_EMPTY: $dirName (DocumentFile.listFiles returned null/empty)")
 
-        // 方式2+3: DocumentsContract 直接查询
-        val treeUri = dir.uri
-        val docIds = mutableListOf<String>()
+        // 方式2+3: DocumentsContract 查询（始终使用原始 treeUri）
+        val docId = extractDocId(dir.uri)
+        Logger.d(TAG, "listDir extractDocId: dir.uri=${dir.uri.toString().take(80)}, docId=$docId")
 
-        runCatching {
-            val id = DocumentsContract.getDocumentId(treeUri)
-            docIds.add(id)
-            Logger.d(TAG, "listDir getDocumentId: $id")
-        }.onFailure {
-            Logger.w(TAG, "listDir getDocumentId failed: ${it.message}")
-        }
-
-        treeUri.lastPathSegment?.let { segment ->
-            val afterTree = segment.substringAfter("tree/", "")
-            if (afterTree.isNotEmpty() && afterTree != segment) {
-                val decoded = java.net.URLDecoder.decode(afterTree, "UTF-8")
-                docIds.add(decoded)
-                Logger.d(TAG, "listDir segment tree: $decoded")
-            }
-            val afterDoc = segment.substringAfter("document/", "")
-            if (afterDoc.isNotEmpty() && afterDoc != segment) {
-                val decoded = java.net.URLDecoder.decode(afterDoc, "UTF-8")
-                docIds.add(decoded)
-                Logger.d(TAG, "listDir segment document: $decoded")
-            }
-        }
-
-        for (docId in docIds.distinct()) {
-            if (docId.isBlank()) continue
+        if (docId != null && docId.isNotBlank()) {
             val results = runCatching {
                 val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, docId)
+                Logger.d(TAG, "listDir DC query: childrenUri=$childrenUri")
                 val list = mutableListOf<DocumentFile>()
                 context.contentResolver.query(
                     childrenUri,
                     arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID),
                     null, null, null
                 )?.use { cursor ->
-                    Logger.d(TAG, "listDir DC query: docId=$docId, rows=${cursor.count}")
+                    Logger.d(TAG, "listDir DC query rows: ${cursor.count}")
                     while (cursor.moveToNext()) {
                         val childDocId = cursor.getString(0) ?: continue
+                        // 关键修复：用原始 treeUri 构建子文件的 tree-based URI
                         val childUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, childDocId)
                         DocumentFile.fromSingleUri(context, childUri)?.let { list.add(it) }
                     }
@@ -87,9 +86,11 @@ object VaultSearch {
                 return results
             }
             Logger.w(TAG, "listDir DC_EMPTY: docId=$docId")
+        } else {
+            Logger.e(TAG, "listDir: could not extract docId from dir.uri=${dir.uri.toString().take(100)}")
         }
 
-        Logger.e(TAG, "listDir FAIL: $dirName — all methods returned empty. uri=${treeUri.toString().take(80)}")
+        Logger.e(TAG, "listDir FAIL: $dirName — all methods returned empty. uri=${dir.uri.toString().take(80)}")
         return emptyList()
     }
 
@@ -110,7 +111,7 @@ object VaultSearch {
             return null
         }
         Logger.d(TAG, "buildCache: root=${root.name}, canRead=${root.canRead()}, uri=$uriStr")
-        scanDir(context, root, map)
+        scanDir(context, vaultUri, root, map)
         Logger.i(TAG, "buildCache: scanned ${map.size} entries")
         if (map.isEmpty()) {
             Logger.e(TAG, "buildCache: scan returned 0 entries — URI permission may be expired")
@@ -121,12 +122,12 @@ object VaultSearch {
         return map
     }
 
-    private fun scanDir(context: Context, dir: DocumentFile, map: HashMap<String, DocumentFile>) {
-        val children = listDir(context, dir)
+    private fun scanDir(context: Context, treeUri: Uri, dir: DocumentFile, map: HashMap<String, DocumentFile>) {
+        val children = listDir(context, treeUri, dir)
         if (children.isEmpty()) return
         for (file in children) {
             when {
-                file.isDirectory -> scanDir(context, file, map)
+                file.isDirectory -> scanDir(context, treeUri, file, map)
                 file.isFile -> {
                     val name = file.name ?: continue
                     map[name] = file
@@ -169,7 +170,7 @@ object VaultSearch {
     // ---- 全文搜索 ----
 
     fun search(context: Context, vaultUri: Uri, query: String, maxResults: Int = 40): String {
-        Logger.i(TAG, "search: query='$query'")
+        Logger.i(TAG, "search: query='$query', vaultUri=${vaultUri.toString().take(60)}")
         val root = DocumentFile.fromTreeUri(context, vaultUri)
         if (root == null) {
             Logger.e(TAG, "search: fromTreeUri returned null")
@@ -177,19 +178,19 @@ object VaultSearch {
         }
         val list = mutableListOf<Result>()
         val q = query.trim().lowercase()
-        if (q.isNotEmpty()) searchDir(context, root, q, list, maxResults)
+        if (q.isNotEmpty()) searchDir(context, vaultUri, root, q, list, maxResults)
         Logger.i(TAG, "search: found ${list.size} results")
         return toJson(list)
     }
 
-    private fun searchDir(context: Context, dir: DocumentFile, query: String, out: MutableList<Result>, max: Int) {
+    private fun searchDir(context: Context, treeUri: Uri, dir: DocumentFile, query: String, out: MutableList<Result>, max: Int) {
         if (out.size >= max) return
-        val children = listDir(context, dir)
+        val children = listDir(context, treeUri, dir)
         if (children.isEmpty()) return
         for (file in children) {
             if (out.size >= max) return
             when {
-                file.isDirectory -> searchDir(context, file, query, out, max)
+                file.isDirectory -> searchDir(context, treeUri, file, query, out, max)
                 file.isFile -> tryMatchFile(context, file, query, out)
             }
         }
@@ -263,7 +264,7 @@ object VaultSearch {
             // 路径导航
             var dir: DocumentFile? = root
             for (part in dirParts) {
-                val children = listDir(context, dir ?: break)
+                val children = listDir(context, vaultUri, dir ?: break)
                 Logger.d(TAG, "findFile nav: looking for '$part' in ${children.size} children")
                 dir = children.find {
                     it.isDirectory && nameMatches(it.name, part)
@@ -276,7 +277,7 @@ object VaultSearch {
             }
 
             if (dir != null) {
-                val found = findInDir(context, dir, filename)
+                val found = findInDir(context, vaultUri, dir, filename)
                 if (found != null) {
                     Logger.i(TAG, "findFile FOUND (path nav): ${found.name}")
                     return found
@@ -286,7 +287,7 @@ object VaultSearch {
 
             // 全库搜索
             Logger.d(TAG, "findFile: full vault search for '$filename'")
-            val result = findInDir(context, root, filename)
+            val result = findInDir(context, vaultUri, root, filename)
             if (result != null) {
                 Logger.i(TAG, "findFile FOUND (full search): ${result.name}")
             } else {
@@ -296,7 +297,7 @@ object VaultSearch {
         }
 
         Logger.d(TAG, "findFile: simple search for '$cleanName'")
-        val result = findInDir(context, root, cleanName)
+        val result = findInDir(context, vaultUri, root, cleanName)
         if (result != null) {
             Logger.i(TAG, "findFile FOUND: ${result.name}")
         } else {
@@ -314,12 +315,12 @@ object VaultSearch {
         return false
     }
 
-    private fun findInDir(context: Context, dir: DocumentFile, noteName: String): DocumentFile? {
-        val children = listDir(context, dir)
+    private fun findInDir(context: Context, treeUri: Uri, dir: DocumentFile, noteName: String): DocumentFile? {
+        val children = listDir(context, treeUri, dir)
         if (children.isEmpty()) return null
         for (file in children) {
             if (file.isDirectory) {
-                findInDir(context, file, noteName)?.let { return it }
+                findInDir(context, treeUri, file, noteName)?.let { return it }
             } else {
                 val fn = file.name ?: continue
                 if (fileNameMatches(fn, noteName)) return file
@@ -363,8 +364,8 @@ object VaultSearch {
         }
 
         val root = DocumentFile.fromTreeUri(context, vaultUri) ?: return null
-        findFileInDir(context, root, cleanPath)?.let { return it }
-        val result = findInDir(context, root, fileName)
+        findFileInDir(context, vaultUri, root, cleanPath)?.let { return it }
+        val result = findInDir(context, vaultUri, root, fileName)
         if (result != null) Logger.i(TAG, "findAssetInVault FOUND: ${result.name}")
         else Logger.e(TAG, "findAssetInVault NOT FOUND: $fileName")
         return result
@@ -376,20 +377,20 @@ object VaultSearch {
             val currentDoc = DocumentFile.fromSingleUri(context, currentDocUri)
             val parentPath = currentDoc?.parentFile
             if (parentPath != null) {
-                findFileInDir(context, parentPath, relativePath)?.let { return it }
+                findFileInDir(context, vaultUri, parentPath, relativePath)?.let { return it }
             }
         }
         return findAssetInVault(context, vaultUri, relativePath)
     }
 
-    internal fun findFileInDir(context: Context, dir: DocumentFile, name: String): DocumentFile? {
+    internal fun findFileInDir(context: Context, treeUri: Uri, dir: DocumentFile, name: String): DocumentFile? {
         val parts = name.replace('\\', '/').split('/')
         var current: DocumentFile? = dir
         for (part in parts) {
             if (part.isEmpty() || part == ".") continue
             if (part == "..") { current = current?.parentFile; continue }
             val decodedPart = try { java.net.URLDecoder.decode(part, "UTF-8") } catch (_: Exception) { part }
-            val children = listDir(context, current ?: return null)
+            val children = listDir(context, treeUri, current ?: return null)
             current = children.find {
                 val n = it.name
                 n == part || n == decodedPart ||

@@ -403,19 +403,19 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                     val stream = contentResolver.openInputStream(file.uri)
                     if (stream != null) return WebResourceResponse(mime, null, stream)
                 }
-            }
 
-            // 回退：从当前文档所在目录加载（支持非 vault 内的本地图片）
-            val docUri = currentDocumentUri
-            if (docUri != null) {
-                val found = runCatching {
-                    val docFile = DocumentFile.fromSingleUri(this@MainActivity, docUri)
-                    val parent = docFile?.parentFile ?: return@runCatching null
-                    VaultSearch.findFileInDir(this@MainActivity, parent, filename)
-                }.getOrNull()
-                if (found != null) {
-                    val stream = contentResolver.openInputStream(found.uri)
-                    if (stream != null) return WebResourceResponse(mime, null, stream)
+                // 回退：从当前文档所在目录加载（支持非 vault 内的本地图片）
+                val docUri = currentDocumentUri
+                if (docUri != null) {
+                    val found = runCatching {
+                        val docFile = DocumentFile.fromSingleUri(this@MainActivity, docUri)
+                        val parent = docFile?.parentFile ?: return@runCatching null
+                        VaultSearch.findFileInDir(this@MainActivity, vaultUri, parent, filename)
+                    }.getOrNull()
+                    if (found != null) {
+                        val stream = contentResolver.openInputStream(found.uri)
+                        if (stream != null) return WebResourceResponse(mime, null, stream)
+                    }
                 }
             }
 
