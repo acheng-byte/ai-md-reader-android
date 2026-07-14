@@ -53,6 +53,60 @@ class Prefs(context: Context) {
         get() = sp.getString(KEY_LAST_DOC_NAME, "") ?: ""
         set(v) { sp.edit().putString(KEY_LAST_DOC_NAME, v).apply() }
 
+    /** 安装日期（时间戳，用于计算陪伴天数） */
+    var installDate: Long
+        get() {
+            val d = sp.getLong(KEY_INSTALL_DATE, 0L)
+            if (d == 0L) {
+                val now = System.currentTimeMillis()
+                sp.edit().putLong(KEY_INSTALL_DATE, now).apply()
+                return now
+            }
+            return d
+        }
+        set(v) { sp.edit().putLong(KEY_INSTALL_DATE, v).apply() }
+
+    /** 累计阅读时长（分钟） */
+    var totalReadingMinutes: Int
+        get() = sp.getInt(KEY_TOTAL_READING_MINUTES, 0)
+        set(v) { sp.edit().putInt(KEY_TOTAL_READING_MINUTES, v).apply() }
+
+    /** 累计阅读场次 */
+    var totalReadingSessions: Int
+        get() = sp.getInt(KEY_TOTAL_READING_SESSIONS, 0)
+        set(v) { sp.edit().putInt(KEY_TOTAL_READING_SESSIONS, v).apply() }
+
+    /** 累计触达书籍数（不重复） */
+    var totalBooksRead: Int
+        get() = sp.getInt(KEY_TOTAL_BOOKS_READ, 0)
+        set(v) { sp.edit().putInt(KEY_TOTAL_BOOKS_READ, v).apply() }
+
+    /** 活跃天数（有阅读行为的天数） */
+    var activeDays: Int
+        get() = sp.getInt(KEY_ACTIVE_DAYS, 0)
+        set(v) { sp.edit().putInt(KEY_ACTIVE_DAYS, v).apply() }
+
+    /** 上次活跃日期（yyyyMMdd 格式） */
+    var lastActiveDate: String
+        get() = sp.getString(KEY_LAST_ACTIVE_DATE, "") ?: ""
+        set(v) { sp.edit().putString(KEY_LAST_ACTIVE_DATE, v).apply() }
+
+    /** 已知书籍集合（用于统计触达书籍数） */
+    fun addKnownBook(name: String): Boolean {
+        val books = sp.getStringSet(KEY_KNOWN_BOOKS, mutableSetOf())?.toMutableSet() ?: mutableSetOf()
+        if (books.contains(name)) return false
+        books.add(name)
+        sp.edit().putStringSet(KEY_KNOWN_BOOKS, books).apply()
+        totalBooksRead = books.size
+        return true
+    }
+
+    /** 计算陪伴天数 */
+    fun companionDays(): Int {
+        val days = (System.currentTimeMillis() - installDate) / (24 * 60 * 60 * 1000L)
+        return days.toInt().coerceAtLeast(1)
+    }
+
     /** 是否自动解析并显示 YAML frontmatter 元数据表格（默认关闭，减少渲染负担） */
     var showFrontmatter: Boolean
         get() = sp.getBoolean(KEY_SHOW_FRONTMATTER, DEFAULT_SHOW_FRONTMATTER)
@@ -147,5 +201,12 @@ class Prefs(context: Context) {
         private const val KEY_FONT_FAMILY = "font_family"
         private const val KEY_LAST_DOC_URI = "last_doc_uri"
         private const val KEY_LAST_DOC_NAME = "last_doc_name"
+        private const val KEY_INSTALL_DATE = "install_date"
+        private const val KEY_TOTAL_READING_MINUTES = "total_reading_minutes"
+        private const val KEY_TOTAL_READING_SESSIONS = "total_reading_sessions"
+        private const val KEY_TOTAL_BOOKS_READ = "total_books_read"
+        private const val KEY_ACTIVE_DAYS = "active_days"
+        private const val KEY_LAST_ACTIVE_DATE = "last_active_date"
+        private const val KEY_KNOWN_BOOKS = "known_books"
     }
 }
