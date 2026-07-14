@@ -7,6 +7,11 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# 并发控制：同一分支的新推送自动取消旧的运行，避免浪费
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     name: Build APK
