@@ -289,6 +289,12 @@
             android:singleLine="true"
             android:text="@string/vault_not_set" />
         <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_clear_vault"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/btn_clear_vault" />
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_select_vault"
             style="@style/Widget.Material3.Button.TextButton"
             android:layout_width="wrap_content"

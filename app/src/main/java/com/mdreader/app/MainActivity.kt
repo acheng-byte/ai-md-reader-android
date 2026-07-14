@@ -133,28 +133,17 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
             if (uri != null) {
                 val encoded = VaultSearch.ensureEncoded(uri)
-                Logger.i("MainActivity", "【选择文件夹】URI = ${encoded.toString().take(100)}")
                 runCatching {
                     contentResolver.takePersistableUriPermission(
                         uri,
                         Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                     )
-                    Logger.i("MainActivity", "【选择文件夹】权限获取成功")
                 }.onFailure {
-                    Logger.e("MainActivity", "【选择文件夹】权限获取失败: ${it.message}")
+                    Logger.e("MainActivity", "文件夹权限获取失败: ${it.message}")
                 }
                 prefs.vaultUri = encoded.toString()
                 VaultSearch.clearCache()
-                // 验证：尝试列出根目录
-                val root = androidx.documentfile.provider.DocumentFile.fromTreeUri(this, encoded)
-                if (root != null) {
-                    Logger.i("MainActivity", "【选择文件夹】验证通过: name=${root.name}, canRead=${root.canRead()}")
-                } else {
-                    Logger.e("MainActivity", "【选择文件夹】验证失败: fromTreeUri 返回 NULL!")
-                }
                 Toast.makeText(this, getString(R.string.vault_set), Toast.LENGTH_SHORT).show()
-            } else {
-                Logger.w("MainActivity", "【选择文件夹】用户取消")
             }
         }
 
@@ -173,19 +162,14 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         favorites = Favorites(this)
         reading = ReadingProgress(this)
         annotations = Annotations(this)
-        // 启动时记录 Vault 状态
+        // 启动时检查 Vault 状态（仅异常时打日志）
         val vaultUriStr = prefs.vaultUri
         if (vaultUriStr != null) {
             val encoded = VaultSearch.ensureEncoded(Uri.parse(vaultUriStr))
-            Logger.i("MainActivity", "【启动】Vault URI = ${encoded.toString().take(80)}")
             val root = androidx.documentfile.provider.DocumentFile.fromTreeUri(this, encoded)
-            if (root != null) {
-                Logger.i("MainActivity", "【启动】Vault 根目录有效: name=${root.name}, canRead=${root.canRead()}")
-            } else {
-                Logger.e("MainActivity", "【启动】Vault 根目录无效 (fromTreeUri=null) — 请重新选择文件夹")
+            if (root == null) {
+                Logger.e("MainActivity", "Vault 根目录无效 — 请重新选择文件夹")
             }
-        } else {
-            Logger.w("MainActivity", "【启动】未设置 Vault 文件夹")
         }
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
@@ -1266,6 +1250,13 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
 
         sheet.btnSelectVault.setOnClickListener { vaultPicker.launch(null) }
 
+        sheet.btnClearVault.setOnClickListener {
+            prefs.vaultUri = null
+            VaultSearch.clearCache()
+            sheet.tvVaultPath.text = getString(R.string.vault_not_set)
+            Toast.makeText(this, "库文件夹已清空", Toast.LENGTH_SHORT).show()
+        }
+
         sheet.sliderFont.addOnChangeListener { _, _, _ -> debouncedApplySettings(sheet) }
         sheet.sliderLine.addOnChangeListener { _, _, _ -> debouncedApplySettings(sheet) }
         sheet.sliderPara.addOnChangeListener { _, _, _ -> debouncedApplySettings(sheet) }
@@ -1420,32 +1411,44 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
 
     /** 日志查看弹窗：显示最近 500 条日志，支持一键复制 */
     private fun showLogViewer() {
-        val logText = Logger.getAllText()
-        val scrollView = android.widget.ScrollView(this).apply {
-            setPadding(48, 32, 48, 16)
-        }
+        // 默认显示摘要（仅警告+错误），最新在前
+        var showAll = false
+        val scrollView = android.widget.ScrollView(this).apply { setPadding(32, 16, 32, 8) }
         val textView = android.widget.TextView(this).apply {
-            text = if (logText.isEmpty()) "暂无日志" else logText
-            textSize = 11f
+            textSize = 10f
             setPadding(0, 0, 0, 16)
             setTextIsSelectable(true)
             typeface = android.graphics.Typeface.MONOSPACE
         }
         scrollView.addView(textView)
 
+        fun refreshText() {
+            textView.text = if (showAll) Logger.getAllText() else Logger.getSummaryText()
+            textView.text = if (textView.text.isEmpty()) "暂无日志" else textView.text
+        }
+        refreshText()
+
+        val errCount = Logger.errorCount()
+        val titleSuffix = if (errCount > 0) " (${Logger.size()} 条, $errCount 个错误)" else " (${Logger.size()} 条)"
+
         val dialog = androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle("运行日志 (${Logger.size()} 条)")
+            .setTitle("运行日志$titleSuffix")
             .setView(scrollView)
             .setPositiveButton("复制全部") { _: android.content.DialogInterface, _: Int ->
                 val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("MDReader Log", logText))
+                val allText = Logger.getAllText()
+                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("MDReader Log", allText))
                 Toast.makeText(this, "已复制 ${Logger.size()} 条日志", Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton("清空") { _: android.content.DialogInterface, _: Int ->
                 Logger.clear()
+                refreshText()
                 Toast.makeText(this, "日志已清空", Toast.LENGTH_SHORT).show()
             }
-            .setNeutralButton("关闭", null)
+            .setNeutralButton(if (showAll) "仅错误" else "全部") { _: android.content.DialogInterface, _: Int ->
+                showAll = !showAll
+                refreshText()
+            }
             .create()
         dialog.show()
         dialog.window?.setLayout(
@@ -1658,23 +1661,11 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
 
     override fun searchVaultForEmbed(ref: String): String {
         val vaultUriStr = prefs.vaultUri
-        if (vaultUriStr == null) {
-            Logger.w("MainActivity", "【嵌入搜索】Vault 未设置, ref='$ref'")
-            return ""
-        }
+        if (vaultUriStr == null) return ""
         val searchName = ref.substringBeforeLast('.')
-        Logger.i("MainActivity", "【嵌入搜索】ref='$ref', 搜索名='$searchName'")
         return runCatching {
             val result = VaultSearch.findFile(this, VaultSearch.ensureEncoded(Uri.parse(vaultUriStr)), searchName)
-            if (result != null) {
-                Logger.i("MainActivity", "【嵌入搜索·找到】${result.name}")
-                result.uri.toString()
-            } else {
-                Logger.e("MainActivity", "【嵌入搜索·未找到】'$searchName'")
-                ""
-            }
-        }.onFailure {
-            Logger.e("MainActivity", "【嵌入搜索·出错】${it.message}")
+            result?.uri?.toString() ?: ""
         }.getOrDefault("")
     }
 

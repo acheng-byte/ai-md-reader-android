@@ -71,7 +71,8 @@
     <!-- Vault / Wikilink -->
     <string name="label_vault">Vault 文件夹</string>
     <string name="vault_not_set">未设置（点击选择）</string>
-    <string name="btn_select_vault">选择文件夹</string>
+    <string name="btn_select_vault">选择</string>
+    <string name="btn_clear_vault">清空</string>
     <string name="vault_set">Vault 文件夹已设置</string>
     <string name="vault_not_set_toast">请先在设置中选择 Vault 文件夹</string>
     <string name="wikilink_not_found">找不到文件：%1$s</string>

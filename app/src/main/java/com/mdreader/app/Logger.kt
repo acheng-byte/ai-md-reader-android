@@ -50,15 +50,27 @@ object Logger {
         }
     }
 
-    /** 获取所有日志文本（用于复制） */
+    /** 获取日志文本（倒序，最新在前）。仅包含 W 和 E 级别，适合手机查看。 */
+    @Synchronized
+    fun getSummaryText(): String {
+        return entries.asReversed()
+            .filter { it.contains("/W/") || it.contains("/E/") }
+            .joinToString("\n")
+    }
+
+    /** 获取所有日志文本（倒序，最新在前），用于复制。 */
     @Synchronized
     fun getAllText(): String {
-        return entries.joinToString("\n")
+        return entries.asReversed().joinToString("\n")
     }
 
     /** 获取条目数 */
     @Synchronized
     fun size(): Int = entries.size
+
+    /** 获取错误数量 */
+    @Synchronized
+    fun errorCount(): Int = entries.count { it.contains("/E/") }
 
     /** 清空日志 */
     @Synchronized
