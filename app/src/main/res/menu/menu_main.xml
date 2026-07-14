@@ -39,6 +39,20 @@
         android:title="@string/action_search"
         app:showAsAction="always" />
 
+    <!-- 正常模式：设置 -->
+    <item
+        android:id="@+id/action_settings"
+        android:icon="@drawable/ic_settings"
+        android:title="@string/action_settings"
+        app:showAsAction="always" />
+
+    <!-- 正常模式：阅读统计 -->
+    <item
+        android:id="@+id/action_reading_stats"
+        android:icon="@drawable/ic_history"
+        android:title="@string/action_reading_stats"
+        app:showAsAction="never" />
+
     <!-- 正常模式：源码 / 预览切换 -->
     <item
         android:id="@+id/action_toggle"
@@ -93,6 +107,11 @@
     <item
         android:id="@+id/action_export_html"
         android:title="@string/action_export_html"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_export_doc"
+        android:title="@string/action_export_doc"
         app:showAsAction="never" />
 
     <!-- 标注功能 -->
