@@ -8,11 +8,11 @@
 
 现在越来越多内容从 AI 对话、代码助手、知识库、会议纪要和自动化工作流里直接产出为 Markdown。电脑上阅读很方便，但手机上常常缺一个足够轻、足够直接、能从微信和文件管理器顺手打开 `.md` 的本地阅读器。**MD阅读器**解决的就是这个小而高频的痛点：把 Markdown 文件在手机上安静、清楚、离线地读起来。
 
-## 最新版本 v2.1.7
+## 最新版本 v2.3.1
 
-v2.1.7 是功能最完善的版本，涵盖 v1.9.0 至 v2.1.7 的完整更新：
+v2.3.1 是功能最完善的版本，涵盖 v1.9.0 至 v2.3.1 的完整更新：
 
-- **v2.1.7**：PDF 编辑崩溃修复、TXT 行首数字反斜杠修复
+- **v2.3.1**：阅读统计系统、工具栏设置按钮、修复授权过期、修复主题切换卡顿、修复 DOC 导出 bug
 - **v2.1.6**：渲染前清除菱形问号（U+FFFD），编码检测阈值优化
 - **v2.1.5**：编码检测逻辑优化 — 比较解码质量避免乱码
 - **v2.1.4**：编码检测增强（UTF-16/GB18030）、换行符统一、特殊字符转义、特殊空格规范化
@@ -73,6 +73,7 @@ v2.1.7 是功能最完善的版本，涵盖 v1.9.0 至 v2.1.7 的完整更新：
 | 编辑模式 | 已合并至源码模式，源码模式下可直接编辑并自动保存 |
 | 导出长图片 | 滚动截图拼接，保存至 `Download/MD阅读器/Picture` |
 | 导出 HTML | 包含完整样式的独立 HTML 文件，保存至 `Download/MD阅读器/HTML` |
+| 导出 DOC | 将渲染内容导出为 .docx 文件，保留标题/加粗/斜体/列表/表格等格式，保存至 `Download/MD阅读器/DOC` |
 | 自动更新 | 启动时自动检查 GitHub Release 更新，也可手动检查 |
 | 离线渲染 | 内置 markdown-it 与 highlight.js，支持常见 Markdown 语法和代码高亮 |
 
@@ -110,7 +111,8 @@ adb install -r app/build/outputs/apk/release/app-release.apk
 
 | 版本 | 类型 | 更新重点 |
 | --- | --- | --- |
-| [v2.1.7](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.1.7) | 最新版本 | PDF 编辑崩溃修复、TXT 行首数字反斜杠修复 |
+| [v2.3.0](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.3.0) | 最新版本 | 新增导出 DOC、修复长图片拼接、HTML 导出增强 |
+| [v2.1.7](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.1.7) | 稳定版本 | PDF 编辑崩溃修复、TXT 行首数字反斜杠修复 |
 | [v2.1.6](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.1.6) | 编码修复 | 渲染前清除菱形问号，编码检测阈值优化 |
 | [v2.1.5](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.1.5) | 编码修复 | 编码检测优化：比较解码质量避免乱码 |
 | [v2.1.4](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.1.4) | 编码修复 | 编码检测增强、换行符统一、特殊字符转义、特殊空格规范化 |
@@ -151,7 +153,7 @@ adb install -r app/build/outputs/apk/release/app-release.apk
 5. 点击屏幕中央区域，调出"显示设置"（字号、行间距、段间距、主题、护眼模式、字体、Vault 文件夹、检查更新）。
 6. 点击搜索图标，在当前文档中搜索关键词；也可切换为全库搜索。
 7. 点击工具栏星形图标"收藏"当前文档；在"更多菜单 ⋮ → 收藏夹 / 打开历史"中管理。
-8. 通过"更多菜单 ⋮ → 导出长图片 / 导出 HTML"导出文档。
+8. 通过“更多菜单 ⋮ → 导出长图片 / 导出 HTML / 导出 DOC”导出文档。
 9. 下次重新打开同一文档时，会自动回到上次阅读位置。
 10. 源码模式下可直接编辑 Markdown 内容，退出时自动保存，无需单独的编辑模式。
 11. 在微信收到 `.md` 文件时，选择"用其他应用打开"，再选择"MD阅读器"。
