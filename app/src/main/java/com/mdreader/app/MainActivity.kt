@@ -1419,10 +1419,10 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
     /** 日志查看弹窗：显示最近 500 条日志，支持一键复制 */
     private fun showLogViewer() {
         val logText = Logger.getAllText()
-        val scrollView = ScrollView(this).apply {
+        val scrollView = android.widget.ScrollView(this).apply {
             setPadding(48, 32, 48, 16)
         }
-        val textView = TextView(this).apply {
+        val textView = android.widget.TextView(this).apply {
             text = if (logText.isEmpty()) "暂无日志" else logText
             textSize = 11f
             setPadding(0, 0, 0, 16)
@@ -1434,19 +1434,18 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         val dialog = androidx.appcompat.app.AlertDialog.Builder(this)
             .setTitle("运行日志 (${Logger.size()} 条)")
             .setView(scrollView)
-            .setPositiveButton("复制全部") { _, _ ->
+            .setPositiveButton("复制全部") { _: android.content.DialogInterface, _: Int ->
                 val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
                 clipboard.setPrimaryClip(android.content.ClipData.newPlainText("MDReader Log", logText))
                 Toast.makeText(this, "已复制 ${Logger.size()} 条日志", Toast.LENGTH_SHORT).show()
             }
-            .setNegativeButton("清空") { _, _ ->
+            .setNegativeButton("清空") { _: android.content.DialogInterface, _: Int ->
                 Logger.clear()
                 Toast.makeText(this, "日志已清空", Toast.LENGTH_SHORT).show()
             }
             .setNeutralButton("关闭", null)
             .create()
         dialog.show()
-        // 调整对话框大小
         dialog.window?.setLayout(
             (resources.displayMetrics.widthPixels * 0.92).toInt(),
             (resources.displayMetrics.heightPixels * 0.7).toInt()
