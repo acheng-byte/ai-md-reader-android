@@ -87,4 +87,7 @@ dependencies {
     implementation("com.google.android.material:material:1.12.0")
     implementation("androidx.webkit:webkit:1.11.0")
     implementation("androidx.documentfile:documentfile:1.0.1")
+    // Apache POI HWPF — 解析旧版 .doc（OLE2）格式，FileUtils 读取 .doc 必需
+    implementation("org.apache.poi:poi:4.1.2")
+    implementation("org.apache.poi:poi-scratchpad:4.1.2")
 }
