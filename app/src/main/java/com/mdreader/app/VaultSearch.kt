@@ -2,6 +2,7 @@ package com.mdreader.app
 
 import android.content.Context
 import android.net.Uri
+import android.provider.DocumentsContract
 import androidx.documentfile.provider.DocumentFile
 import org.json.JSONArray
 import org.json.JSONObject
@@ -20,6 +21,35 @@ object VaultSearch {
     }
 
     /**
+     * 列出目录内容。优先用 DocumentFile.listFiles()，若返回空则用 DocumentsContract 直接查询。
+     */
+    private fun listDir(context: Context, dir: DocumentFile): Array<DocumentFile>? {
+        // 先试 DocumentFile.listFiles()
+        val dfList = runCatching { dir.listFiles() }.getOrNull()
+        if (!dfList.isNullOrEmpty()) return dfList
+
+        // 回退：用 DocumentsContract 直接查询子文档
+        return runCatching {
+            val treeUri = dir.uri
+            val docId = DocumentsContract.getDocumentId(treeUri)
+            val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, docId)
+            val results = mutableListOf<DocumentFile>()
+            context.contentResolver.query(
+                childrenUri,
+                arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID),
+                null, null, null
+            )?.use { cursor ->
+                while (cursor.moveToNext()) {
+                    val childDocId = cursor.getString(0)
+                    val childUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, childDocId)
+                    DocumentFile.fromSingleUri(context, childUri)?.let { results.add(it) }
+                }
+            }
+            if (results.isEmpty()) null else results.toTypedArray()
+        }.getOrNull()
+    }
+
+    /**
      * 构建缓存：递归扫描 vault，为每个文件存储多种名称变体作为 key。
      * 如果根目录不可读（URI 权限过期），返回 null。
      */
@@ -31,32 +61,31 @@ object VaultSearch {
         val map = HashMap<String, DocumentFile>()
         val root = DocumentFile.fromTreeUri(context, vaultUri)
         if (root == null || !root.canRead()) return null
-        scanDir(root, map)
+        scanDir(context, root, map)
         if (map.isEmpty()) return null  // 扫描结果为空，可能是权限问题
         fileCache[uriStr] = map
         cacheVaultUri = uriStr
         return map
     }
 
-    private fun scanDir(dir: DocumentFile, map: HashMap<String, DocumentFile>) {
-        runCatching {
-            dir.listFiles().forEach { file ->
-                when {
-                    file.isDirectory -> scanDir(file, map)
-                    file.isFile -> {
-                        val name = file.name ?: return@forEach
-                        // 原始名称
-                        map[name] = file
-                        map[name.lowercase()] = file
-                        // URL 解码版本（某些 Storage Provider 返回编码后的名称）
-                        try {
-                            val decoded = java.net.URLDecoder.decode(name, "UTF-8")
-                            if (decoded != name) {
-                                map[decoded] = file
-                                map[decoded.lowercase()] = file
-                            }
-                        } catch (_: Exception) {}
-                    }
+    private fun scanDir(context: Context, dir: DocumentFile, map: HashMap<String, DocumentFile>) {
+        val children = listDir(context, dir) ?: return
+        for (file in children) {
+            when {
+                file.isDirectory -> scanDir(context, file, map)
+                file.isFile -> {
+                    val name = file.name ?: continue
+                    // 原始名称
+                    map[name] = file
+                    map[name.lowercase()] = file
+                    // URL 解码版本（某些 Storage Provider 返回编码后的名称）
+                    try {
+                        val decoded = java.net.URLDecoder.decode(name, "UTF-8")
+                        if (decoded != name) {
+                            map[decoded] = file
+                            map[decoded.lowercase()] = file
+                        }
+                    } catch (_: Exception) {}
                 }
             }
         }
@@ -114,13 +143,12 @@ object VaultSearch {
         max: Int
     ) {
         if (out.size >= max) return
-        runCatching {
-            dir.listFiles().forEach { file ->
-                if (out.size >= max) return
-                when {
-                    file.isDirectory -> searchDir(context, file, query, out, max)
-                    file.isFile -> tryMatchFile(context, file, query, out)
-                }
+        val children = listDir(context, dir) ?: return
+        for (file in children) {
+            if (out.size >= max) return
+            when {
+                file.isDirectory -> searchDir(context, file, query, out, max)
+                file.isFile -> tryMatchFile(context, file, query, out)
             }
         }
     }
@@ -174,20 +202,21 @@ object VaultSearch {
             val dirParts = parts.dropLast(1)
             var dir: DocumentFile? = root
             for (part in dirParts) {
-                dir = dir?.listFiles()?.find {
+                val children = listDir(context, dir ?: break)
+                dir = children?.find {
                     it.isDirectory && dirNameMatches(it.name, part)
                 }
                 if (dir == null) break
             }
             if (dir != null) {
-                val found = findInDir(dir, filename)
+                val found = findInDir(context, dir, filename)
                 if (found != null) return found
             }
             // 路径导航失败：全库按文件名搜索
-            return findInDir(root, filename)
+            return findInDir(context, root, filename)
         }
 
-        return findInDir(root, cleanName)
+        return findInDir(context, root, cleanName)
     }
 
     /**
@@ -207,15 +236,14 @@ object VaultSearch {
      * 递归搜索目录，匹配文件名。
      * 支持多种名称变体：原始、去扩展名、加.md、URL解码。
      */
-    private fun findInDir(dir: DocumentFile, noteName: String): DocumentFile? {
-        runCatching {
-            dir.listFiles().forEach { file ->
-                if (file.isDirectory) {
-                    findInDir(file, noteName)?.let { return it }
-                } else {
-                    val fn = file.name ?: return@forEach
-                    if (fileNameMatches(fn, noteName)) return file
-                }
+    private fun findInDir(context: Context, dir: DocumentFile, noteName: String): DocumentFile? {
+        val children = listDir(context, dir) ?: return null
+        for (file in children) {
+            if (file.isDirectory) {
+                findInDir(context, file, noteName)?.let { return it }
+            } else {
+                val fn = file.name ?: continue
+                if (fileNameMatches(fn, noteName)) return file
             }
         }
         return null
@@ -265,10 +293,10 @@ object VaultSearch {
 
         // 回退：路径导航 + 递归搜索
         val root = DocumentFile.fromTreeUri(context, vaultUri) ?: return null
-        val pathResult = findFileInDir(root, cleanPath)
+        val pathResult = findFileInDir(context, root, cleanPath)
         if (pathResult != null) return pathResult
 
-        return findInDir(root, fileName)
+        return findInDir(context, root, fileName)
     }
 
     fun resolveRelativeAsset(
@@ -282,14 +310,14 @@ object VaultSearch {
             val currentDoc = DocumentFile.fromSingleUri(context, currentDocUri)
             val parentPath = currentDoc?.parentFile
             if (parentPath != null) {
-                val candidate = findFileInDir(parentPath, relativePath)
+                val candidate = findFileInDir(context, parentPath, relativePath)
                 if (candidate != null) return candidate
             }
         }
         return findAssetInVault(context, vaultUri, relativePath)
     }
 
-    internal fun findFileInDir(dir: DocumentFile, name: String): DocumentFile? {
+    internal fun findFileInDir(context: Context, dir: DocumentFile, name: String): DocumentFile? {
         val parts = name.replace('\\', '/').split('/')
         var current: DocumentFile? = dir
         for (part in parts) {
@@ -298,10 +326,12 @@ object VaultSearch {
             val decodedPart = try {
                 java.net.URLDecoder.decode(part, "UTF-8")
             } catch (_: Exception) { part }
-            current = current?.listFiles()?.find {
-                it.name == part || it.name == decodedPart ||
-                    it.name?.equals(part, ignoreCase = true) == true ||
-                    it.name?.equals(decodedPart, ignoreCase = true) == true
+            val children = listDir(context, current ?: return null)
+            current = children?.find {
+                val n = it.name
+                n == part || n == decodedPart ||
+                    n?.equals(part, ignoreCase = true) == true ||
+                    n?.equals(decodedPart, ignoreCase = true) == true
             } ?: return null
         }
         return current?.takeIf { it.isFile }
