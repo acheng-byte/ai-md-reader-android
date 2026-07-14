@@ -46,8 +46,16 @@ object VaultSearch {
                         if (name != null) {
                             // 用文件名小写作为 key（不含路径），支持快速查找
                             map[name.lowercase()] = file
-                            // 也存一份含路径的 key，支持路径匹配
+                            // 也存一份原始大小写
                             map[name] = file
+                            // 存一份 URL 解码后的名称（某些设备上 DocumentFile.getName() 可能返回编码后的名称）
+                            try {
+                                val decoded = java.net.URLDecoder.decode(name, "UTF-8")
+                                if (decoded != name) {
+                                    map[decoded.lowercase()] = file
+                                    map[decoded] = file
+                                }
+                            } catch (_: Exception) {}
                         }
                     }
                 }
@@ -114,22 +122,49 @@ object VaultSearch {
 
         val cache = buildCache(context, vaultUri)
 
-        // 策略1：精确匹配（小写 + 原始大小写）
-        cache[fileName.lowercase()]?.let { return it }
-        cache[fileName]?.let { return it }
+        // 尝试多种名称变体在缓存中匹配
+        val candidates = buildNameCandidates(fileName)
+        for (name in candidates) {
+            cache[name]?.let { return it }
+        }
 
-        // 策略2：去掉扩展名匹配（wikilink 可能不带 .md）
-        val nameNoExt = fileName.substringBeforeLast('.')
-        cache[nameNoExt.lowercase()]?.let { return it }
-        cache[nameNoExt]?.let { return it }
-
-        // 策略3：加 .md 后缀匹配
-        cache["${fileName.lowercase()}.md"]?.let { return it }
-        cache["$fileName.md"]?.let { return it }
-
-        // 策略4：回退到递归扫描（缓存未覆盖的情况）
+        // 回退到递归扫描（缓存未覆盖的情况）
         val root = DocumentFile.fromTreeUri(context, vaultUri) ?: return null
         return findInDir(root, fileName)
+    }
+
+    /**
+     * 为一个文件名生成所有可能的缓存 key 变体：
+     * 原始、小写、URL解码、去扩展名、加.md 等
+     */
+    private fun buildNameCandidates(fileName: String): List<String> {
+        val list = mutableListOf<String>()
+        list.add(fileName)
+        list.add(fileName.lowercase())
+
+        // URL 解码版本
+        val decoded = try {
+            java.net.URLDecoder.decode(fileName, "UTF-8")
+        } catch (_: Exception) { fileName }
+        if (decoded != fileName) {
+            list.add(decoded)
+            list.add(decoded.lowercase())
+        }
+
+        // 去扩展名
+        val nameNoExt = fileName.substringBeforeLast('.')
+        if (nameNoExt != fileName) {
+            list.add(nameNoExt)
+            list.add(nameNoExt.lowercase())
+        }
+
+        // 加 .md 后缀
+        if (!fileName.endsWith(".md", ignoreCase = true)) {
+            list.add("$fileName.md")
+            list.add("${fileName.lowercase()}.md")
+        }
+
+        return list
     }
 
     private fun findInDir(dir: DocumentFile, noteName: String): DocumentFile? {
@@ -159,18 +194,21 @@ object VaultSearch {
         if (cleanPath.isEmpty()) return null
 
         val fileName = cleanPath.substringAfterLast('/')  // 取最后一段文件名
+        if (fileName.isEmpty()) return null
         val cache = buildCache(context, vaultUri)
 
-        // 策略1：用文件名（不含路径）在缓存中快速匹配
-        cache[fileName.lowercase()]?.let { return it }
-        cache[fileName]?.let { return it }
+        // 尝试多种名称变体在缓存中匹配
+        val candidates = buildNameCandidates(fileName)
+        for (name in candidates) {
+            cache[name]?.let { return it }
+        }
 
-        // 策略2：按完整相对路径从根目录导航
+        // 按完整相对路径从根目录导航
         val root = DocumentFile.fromTreeUri(context, vaultUri) ?: return null
         val pathFile = findFileInDir(root, cleanPath)
         if (pathFile != null) return pathFile
 
-        // 策略3：去掉扩展名后在缓存中模糊匹配
+        // 回退：遍历缓存做模糊匹配（去掉扩展名后忽略大小写比较）
         val nameNoExt = fileName.substringBeforeLast('.')
         for ((key, file) in cache) {
             val keyNoExt = key.substringBeforeLast('.')
@@ -207,7 +245,14 @@ object VaultSearch {
         for (part in parts) {
             if (part.isEmpty() || part == ".") continue
             if (part == "..") { current = current?.parentFile; continue }
-            current = current?.listFiles()?.find { it.name == part } ?: return null
+            val decodedPart = try {
+                java.net.URLDecoder.decode(part, "UTF-8")
+            } catch (_: Exception) { part }
+            current = current?.listFiles()?.find {
+                it.name == part || it.name == decodedPart ||
+                    it.name?.equals(part, ignoreCase = true) == true ||
+                    it.name?.equals(decodedPart, ignoreCase = true) == true
+            } ?: return null
         }
         return current?.takeIf { it.isFile }
     }

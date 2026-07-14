@@ -299,24 +299,47 @@
     }
 
     /* ---------- Obsidian Wikilink 预处理 ---------- */
+    // 编码路径但保留 / 分隔符（不编码为 %2F），兼容各 Android WebView
+    function encodeVaultPath(ref) {
+        // 外部 URL 直接返回，不走 vault
+        if (/^(https?:|\/\/|data:)/i.test(ref)) return ref;
+        return ref.split('/').map(function (seg) { return encodeURIComponent(seg); }).join('/');
+    }
+
     function preprocessWikilinks(source) {
         // ![[image.ext]] → 直接渲染图片/视频/嵌入文档
         source = source.replace(/!\[\[([^\]]+)\]\]/g, function (_, ref) {
+            // 外部 URL：直接用作图片/视频/音频源
+            if (/^(https?:|\/\/)/i.test(ref)) {
+                var ext2 = ref.split('.').pop().toLowerCase().split('?')[0];
+                var vExts = ['mp4', 'webm', 'ogv', 'mov'];
+                var aExts = ['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac', 'wma'];
+                if (vExts.indexOf(ext2) >= 0) {
+                    return '<div class="video-embed"><video controls preload="metadata" src="' +
+                        escapeHtml(ref) + '"></video><p class="video-caption">' + escapeHtml(ref) + '</p></div>';
+                }
+                if (aExts.indexOf(ext2) >= 0) {
+                    return '<div class="audio-embed"><audio controls preload="metadata" src="' +
+                        escapeHtml(ref) + '"></audio><p class="audio-caption">' + escapeHtml(ref) + '</p></div>';
+                }
+                // 默认当图片处理
+                return '![' + ref + '](' + ref + ')';
+            }
             var ext = ref.split('.').pop().toLowerCase();
             var imageExts = ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp', 'ico'];
             var videoExts = ['mp4', 'webm', 'ogv', 'mov'];
             var audioExts = ['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac', 'wma'];
             if (imageExts.indexOf(ext) >= 0) {
-                var imgUrl = VAULT_BASE + encodeURIComponent(ref);
+                var imgUrl = VAULT_BASE + encodeVaultPath(ref);
                 return '!['  + ref + '](' + imgUrl + ')';
             }
             if (videoExts.indexOf(ext) >= 0) {
-                var vidUrl = VAULT_BASE + encodeURIComponent(ref);
+                var vidUrl = VAULT_BASE + encodeVaultPath(ref);
                 return '<div class="video-embed"><video controls preload="metadata" src="' +
                     escapeHtml(vidUrl) + '"></video><p class="video-caption">' + escapeHtml(ref) + '</p></div>';
             }
             if (audioExts.indexOf(ext) >= 0) {
-                var audUrl = VAULT_BASE + encodeURIComponent(ref);
+                var audUrl = VAULT_BASE + encodeVaultPath(ref);
                 return '<div class="audio-embed"><audio controls preload="metadata" src="' +
                     escapeHtml(audUrl) + '"></audio><p class="audio-caption">' + escapeHtml(ref) + '</p></div>';
             }
@@ -341,7 +364,7 @@
                 display = noteName;
             }
             var linkName = noteName.replace(/\.md$/i, '');
-            return '[' + display + '](mdreader://open/' + encodeURIComponent(linkName) + ')';
+            return '[' + display + '](mdreader://open/' + encodeVaultPath(linkName) + ')';
         });
 
         return source;
@@ -400,18 +423,19 @@
             if (!m) return;
             var mdPath = m[1];
             var anchor = m[2] || '';
-            a.setAttribute('href', 'mdreader://open/' + encodeURIComponent(mdPath + anchor));
+            a.setAttribute('href', 'mdreader://open/' + encodeVaultPath(mdPath) + anchor);
         });
     }
 
     /* ---------- 普通 Markdown 图片路径 → Vault URL ---------- */
     function preprocessImages(source) {
-        return source.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, function (match, alt, src) {
+        return source.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, function (match, alt, rawSrc) {
+            var src = rawSrc.trim();
             // 跳过网络 URL、data: URI、已经是 vault 路径的
             if (/^(https?:|data:|#|\/\/|https:\/\/appassets)/.test(src)) return match;
             // /vault-root/path → 去掉开头的 / 当作 vault 根路径处理（Obsidian 绝对引用惯例）
             var vaultPath = src.charAt(0) === '/' ? src.slice(1) : src;
-            return '![' + alt + '](' + VAULT_BASE + encodeURIComponent(vaultPath) + ')';
+            return '![' + alt + '](' + VAULT_BASE + encodeVaultPath(vaultPath) + ')';
         });
     }
 
@@ -1280,9 +1304,7 @@
     function normalizeText(s) {
         // 去除零宽字符：ZWS / ZWNJ / ZWJ / BOM / 软连字符 / 左至右 / 右至左标记
         s = s.replace(/[\u200B\u200C\u200D\uFEFF\u00AD\u200E\u200F]/g, '');
-        // 全角空格 → 普通空格
-        s = s.replace(/\u3000/g, ' ');
-        // 不间断空格 → 普通空格
+        // 不间断空格 → 普通空格（保留全角空格 \u3000，因为中文文件名/路径可能含全角空格）
         s = s.replace(/\u00A0/g, ' ');
         // 其他 Unicode 空格统一为普通空格（em space, en space, thin space 等）
         s = s.replace(/[\u2000-\u200A\u202F\u205F]/g, ' ');
