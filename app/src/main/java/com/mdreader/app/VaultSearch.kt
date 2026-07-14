@@ -10,8 +10,92 @@ object VaultSearch {
 
     data class Result(val uri: String, val name: String, val excerpt: String)
 
-    /** 清除缓存（vault 切换时调用）— 已移除缓存，保留接口兼容 */
-    fun clearCache() {}
+    // ---- 缓存：vaultUri -> (文件名变体 -> DocumentFile) ----
+    private val fileCache = HashMap<String, HashMap<String, DocumentFile>>()
+    private var cacheVaultUri: String? = null
+
+    fun clearCache() {
+        fileCache.clear()
+        cacheVaultUri = null
+    }
+
+    /**
+     * 构建缓存：递归扫描 vault，为每个文件存储多种名称变体作为 key。
+     * 如果根目录不可读（URI 权限过期），返回 null。
+     */
+    private fun buildCache(context: Context, vaultUri: Uri): HashMap<String, DocumentFile>? {
+        val uriStr = vaultUri.toString()
+        if (cacheVaultUri == uriStr && fileCache[uriStr] != null) {
+            return fileCache[uriStr]!!
+        }
+        val map = HashMap<String, DocumentFile>()
+        val root = DocumentFile.fromTreeUri(context, vaultUri)
+        if (root == null || !root.canRead()) return null
+        scanDir(root, map)
+        if (map.isEmpty()) return null  // 扫描结果为空，可能是权限问题
+        fileCache[uriStr] = map
+        cacheVaultUri = uriStr
+        return map
+    }
+
+    private fun scanDir(dir: DocumentFile, map: HashMap<String, DocumentFile>) {
+        runCatching {
+            dir.listFiles().forEach { file ->
+                when {
+                    file.isDirectory -> scanDir(file, map)
+                    file.isFile -> {
+                        val name = file.name ?: return@forEach
+                        // 原始名称
+                        map[name] = file
+                        map[name.lowercase()] = file
+                        // URL 解码版本（某些 Storage Provider 返回编码后的名称）
+                        try {
+                            val decoded = java.net.URLDecoder.decode(name, "UTF-8")
+                            if (decoded != name) {
+                                map[decoded] = file
+                                map[decoded.lowercase()] = file
+                            }
+                        } catch (_: Exception) {}
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * 为文件名生成所有可能的匹配变体：
+     * 原始、小写、URL解码、去扩展名、加.md 等
+     */
+    private fun buildNameCandidates(fileName: String): List<String> {
+        val list = mutableListOf<String>()
+        list.add(fileName)
+        list.add(fileName.lowercase())
+
+        val decoded = try {
+            java.net.URLDecoder.decode(fileName, "UTF-8")
+        } catch (_: Exception) { fileName }
+        if (decoded != fileName) {
+            list.add(decoded)
+            list.add(decoded.lowercase())
+        }
+
+        // 去扩展名
+        val nameNoExt = fileName.substringBeforeLast('.')
+        if (nameNoExt != fileName) {
+            list.add(nameNoExt)
+            list.add(nameNoExt.lowercase())
+        }
+
+        // 加 .md 后缀
+        if (!fileName.endsWith(".md", ignoreCase = true)) {
+            list.add("$fileName.md")
+            list.add("${fileName.lowercase()}.md")
+        }
+
+        return list
+    }
+
+    // ---- 全文搜索 ----
 
     fun search(context: Context, vaultUri: Uri, query: String, maxResults: Int = 40): String {
         val root = DocumentFile.fromTreeUri(context, vaultUri)
@@ -62,31 +146,67 @@ object VaultSearch {
         }
     }
 
+    // ---- Wikilink 文件查找 ----
+
     fun findFile(context: Context, vaultUri: Uri, noteName: String): DocumentFile? {
-        val root = DocumentFile.fromTreeUri(context, vaultUri) ?: return null
-        // Strip heading anchor: [[File#Heading]] → "File"
         val cleanName = noteName.substringBefore('#').trim()
-        // Handle path-based wikilinks: [[Folder/Filename]]
+        if (cleanName.isEmpty()) return null
+
+        // 优先用缓存查找（快速，支持多种名称变体匹配）
+        val cache = buildCache(context, vaultUri)
+        if (cache != null) {
+            val fileName = cleanName.substringAfterLast('/').trim()
+            if (fileName.isNotEmpty()) {
+                val candidates = buildNameCandidates(fileName)
+                for (name in candidates) {
+                    cache[name]?.let { return it }
+                }
+            }
+        }
+
+        // 缓存不可用或未命中：回退到递归搜索
+        val root = DocumentFile.fromTreeUri(context, vaultUri) ?: return null
+
+        // 有路径前缀：先尝试路径导航定位目录，再在该目录下搜索
         if (cleanName.contains('/')) {
             val parts = cleanName.split('/').filter { it.isNotEmpty() }
             val filename = parts.last()
             val dirParts = parts.dropLast(1)
-            // Try exact path navigation first
             var dir: DocumentFile? = root
             for (part in dirParts) {
-                dir = dir?.listFiles()?.find { it.isDirectory && (it.name ?: "").equals(part, ignoreCase = true) }
+                dir = dir?.listFiles()?.find {
+                    it.isDirectory && dirNameMatches(it.name, part)
+                }
                 if (dir == null) break
             }
             if (dir != null) {
                 val found = findInDir(dir, filename)
                 if (found != null) return found
             }
-            // Fallback: search entire vault by filename only
+            // 路径导航失败：全库按文件名搜索
             return findInDir(root, filename)
         }
+
         return findInDir(root, cleanName)
     }
 
+    /**
+     * 目录名匹配：支持原始、URL解码、大小写不敏感
+     */
+    private fun dirNameMatches(dirName: String?, target: String): Boolean {
+        if (dirName == null) return false
+        if (dirName.equals(target, ignoreCase = true)) return true
+        try {
+            val decoded = java.net.URLDecoder.decode(dirName, "UTF-8")
+            if (decoded.equals(target, ignoreCase = true)) return true
+        } catch (_: Exception) {}
+        return false
+    }
+
+    /**
+     * 递归搜索目录，匹配文件名。
+     * 支持多种名称变体：原始、去扩展名、加.md、URL解码。
+     */
     private fun findInDir(dir: DocumentFile, noteName: String): DocumentFile? {
         runCatching {
             dir.listFiles().forEach { file ->
@@ -94,11 +214,7 @@ object VaultSearch {
                     findInDir(file, noteName)?.let { return it }
                 } else {
                     val fn = file.name ?: return@forEach
-                    val base = fn.substringBeforeLast(".")
-                    if (base.equals(noteName, ignoreCase = true) ||
-                        fn.equals(noteName, ignoreCase = true) ||
-                        fn.equals("$noteName.md", ignoreCase = true)
-                    ) return file
+                    if (fileNameMatches(fn, noteName)) return file
                 }
             }
         }
@@ -106,29 +222,55 @@ object VaultSearch {
     }
 
     /**
-     * 全库查找文件（支持图片等任意类型）。
-     * 先尝试路径导航，找不到再递归搜索文件名。
+     * 文件名匹配：检查多种变体
+     * - base.equals(noteName)  （去扩展名后比较）
+     * - fn.equals(noteName)    （完整名比较）
+     * - fn.equals(noteName.md) （加.md 后缀比较）
+     * - URL 解码后以上三种
      */
+    private fun fileNameMatches(actualName: String, targetName: String): Boolean {
+        val base = actualName.substringBeforeLast(".")
+        // 直接匹配
+        if (base.equals(targetName, ignoreCase = true)) return true
+        if (actualName.equals(targetName, ignoreCase = true)) return true
+        if (actualName.equals("$targetName.md", ignoreCase = true)) return true
+        // URL 解码后匹配
+        try {
+            val decoded = java.net.URLDecoder.decode(actualName, "UTF-8")
+            val decodedBase = decoded.substringBeforeLast(".")
+            if (decodedBase.equals(targetName, ignoreCase = true)) return true
+            if (decoded.equals(targetName, ignoreCase = true)) return true
+            if (decoded.equals("$targetName.md", ignoreCase = true)) return true
+        } catch (_: Exception) {}
+        return false
+    }
+
+    // ---- 资源文件查找（图片等） ----
+
     fun findAssetInVault(context: Context, vaultUri: Uri, relativePath: String): DocumentFile? {
         val cleanPath = relativePath.replace('\\', '/').trimStart('/')
         if (cleanPath.isEmpty()) return null
 
-        val root = DocumentFile.fromTreeUri(context, vaultUri) ?: return null
+        val fileName = cleanPath.substringAfterLast('/')
+        if (fileName.isEmpty()) return null
 
-        // 先尝试按完整路径导航
+        // 优先缓存
+        val cache = buildCache(context, vaultUri)
+        if (cache != null) {
+            val candidates = buildNameCandidates(fileName)
+            for (name in candidates) {
+                cache[name]?.let { return it }
+            }
+        }
+
+        // 回退：路径导航 + 递归搜索
+        val root = DocumentFile.fromTreeUri(context, vaultUri) ?: return null
         val pathResult = findFileInDir(root, cleanPath)
         if (pathResult != null) return pathResult
 
-        // 回退：按文件名递归搜索
-        val fileName = cleanPath.substringAfterLast('/')
-        if (fileName.isNotEmpty()) {
-            return findInDir(root, fileName)
-        }
-
-        return null
+        return findInDir(root, fileName)
     }
 
-    /** Resolve an image path relative to the current document inside the vault tree. */
     fun resolveRelativeAsset(
         context: Context,
         vaultUri: Uri,
@@ -136,7 +278,6 @@ object VaultSearch {
         relativePath: String
     ): DocumentFile? {
         val root = DocumentFile.fromTreeUri(context, vaultUri) ?: return null
-        // First try: find relative to current doc's directory
         if (currentDocUri != null) {
             val currentDoc = DocumentFile.fromSingleUri(context, currentDocUri)
             val parentPath = currentDoc?.parentFile
@@ -145,8 +286,7 @@ object VaultSearch {
                 if (candidate != null) return candidate
             }
         }
-        // Fallback: search anywhere in vault
-        return findInDir(root, relativePath.substringAfterLast('/'))
+        return findAssetInVault(context, vaultUri, relativePath)
     }
 
     internal fun findFileInDir(dir: DocumentFile, name: String): DocumentFile? {
