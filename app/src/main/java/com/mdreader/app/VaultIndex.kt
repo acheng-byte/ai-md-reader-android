@@ -221,6 +221,7 @@ object VaultIndex {
                     val currentCount = allEntries.size
                     Logger.i(TAG, "增量扫描进度: 已索引 $currentCount 个文件，保存断点...")
                     saveToDisk(ctx)
+                    Logger.i(TAG, "断点保存完毕，当前已索引 $currentCount 个文件")
                 }
             }
         }
