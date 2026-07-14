@@ -1949,6 +1949,12 @@
         text = text.replace(/^\[\^[^\]]+\]:\s*.+$/gm, '');
         // 14. 去除 callout 标记
         text = text.replace(/^\[![^\]]*\]\s*/gm, '');
+        // 15. 去除行内代码反引号（保留内容）
+        text = text.replace(/`([^`]*)`/g, '$1');
+        // 16. 去除自动链接 <url> → url
+        text = text.replace(/<([^>]+)>/g, '$1');
+        // 17. 去除转义反斜杠
+        text = text.replace(/\\([\\`*_{}[\]()#+\-.!|~])/g, '$1');
 
         // 去除所有空白字符后计算纯文字数
         var noWhitespace = text.replace(/\s+/g, '');

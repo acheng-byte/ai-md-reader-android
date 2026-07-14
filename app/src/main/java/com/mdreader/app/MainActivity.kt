@@ -231,10 +231,10 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                 Thread {
                     try {
                         val encoded = VaultSearch.ensureEncoded(Uri.parse(vaultUriForIndex))
-                        // 先尝试从磁盘加载缓存（瞬间），失败则后台扫描
-                        if (!VaultIndex.loadFromDisk(this, encoded)) {
-                            VaultIndex.scanInBackground(this, encoded)
-                        }
+                        // 先尝试从磁盘加载缓存（瞬间），然后触发后台扫描
+                        // scanInBackground 会跳过已扫描目录，继续未完成部分
+                        VaultIndex.loadFromDisk(this, encoded)
+                        VaultIndex.scanInBackground(this, encoded)
                     } catch (_: Exception) {}
                 }.start()
             }, 3000)
@@ -1658,8 +1658,10 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         if (elapsed > 0) {
             prefs.totalReadingMinutes = prefs.totalReadingMinutes + elapsed.toInt()
         }
-        // 更新活跃天数
-        val today = java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.ROOT).format(java.util.Date())
+        // 更新活跃天数（按北京时间0点分界）
+        val df = java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.ROOT)
+        df.timeZone = java.util.TimeZone.getTimeZone("Asia/Shanghai")
+        val today = df.format(java.util.Date())
         if (prefs.lastActiveDate != today) {
             prefs.activeDays = prefs.activeDays + 1
             prefs.lastActiveDate = today
