@@ -12,17 +12,11 @@ object VaultSearch {
     data class Result(val uri: String, val name: String, val excerpt: String)
     private const val TAG = "VaultSearch"
 
-    // ---- 缓存 ----
-    private val fileCache = HashMap<String, HashMap<String, DocumentFile>>()
-    private var cacheVaultUri: String? = null
-    @Volatile
-    private var isScanning = false
+    // ---- 缓存（已改为按需查找，不再全库扫描） ----
 
     @Synchronized
     fun clearCache() {
-        fileCache.clear()
-        cacheVaultUri = null
-        Logger.i(TAG, "【清除缓存】已清空文件缓存")
+        Logger.i(TAG, "【清除缓存】缓存已清空")
     }
 
     // ---- URI 编码修复 ----
@@ -153,93 +147,6 @@ object VaultSearch {
         return emptyList()
     }
 
-    /**
-     * 构建缓存：递归扫描 vault 目录。
-     */
-    private fun buildCache(context: Context, vaultUri: Uri): HashMap<String, DocumentFile>? {
-        val uriStr = vaultUri.toString()
-        // 同步读取缓存
-        synchronized(this) {
-            if (cacheVaultUri == uriStr && fileCache[uriStr] != null) {
-                return fileCache[uriStr]!!
-            }
-        }
-        // 防止多线程重复扫描
-        if (isScanning) {
-            synchronized(this) { return fileCache[uriStr] }
-        }
-        isScanning = true
-        try {
-            Logger.i(TAG, "开始扫描库文件夹...")
-            val map = HashMap<String, DocumentFile>()
-            val root = DocumentFile.fromTreeUri(context, vaultUri)
-            if (root == null) {
-                Logger.e(TAG, "库文件夹无效 (fromTreeUri=null) — 请重新选择")
-                return null
-            }
-            // 单遍扫描，后台预扫描确保缓存就绪
-            scanDir(context, vaultUri, root, map)
-            Logger.i(TAG, "库扫描完成: ${map.size} 个文件")
-            if (map.isEmpty()) {
-                Logger.e(TAG, "扫描结果为 0 — 权限可能已过期，请重新选择文件夹")
-                return null
-            }
-            // 同步写入缓存
-            synchronized(this) {
-                fileCache[uriStr] = map
-                cacheVaultUri = uriStr
-            }
-            return map
-        } finally {
-            isScanning = false
-        }
-    }
-
-    private fun scanDir(context: Context, treeUri: Uri, dir: DocumentFile, map: HashMap<String, DocumentFile>) {
-        val children = listDir(context, treeUri, dir)
-        if (children.isEmpty()) return
-        for (file in children) {
-            when {
-                file.isDirectory -> scanDir(context, treeUri, file, map)
-                file.isFile -> {
-                    val name = file.name ?: continue
-                    map[name] = file
-                    map[name.lowercase()] = file
-                    try {
-                        val decoded = java.net.URLDecoder.decode(name, "UTF-8")
-                        if (decoded != name) {
-                            map[decoded] = file
-                            map[decoded.lowercase()] = file
-                        }
-                    } catch (_: Exception) {}
-                }
-            }
-        }
-    }
-
-    private fun buildNameCandidates(fileName: String): List<String> {
-        val list = mutableListOf<String>()
-        list.add(fileName)
-        list.add(fileName.lowercase())
-        val decoded = try {
-            java.net.URLDecoder.decode(fileName, "UTF-8")
-        } catch (_: Exception) { fileName }
-        if (decoded != fileName) {
-            list.add(decoded)
-            list.add(decoded.lowercase())
-        }
-        val nameNoExt = fileName.substringBeforeLast('.')
-        if (nameNoExt != fileName) {
-            list.add(nameNoExt)
-            list.add(nameNoExt.lowercase())
-        }
-        if (!fileName.endsWith(".md", ignoreCase = true)) {
-            list.add("$fileName.md")
-            list.add("${fileName.lowercase()}.md")
-        }
-        return list
-    }
-
     // ---- 全文搜索 ----
 
     fun search(context: Context, vaultUri: Uri, query: String, maxResults: Int = 40): String {
@@ -297,26 +204,15 @@ object VaultSearch {
         val cleanName = noteName.substringBefore('#').trim()
         if (cleanName.isEmpty()) return null
 
-        // 优先缓存
-        val cache = buildCache(context, encoded)
-        if (cache != null) {
-            val fileName = cleanName.substringAfterLast('/').trim()
-            if (fileName.isNotEmpty()) {
-                for (name in buildNameCandidates(fileName)) {
-                    cache[name]?.let { return it }
-                }
-            }
-        }
-
-        // 回退：递归搜索
         val root = DocumentFile.fromTreeUri(context, encoded) ?: return null
+        val fileName = cleanName.substringAfterLast('/').trim()
+        if (fileName.isEmpty()) return null
 
         if (cleanName.contains('/')) {
             val parts = cleanName.split('/').filter { it.isNotEmpty() }
-            val filename = parts.last()
             val dirParts = parts.dropLast(1)
 
-            // 路径导航
+            // 路径导航：先尝试指定目录
             var dir: DocumentFile? = root
             for (part in dirParts) {
                 val children = listDir(context, encoded, dir ?: break)
@@ -327,11 +223,11 @@ object VaultSearch {
             }
 
             if (dir != null) {
-                findInDir(context, encoded, dir, filename)?.let { return it }
+                findInDir(context, encoded, dir, fileName)?.let { return it }
             }
 
-            // 全库搜索
-            return findInDir(context, encoded, root, filename)
+            // 回退：全库搜索文件名
+            return findInDir(context, encoded, root, fileName)
         }
 
         return findInDir(context, encoded, root, cleanName)
@@ -384,22 +280,9 @@ object VaultSearch {
         val fileName = cleanPath.substringAfterLast('/')
         if (fileName.isEmpty()) return null
 
-        // 只查已有缓存，不触发扫描（避免阻塞 WebView 资源加载）
-        val cache = getCachedFiles(encoded.toString())
-        if (cache != null) {
-            for (name in buildNameCandidates(fileName)) {
-                cache[name]?.let { return it }
-            }
-        }
-
-        // 缓存未就绪时不回退到慢速目录查找，直接返回 null 让调用方使用 APK 内置资源
-        return null
-    }
-
-    /** 获取已构建的缓存（不触发扫描），如果缓存不存在或正在扫描中返回 null */
-    fun getCachedFiles(vaultUriStr: String): HashMap<String, DocumentFile>? {
-        if (isScanning) return null
-        return fileCache[vaultUriStr]
+        // 按需递归搜索，不触发全库扫描
+        val root = DocumentFile.fromTreeUri(context, encoded) ?: return null
+        return findInDir(context, encoded, root, fileName)
     }
 
     fun resolveRelativeAsset(context: Context, vaultUri: Uri, currentDocUri: Uri?, relativePath: String): DocumentFile? {
