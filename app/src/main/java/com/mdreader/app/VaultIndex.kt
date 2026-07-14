@@ -88,6 +88,8 @@ object VaultIndex {
             try {
                 val uriStr = vaultUri.toString()
                 val encoded = VaultSearch.ensureEncoded(vaultUri)
+                // 关键：扫描前就设置 indexVaultUri，确保中途 saveToDisk 保存正确的 URI
+                synchronized(this) { indexVaultUri = uriStr }
                 Logger.i(TAG, "开始索引库文件夹...")
 
                 val root = DocumentFile.fromTreeUri(context, encoded)
@@ -103,7 +105,7 @@ object VaultIndex {
                 // 最终保存
                 saveToDisk(context)
                 Logger.i(TAG, "索引完成: ${allEntries.size} 个文件")
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 Logger.e(TAG, "索引失败: ${e.message}")
             } finally {
                 scanning = false
@@ -192,37 +194,46 @@ object VaultIndex {
         // 增量：跳过已扫描的目录
         if (relPath.isNotEmpty() && scannedDirs.contains(relPath)) return
 
-        val children = listDir(context, treeUri, dir)
+        val children = try {
+            listDir(context, treeUri, dir)
+        } catch (e: Exception) {
+            Logger.w(TAG, "列目录失败: $relPath - ${e.message}")
+            emptyList()
+        }
         if (children.isEmpty()) {
             if (relPath.isNotEmpty()) scannedDirs.add(relPath)
             return
         }
 
         for (file in children) {
-            val name = file.name ?: continue
-            if (file.isDirectory) {
-                val childPath = if (relPath.isEmpty()) name else "$relPath/$name"
-                scanDir(context, treeUri, file, childPath, ctx)
-            } else {
-                val entry = Entry(
-                    name = name,
-                    path = if (relPath.isEmpty()) name else "$relPath/$name",
-                    uri = file.uri.toString()
-                )
-                synchronized(this) {
-                    allEntries.add(entry)
-                    val lower = name.lowercase()
-                    if (entries[lower] == null) entries[lower] = entry
+            try {
+                val name = file.name ?: continue
+                if (file.isDirectory) {
+                    val childPath = if (relPath.isEmpty()) name else "$relPath/$name"
+                    scanDir(context, treeUri, file, childPath, ctx)
+                } else {
+                    val entry = Entry(
+                        name = name,
+                        path = if (relPath.isEmpty()) name else "$relPath/$name",
+                        uri = file.uri.toString()
+                    )
+                    synchronized(this) {
+                        allEntries.add(entry)
+                        val lower = name.lowercase()
+                        if (entries[lower] == null) entries[lower] = entry
+                    }
+                    fileCountSinceSave++
+                    // 定期保存（增量断点）
+                    if (fileCountSinceSave >= SAVE_INTERVAL) {
+                        fileCountSinceSave = 0
+                        val currentCount = allEntries.size
+                        Logger.i(TAG, "增量扫描进度: 已索引 $currentCount 个文件，保存断点...")
+                        saveToDisk(ctx)
+                        Logger.i(TAG, "断点保存完毕，当前已索引 $currentCount 个文件")
+                    }
                 }
-                fileCountSinceSave++
-                // 定期保存（增量断点）
-                if (fileCountSinceSave >= SAVE_INTERVAL) {
-                    fileCountSinceSave = 0
-                    val currentCount = allEntries.size
-                    Logger.i(TAG, "增量扫描进度: 已索引 $currentCount 个文件，保存断点...")
-                    saveToDisk(ctx)
-                    Logger.i(TAG, "断点保存完毕，当前已索引 $currentCount 个文件")
-                }
+            } catch (e: Exception) {
+                Logger.w(TAG, "扫描文件异常: $relPath - ${e.message}")
             }
         }
 

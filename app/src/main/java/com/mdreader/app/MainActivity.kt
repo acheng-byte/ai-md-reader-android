@@ -160,6 +160,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         }
         AppCompatDelegate.setDefaultNightMode(nightMode)
         super.onCreate(savedInstanceState)
+        Logger.init(this)
         prefs = Prefs(this)
         history = History(this)
         favorites = Favorites(this)
@@ -1584,6 +1585,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
     override fun onPause() {
         super.onPause()
         reading.flush()
+        Logger.saveToDisk()
         // 记录阅读时长：每次 pause 时计算本次会话时长
         recordReadingSession()
     }
