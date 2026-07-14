@@ -132,15 +132,28 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
     private val vaultPicker =
         registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
             if (uri != null) {
+                Logger.i("MainActivity", "vaultPicker: selected URI = ${uri.toString().take(100)}")
                 runCatching {
                     contentResolver.takePersistableUriPermission(
                         uri,
                         Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                     )
+                    Logger.i("MainActivity", "vaultPicker: persistable permission granted")
+                }.onFailure {
+                    Logger.e("MainActivity", "vaultPicker: persistable permission failed: ${it.message}")
                 }
                 prefs.vaultUri = uri.toString()
                 VaultSearch.clearCache()
+                // 验证：尝试列出根目录
+                val root = androidx.documentfile.provider.DocumentFile.fromTreeUri(this, uri)
+                if (root != null) {
+                    Logger.i("MainActivity", "vaultPicker: root=${root.name}, canRead=${root.canRead()}, uri=${uri.toString().take(80)}")
+                } else {
+                    Logger.e("MainActivity", "vaultPicker: fromTreeUri returned NULL!")
+                }
                 Toast.makeText(this, getString(R.string.vault_set), Toast.LENGTH_SHORT).show()
+            } else {
+                Logger.w("MainActivity", "vaultPicker: user cancelled")
             }
         }
 
@@ -159,6 +172,19 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         favorites = Favorites(this)
         reading = ReadingProgress(this)
         annotations = Annotations(this)
+        // 启动时记录 Vault 状态
+        val vaultUriStr = prefs.vaultUri
+        if (vaultUriStr != null) {
+            Logger.i("MainActivity", "onCreate: vaultUri = ${vaultUriStr.take(80)}")
+            val root = androidx.documentfile.provider.DocumentFile.fromTreeUri(this, Uri.parse(vaultUriStr))
+            if (root != null) {
+                Logger.i("MainActivity", "onCreate: root=${root.name}, canRead=${root.canRead()}")
+            } else {
+                Logger.e("MainActivity", "onCreate: fromTreeUri returned NULL — vault URI may be invalid")
+            }
+        } else {
+            Logger.w("MainActivity", "onCreate: vaultUri is NULL — no vault set")
+        }
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         setSupportActionBar(binding.toolbar)
@@ -691,7 +717,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             R.id.action_open, R.id.action_favorites, R.id.action_history,
             R.id.action_add_shortcut,
             R.id.action_settings, R.id.action_reading_stats,
-            R.id.action_annotate
+            R.id.action_annotate, R.id.action_log
         ).forEach { menu.findItem(it)?.isVisible = normalVisible }
         // edit 按钮不再需要（源码模式即可编辑），但保留 toggle 按钮
         menu.findItem(R.id.action_edit)?.isVisible = false
@@ -790,6 +816,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             Toast.makeText(this, R.string.annotate_cleared, Toast.LENGTH_SHORT).show()
             true
         }
+        R.id.action_log -> { showLogViewer(); true }
         else -> super.onOptionsItemSelected(item)
     }
 
@@ -1389,6 +1416,43 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         dialog.show()
     }
 
+    /** 日志查看弹窗：显示最近 500 条日志，支持一键复制 */
+    private fun showLogViewer() {
+        val logText = Logger.getAllText()
+        val scrollView = ScrollView(this).apply {
+            setPadding(48, 32, 48, 16)
+        }
+        val textView = TextView(this).apply {
+            text = if (logText.isEmpty()) "暂无日志" else logText
+            textSize = 11f
+            setPadding(0, 0, 0, 16)
+            setTextIsSelectable(true)
+            typeface = android.graphics.Typeface.MONOSPACE
+        }
+        scrollView.addView(textView)
+
+        val dialog = androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("运行日志 (${Logger.size()} 条)")
+            .setView(scrollView)
+            .setPositiveButton("复制全部") { _, _ ->
+                val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("MDReader Log", logText))
+                Toast.makeText(this, "已复制 ${Logger.size()} 条日志", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("清空") { _, _ ->
+                Logger.clear()
+                Toast.makeText(this, "日志已清空", Toast.LENGTH_SHORT).show()
+            }
+            .setNeutralButton("关闭", null)
+            .create()
+        dialog.show()
+        // 调整对话框大小
+        dialog.window?.setLayout(
+            (resources.displayMetrics.widthPixels * 0.92).toInt(),
+            (resources.displayMetrics.heightPixels * 0.7).toInt()
+        )
+    }
+
     private fun onHistoryEntryClicked(entry: History.Entry, status: DocStatus, dialog: BottomSheetDialog) {
         val fav = favorites.find(entry.uri)
         if (fav != null && favorites.fileOf(fav).exists()) {
@@ -1592,9 +1656,25 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
     }
 
     override fun searchVaultForEmbed(ref: String): String {
-        val vaultUriStr = prefs.vaultUri ?: return ""
+        val vaultUriStr = prefs.vaultUri
+        if (vaultUriStr == null) {
+            Logger.w("MainActivity", "searchVaultForEmbed: vaultUri is NULL, ref='$ref'")
+            return ""
+        }
+        Logger.i("MainActivity", "searchVaultForEmbed: ref='$ref', vaultUri=${vaultUriStr.take(60)}")
+        val searchName = ref.substringBeforeLast('.')
+        Logger.d("MainActivity", "searchVaultForEmbed: searchName='$searchName'")
         return runCatching {
-            VaultSearch.findFile(this, Uri.parse(vaultUriStr), ref.substringBeforeLast('.'))?.uri?.toString() ?: ""
+            val result = VaultSearch.findFile(this, Uri.parse(vaultUriStr), searchName)
+            if (result != null) {
+                Logger.i("MainActivity", "searchVaultForEmbed FOUND: ${result.name}")
+                result.uri.toString()
+            } else {
+                Logger.e("MainActivity", "searchVaultForEmbed NOT FOUND: '$searchName'")
+                ""
+            }
+        }.onFailure {
+            Logger.e("MainActivity", "searchVaultForEmbed ERROR: ${it.message}")
         }.getOrDefault("")
     }
 

@@ -128,4 +128,11 @@
         android:title="@string/annotate_clear"
         android:visible="false"
         app:showAsAction="never" />
+
+    <!-- 日志 -->
+    <item
+        android:id="@+id/action_log"
+        android:icon="@drawable/ic_history"
+        android:title="运行日志"
+        app:showAsAction="never" />
 </menu>
