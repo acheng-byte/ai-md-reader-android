@@ -1,6 +1,6 @@
 # MD阅读器
 
-一款为 AI 时代准备的轻量级手机 Markdown 阅读器。支持 Markdown、TXT、DOC、DOCX、PDF 等多种格式，兼容 Obsidian 语法。
+一款为 AI 时代准备的轻量级手机 Markdown 阅读器。支持 Markdown、TXT、DOC、PDF 等多种格式，兼容 Obsidian 语法。
 
 [![Latest release](https://img.shields.io/github/v/release/acheng-byte/ai-md-reader-android?label=latest)](https://github.com/acheng-byte/ai-md-reader-android/releases/latest)
 [![Android CI](https://github.com/acheng-byte/ai-md-reader-android/actions/workflows/android-ci.yml/badge.svg)](https://github.com/acheng-byte/ai-md-reader-android/actions/workflows/android-ci.yml)
@@ -8,30 +8,11 @@
 
 现在越来越多内容从 AI 对话、代码助手、知识库、会议纪要和自动化工作流里直接产出为 Markdown。电脑上阅读很方便，但手机上常常缺一个足够轻、足够直接、能从微信和文件管理器顺手打开 `.md` 的本地阅读器。**MD阅读器**解决的就是这个小而高频的痛点：把 Markdown 文件在手机上安静、清楚、离线地读起来。
 
-## 最新版本 v2.3.1
+## 最新版本 v2.2.6
 
-v2.3.1 是功能最完善的版本，涵盖 v1.9.0 至 v2.3.1 的完整更新：
-
-- **v2.3.1**：阅读统计系统、工具栏设置按钮、修复授权过期、修复主题切换卡顿、修复 DOC 导出 bug
-- **v2.1.6**：渲染前清除菱形问号（U+FFFD），编码检测阈值优化
-- **v2.1.5**：编码检测逻辑优化 — 比较解码质量避免乱码
-- **v2.1.4**：编码检测增强（UTF-16/GB18030）、换行符统一、特殊字符转义、特殊空格规范化
-- **v2.1.3**：图片单击预览（缩放/拖动/双击关闭）、视频全屏预览、音频播放支持
-- **v2.1.1**：欢迎页更新、搜索栏优化（清除按钮/切换开关/响应式）、字体映射改善
-- **v2.1.0**：全新羽毛笔图标、添加桌面快捷方式、主题同步修复、精简 Mermaid 保存
-- **v2.0.7**：移除 Mermaid 保存为 PNG 功能（保留预览）、清理保存相关代码残留
-- **v2.0.6**：修复工具栏/状态栏颜色不随浅色/深色/护眼主题切换
-- **v2.0.5**：添加文件到桌面快捷方式（ShortcutManager）
-- **v2.0.4**：修复隐藏文件名标题在折叠/展开后重新出现
-- **v2.0.0**：Mermaid 点击预览修复（事件立即绑定）、Mermaid 保存修复（直接存 SVG）、隐藏文件名标题修复（时序+匹配+兜底）
-- **v1.9.8**：修复预览覆盖层黑色背景（改为默认浅色+跟随主题）、修复保存文件名显示数字
-- **v1.9.7**：修复隐藏文件名标题不生效、源码模式光标定位到顶部、引用块样式开关优化（20+ Callout 类型）、支持纯文本代码块
-- **v1.9.5**：点击标题栏查看字符统计、9 种字体、修复图片/表格点击误触、全局防重复点击
-- **v1.9.4**：表格/图表全屏预览 + 双指缩放、源码模式直接编辑 + 自动保存、设置持久化、历史 200 条
-- **v1.9.3**：Mermaid 图表长按下载、长图导出优化（32768px）、设置面板分区
-- **v1.9.2**：隐藏文件名标题、渲染缓存、设置开关
-- **v1.9.1**：全面性能优化（防抖、异步保存、内存缓存）
-- **v1.9.0**：阅读标注、HTML 导出修复、Vault 图片嵌入
+- **v2.2.6**：修复 Vault 斜杠路径查找、外链图片显示、ERR_INVALID_RESPONSE 崩溃、恢复默认设置；资源加载改为 Vault 优先
+- **v2.2.5**：欢迎界面新增作者信息与外链
+- **v2.2.4**：返回键优化（图片预览关闭 + 退出确认）
 
 [下载最新 APK](https://github.com/acheng-byte/ai-md-reader-android/releases/latest) · [查看 GitHub Releases](https://github.com/acheng-byte/ai-md-reader-android/releases)
 
@@ -46,7 +27,7 @@ v2.3.1 是功能最完善的版本，涵盖 v1.9.0 至 v2.3.1 的完整更新：
 
 | 场景 | 能力 |
 | --- | --- |
-| 打开本地文档 | 通过系统文件选择器读取 `.md` / `.markdown` / `.txt` / `.doc` / `.docx` / `.pdf` 文件 |
+| 打开本地文档 | 通过系统文件选择器读取 `.md` / `.markdown` / `.txt` / `.doc` / `.pdf` 文件 |
 | 从其他应用打开 | 支持微信、文件管理器、QQ、邮件等应用的"用其他应用打开"入口 |
 | 源码 / 预览切换 | 同一文件可在原始 Markdown 与渲染预览之间切换 |
 | 代码块复制 | 预览模式下每个代码块右上角提供一键复制 |
@@ -63,17 +44,13 @@ v2.3.1 是功能最完善的版本，涵盖 v1.9.0 至 v2.3.1 的完整更新：
 | 全库搜索 | 在 Vault 文件夹中搜索所有文档（需先设置 Vault） |
 | 转发分享 | 一键把完整文档经系统分享转发到微信等应用 |
 | 桌面快捷方式 | 将当前文档添加为桌面快捷方式，一键直达 |
-| 表格预览下载 | 单击表格全屏预览，支持双指缩放和预览内下载 |
+| 表格预览 | 单击表格全屏预览，支持双指缩放 |
 | 图片预览 | 单击图片全屏预览，双指缩放、单指拖动、双击关闭 |
 | 视频预览 | 单击视频全屏播放，双击关闭 |
 | 音频播放 | 支持 mp3/wav/ogg/m4a/aac/flac/wma 格式内嵌播放 |
 | 源码直接编辑 | 源码模式即可编辑，自动保存 |
 | 字符统计 | 点击标题栏查看总字符、纯文字（去除标点和 Markdown 语法）、总行数、代码字符数 |
 | 阅读标注 | 手指绘画标注，多色多模式 |
-| 编辑模式 | 已合并至源码模式，源码模式下可直接编辑并自动保存 |
-| 导出长图片 | 滚动截图拼接，保存至 `Download/MD阅读器/Picture` |
-| 导出 HTML | 包含完整样式的独立 HTML 文件，保存至 `Download/MD阅读器/HTML` |
-| 导出 DOC | 将渲染内容导出为 .docx 文件，保留标题/加粗/斜体/列表/表格等格式，保存至 `Download/MD阅读器/DOC` |
 | 自动更新 | 启动时自动检查 GitHub Release 更新，也可手动检查 |
 | 离线渲染 | 内置 markdown-it 与 highlight.js，支持常见 Markdown 语法和代码高亮 |
 
@@ -82,19 +59,20 @@ v2.3.1 是功能最完善的版本，涵盖 v1.9.0 至 v2.3.1 的完整更新：
 | 语法 | 说明 |
 | --- | --- |
 | `[[页面]]` | Wikilink 跳转 |
-| `[[目录/文件\|显示名]]` | 路径式 Wikilink |
+| `[[目录/文件\|显示名]]` | 路径式 Wikilink（支持斜杠路径） |
 | `[[#标题]]` | 页内锚点跳转 |
 | `![[图片.png]]` | 嵌入图片（单击预览、双指缩放） |
+| `![[https://...]]` | 外链图片/视频直接显示 |
 | `![[视频.mp4]]` | 嵌入视频（单击全屏播放） |
 | `![[音频.mp3]]` | 嵌入音频（mp3/wav/ogg/m4a/aac/flac/wma） |
 | `![[文档.md]]` | 引用文档内联展开 |
-| `> [!NOTE]` | Callout 标注（支持多种类型） |
+| `> [!NOTE]` | Callout 标注（支持 20+ 种类型） |
 | `==高亮==` | 黄色背景高亮 |
 | `#标签` | 标签胶囊样式 |
 | `%%注释%%` | 注释内容隐藏 |
 | `[^1]` 脚注 | 上标链接 + 文末脚注列表 |
 | YAML Frontmatter | 自动解析为元数据表格 |
-| Mermaid 图表 | 流程图、时序图、饼图等 |
+| Mermaid 图表 | 流程图、时序图、饼图等（单击预览） |
 | 任务列表 `- [ ]` | 可视复选框 |
 
 ## 下载安装
@@ -109,40 +87,13 @@ adb install -r app/build/outputs/apk/release/app-release.apk
 
 ## 版本更新
 
-| 版本 | 类型 | 更新重点 |
-| --- | --- | --- |
-| [v2.3.0](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.3.0) | 最新版本 | 新增导出 DOC、修复长图片拼接、HTML 导出增强 |
-| [v2.1.7](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.1.7) | 稳定版本 | PDF 编辑崩溃修复、TXT 行首数字反斜杠修复 |
-| [v2.1.6](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.1.6) | 编码修复 | 渲染前清除菱形问号，编码检测阈值优化 |
-| [v2.1.5](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.1.5) | 编码修复 | 编码检测优化：比较解码质量避免乱码 |
-| [v2.1.4](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.1.4) | 编码修复 | 编码检测增强、换行符统一、特殊字符转义、特殊空格规范化 |
-| [v2.1.3](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.1.3) | 功能增强 | 图片预览、视频全屏、音频播放 |
-| [v2.1.1](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.1.1) | 功能优化 | 欢迎页更新、搜索栏优化、字体映射改善 |
-| [v2.1.0](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.1.0) | 功能增强 | 全新羽毛笔图标、桌面快捷方式、主题同步、精简 Mermaid |
-| [v2.0.7](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.0.7) | 功能精简 | 移除 Mermaid 保存为 PNG、清理保存代码残留 |
-| [v2.0.6](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.0.6) | Bug 修复 | 工具栏/状态栏颜色跟随主题切换 |
-| [v2.0.5](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.0.5) | 新增功能 | 添加文件到桌面快捷方式 |
-| [v2.0.4](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.0.4) | Bug 修复 | 隐藏文件名标题折叠后重新出现 |
-| [v2.0.0](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.0.0) | 功能增强 | Mermaid 预览修复、保存修复、隐藏标题修复 |
-| [v1.9.7](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v1.9.7) | 功能增强 | 隐藏标题修复、源码光标定位、Callout优化、纯文本代码块 |
-| [v1.9.5](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v1.9.5) | 功能增强 | 字符统计、9字体、误触修复、Mermaid保存修复 |
-| [v1.9.4](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v1.9.4) | 功能增强 | 表格/图表预览下载、源码直接编辑、设置持久化、历史 200 条 |
-| [v1.9.3](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v1.9.3) | 功能增强 | Mermaid 下载、长图导出优化、设置面板分区 |
-| [v1.9.2](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v1.9.2) | 功能增强 | 隐藏文件名标题、渲染缓存、设置开关 |
-| [v1.9.1](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v1.9.1) | 性能优化 | 全面性能优化（防抖/异步/缓存） |
-| [v1.9.0](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v1.9.0) | 功能增强 | 阅读标注、HTML 导出、Vault 嵌入 |
-| [v1.8.0](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v1.8.0) | 功能增强 | 护眼模式、字体切换、PDF 支持、导出长图/HTML、检查更新按钮、PDF 文件关联 |
-| [v1.7.3](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v1.7.3) | Bug 修复 | 修复历史面板双删除 bug、MediaScanner URI 修复 |
-| [v1.7.2](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v1.7.2) | Bug 修复 | DOC 图片过滤、导出 HTML 修复、导出路径优化、编辑 DOC 保护 |
-| [v1.7.1](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v1.7.1) | Bug 修复 | 编译依赖修复、DOC 图片提取、导出长图线程修复、DOCX 表格渲染 |
-| [v1.6.4](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v1.6.4) | 体验优化 | 启动自动恢复上次阅读文档 |
-| [v1.6.3](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v1.6.3) | Bug 修复 | 单换行符、DOCX 标题误识别、TXT 代码块优化 |
-| [v1.6.2](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v1.6.2) | Obsidian 兼容 | 路径式 Wikilink、高亮/标签/注释/脚注等 Obsidian 语法 |
-| [v1.6.0](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v1.6.0) | 多格式支持 | DOCX/TXT 支持、Vault 图片视频、引用展开、全库异步搜索、自动更新 |
-| [v1.4.1](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v1.4.1) | 阅读体验 | 阅读位置记忆、收藏夹修复 |
-| [v1.4](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v1.4) | 分享 | 新增转发分享功能 |
+| 版本 | 更新重点 |
+| --- | --- |
+| [v2.2.6](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.2.6) | Vault 斜杠路径修复、外链图片、崩溃修复、恢复默认、Vault 优先加载 |
+| [v2.2.5](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.2.5) | 欢迎界面新增作者信息与外链 |
+| [v2.2.4](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.2.4) | 返回键优化（图片预览关闭 + 退出确认） |
 
-完整版本记录见 [CHANGELOG.md](CHANGELOG.md)，每版详细说明见 [GitHub Releases](https://github.com/acheng-byte/ai-md-reader-android/releases)。
+更多历史版本见 [GitHub Releases](https://github.com/acheng-byte/ai-md-reader-android/releases)。
 
 ## 使用方式
 
@@ -153,10 +104,9 @@ adb install -r app/build/outputs/apk/release/app-release.apk
 5. 点击屏幕中央区域，调出"显示设置"（字号、行间距、段间距、主题、护眼模式、字体、Vault 文件夹、检查更新）。
 6. 点击搜索图标，在当前文档中搜索关键词；也可切换为全库搜索。
 7. 点击工具栏星形图标"收藏"当前文档；在"更多菜单 ⋮ → 收藏夹 / 打开历史"中管理。
-8. 通过“更多菜单 ⋮ → 导出长图片 / 导出 HTML / 导出 DOC”导出文档。
-9. 下次重新打开同一文档时，会自动回到上次阅读位置。
-10. 源码模式下可直接编辑 Markdown 内容，退出时自动保存，无需单独的编辑模式。
-11. 在微信收到 `.md` 文件时，选择"用其他应用打开"，再选择"MD阅读器"。
+8. 下次重新打开同一文档时，会自动回到上次阅读位置。
+9. 源码模式下可直接编辑 Markdown 内容，退出时自动保存。
+10. 在微信收到 `.md` 文件时，选择"用其他应用打开"，再选择"MD阅读器"。
 
 ## 从源码构建
 
@@ -189,46 +139,6 @@ adb install -r app/build/outputs/apk/release/app-release.apk
 - Mermaid（离线渲染）
 - Apache POI 4.1.2（HWPF for .doc）
 - Android PdfRenderer（PDF 逐页渲染）
-
-项目结构：
-
-```text
-.
-├─ app/
-│  ├─ build.gradle.kts
-│  └─ src/main/
-│     ├─ AndroidManifest.xml
-│     ├─ java/com/mdreader/app/
-│     │   ├─ MainActivity.kt
-│     │   ├─ MarkdownBridge.kt
-│     │   ├─ Prefs.kt
-│     │   ├─ FileUtils.kt
-│     │   ├─ VaultSearch.kt
-│     │   ├─ UpdateChecker.kt
-│     │   ├─ History.kt / HistoryAdapter.kt
-│     │   ├─ Favorites.kt
-│     │   ├─ ReadingProgress.kt
-│     │   ├─ DocStatus.kt
-│     │   └─ AnnotationOverlay.kt
-│     ├─ res/
-│     │  └─ xml/
-│     │     └─ backup_rules.xml
-│     └─ assets/
-│        ├─ viewer.html
-│        ├─ app.js
-│        ├─ app.css
-│        └─ lib/
-├─ ios/
-├─ .github/workflows/
-│  ├─ android-ci.yml
-│  └─ release.yml
-├─ docs/
-│  ├─ MAINTENANCE.md
-│  └─ RELEASE_NOTES_v*.md
-├─ CHANGELOG.md
-├─ LICENSE
-└─ THIRD_PARTY_NOTICES.md
-```
 
 ## 开源协议
 

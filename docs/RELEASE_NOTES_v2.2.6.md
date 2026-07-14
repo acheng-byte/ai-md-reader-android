@@ -2,8 +2,7 @@
 
 ### 崩溃修复
 - 修复 ERR_INVALID_RESPONSE：标准 markdown .md 链接在 Vault 中未找到时不再崩溃
-- `shouldInterceptRequest` 增加 Vault 回退：/assets/ 路径的文件从 Vault 加载
-- 添加 `onReceivedError` 处理防止 WebView 错误页面导致后续崩溃
+- `shouldInterceptRequest` 重写为先查 Vault 再回退 APK 捆绑资源
 - 返回键处理增加 `pageReady` 守卫，防止 WebView 未初始化时崩溃
 - 字数统计增加 `pageReady` 守卫
 
