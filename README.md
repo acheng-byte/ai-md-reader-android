@@ -8,11 +8,11 @@
 
 现在越来越多内容从 AI 对话、代码助手、知识库、会议纪要和自动化工作流里直接产出为 Markdown。电脑上阅读很方便，但手机上常常缺一个足够轻、足够直接、能从微信和文件管理器顺手打开 `.md` 的本地阅读器。**MD阅读器**解决的就是这个小而高频的痛点：把 Markdown 文件在手机上安静、清楚、离线地读起来。
 
-## 最新版本 v2.2.9
+## 最新版本 v2.2.10
 
-- **v2.2.9**：修复 Vault 文件夹含中文时搜索失败的根因（URI 编码规范化）、修复递归列目录在子目录断裂问题、日志缓冲区扩至5000条+中文说明
+- **v2.2.10**：修复 Vault 子文件夹 URI 编码根因（docId 合并为单段）、中文路径搜索现在能正确定位
+- **v2.2.9**：修复 Vault 中文路径搜索失败（URI 编码规范化）、递归列目录断裂修复、日志扩至5000条
 - **v2.2.8**：新增运行日志诊断系统、Vault查找三重回退机制
-- **v2.2.7**：恢复缓存机制+DocumentsContract备用查询+文件名变体匹配
 
 [下载最新 APK](https://github.com/acheng-byte/ai-md-reader-android/releases/latest) · [查看 GitHub Releases](https://github.com/acheng-byte/ai-md-reader-android/releases)
 
