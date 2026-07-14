@@ -15,8 +15,10 @@ object VaultSearch {
     // ---- 缓存 ----
     private val fileCache = HashMap<String, HashMap<String, DocumentFile>>()
     private var cacheVaultUri: String? = null
+    @Volatile
     private var isScanning = false
 
+    @Synchronized
     fun clearCache() {
         fileCache.clear()
         cacheVaultUri = null
@@ -156,11 +158,16 @@ object VaultSearch {
      */
     private fun buildCache(context: Context, vaultUri: Uri): HashMap<String, DocumentFile>? {
         val uriStr = vaultUri.toString()
-        if (cacheVaultUri == uriStr && fileCache[uriStr] != null) {
-            return fileCache[uriStr]!!
+        // 同步读取缓存
+        synchronized(this) {
+            if (cacheVaultUri == uriStr && fileCache[uriStr] != null) {
+                return fileCache[uriStr]!!
+            }
         }
         // 防止多线程重复扫描
-        if (isScanning) return fileCache[uriStr]
+        if (isScanning) {
+            synchronized(this) { return fileCache[uriStr] }
+        }
         isScanning = true
         try {
             Logger.i(TAG, "开始扫描库文件夹...")
@@ -177,8 +184,11 @@ object VaultSearch {
                 Logger.e(TAG, "扫描结果为 0 — 权限可能已过期，请重新选择文件夹")
                 return null
             }
-            fileCache[uriStr] = map
-            cacheVaultUri = uriStr
+            // 同步写入缓存
+            synchronized(this) {
+                fileCache[uriStr] = map
+                cacheVaultUri = uriStr
+            }
             return map
         } finally {
             isScanning = false
@@ -374,16 +384,22 @@ object VaultSearch {
         val fileName = cleanPath.substringAfterLast('/')
         if (fileName.isEmpty()) return null
 
-        val cache = buildCache(context, encoded)
+        // 只查已有缓存，不触发扫描（避免阻塞 WebView 资源加载）
+        val cache = getCachedFiles(encoded)
         if (cache != null) {
             for (name in buildNameCandidates(fileName)) {
                 cache[name]?.let { return it }
             }
         }
 
-        val root = DocumentFile.fromTreeUri(context, encoded) ?: return null
-        findFileInDir(context, encoded, root, cleanPath)?.let { return it }
-        return findInDir(context, encoded, root, fileName)
+        // 缓存未就绪时不回退到慢速目录查找，直接返回 null 让调用方使用 APK 内置资源
+        return null
+    }
+
+    /** 获取已构建的缓存（不触发扫描），如果缓存不存在或正在扫描中返回 null */
+    fun getCachedFiles(vaultUriStr: String): HashMap<String, DocumentFile>? {
+        if (isScanning) return null
+        return fileCache[vaultUriStr]
     }
 
     fun resolveRelativeAsset(context: Context, vaultUri: Uri, currentDocUri: Uri?, relativePath: String): DocumentFile? {

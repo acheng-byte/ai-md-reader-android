@@ -13,6 +13,7 @@ object Logger {
     private const val MAX_ENTRIES = 10000
     private val entries = ArrayDeque<String>(MAX_ENTRIES)
     private val timeFormat = SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault())
+    private var errorCounter = 0
 
     @Synchronized
     fun i(tag: String, msg: String) {
@@ -38,9 +39,11 @@ object Logger {
         val time = timeFormat.format(Date())
         val line = "[$time] $level/$tag: $msg"
         if (entries.size >= MAX_ENTRIES) {
-            entries.removeFirst()
+            val removed = entries.removeFirst()
+            if (removed.contains("/E/")) errorCounter--
         }
         entries.addLast(line)
+        if (level == "E") errorCounter++
         // 同时输出到 Logcat
         when (level) {
             "E" -> android.util.Log.e(tag, msg)
@@ -83,11 +86,12 @@ object Logger {
 
     /** 获取错误数量 */
     @Synchronized
-    fun errorCount(): Int = entries.count { it.contains("/E/") }
+    fun errorCount(): Int = errorCounter
 
     /** 清空日志 */
     @Synchronized
     fun clear() {
         entries.clear()
+        errorCounter = 0
     }
 }

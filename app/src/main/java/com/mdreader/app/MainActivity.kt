@@ -165,14 +165,18 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         favorites = Favorites(this)
         reading = ReadingProgress(this)
         annotations = Annotations(this)
-        // 启动时检查 Vault 状态（仅异常时打日志）
+        // 启动时检查 Vault 状态（后台检查，不阻塞 UI）
         val vaultUriStr = prefs.vaultUri
         if (vaultUriStr != null) {
-            val encoded = VaultSearch.ensureEncoded(Uri.parse(vaultUriStr))
-            val root = androidx.documentfile.provider.DocumentFile.fromTreeUri(this, encoded)
-            if (root == null) {
-                Logger.e("MainActivity", "Vault 根目录无效 — 请重新选择文件夹")
-            }
+            Thread {
+                try {
+                    val encoded = VaultSearch.ensureEncoded(Uri.parse(vaultUriStr))
+                    val root = androidx.documentfile.provider.DocumentFile.fromTreeUri(this, encoded)
+                    if (root == null) {
+                        Logger.e("MainActivity", "Vault 根目录无效 — 请重新选择文件夹")
+                    }
+                } catch (_: Exception) {}
+            }.start()
         }
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
@@ -218,11 +222,14 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         webView.setBackgroundColor(bgColor())
         webView.loadUrl(VIEWER_URL)
 
-        // 后台静默预扫描库文件夹（先文档后图片），不阻塞 UI
-        if (prefs.vaultUri != null) {
+        // 后台静默预扫描库文件夹（延迟 3 秒，等文档加载完再扫描，低优先级不抢 I/O）
+        val vaultUriForScan = prefs.vaultUri
+        if (vaultUriForScan != null) {
             Thread {
+                android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_LOWEST)
+                try { Thread.sleep(3000) } catch (_: InterruptedException) {}
                 try {
-                    val encoded = VaultSearch.ensureEncoded(Uri.parse(prefs.vaultUri!!))
+                    val encoded = VaultSearch.ensureEncoded(Uri.parse(vaultUriForScan))
                     VaultSearch.search(this, encoded, "") // 触发 buildCache
                 } catch (_: Exception) {}
             }.start()
