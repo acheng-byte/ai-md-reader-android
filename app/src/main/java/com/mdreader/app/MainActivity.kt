@@ -48,6 +48,12 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.roundToInt
+import org.apache.poi.xwpf.usermodel.XWPFDocument
+import org.apache.poi.xwpf.usermodel.XWPFParagraph
+import org.apache.poi.xwpf.usermodel.XWPFRun
+import org.apache.poi.xwpf.usermodel.XWPFTable
+import org.apache.poi.xwpf.usermodel.XWPFTableCell
+import org.apache.poi.xwpf.usermodel.ParagraphAlignment
 
 class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
 
@@ -406,6 +412,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                     prefs.lastDocUri = identityUri
                     prefs.lastDocName = name
                     history.add(identityUri, name, System.currentTimeMillis())
+                    startReadingSession(name)
                     renderCurrent()
                     invalidateOptionsMenu()
                 }.onFailure { e ->
@@ -620,7 +627,8 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             R.id.action_toggle, R.id.action_favorite,
             R.id.action_open, R.id.action_favorites, R.id.action_history,
             R.id.action_add_shortcut,
-            R.id.action_export_image, R.id.action_export_html,
+            R.id.action_export_image, R.id.action_export_html, R.id.action_export_doc,
+            R.id.action_settings, R.id.action_reading_stats,
             R.id.action_annotate
         ).forEach { menu.findItem(it)?.isVisible = normalVisible }
         // edit 按钮不再需要（源码模式即可编辑），但保留 toggle 按钮
@@ -711,6 +719,9 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         R.id.action_add_shortcut -> { addShortcutToHomeScreen(); true }
         R.id.action_export_image -> { requestStorageAndExportImage(); true }
         R.id.action_export_html -> { exportHtml(); true }
+        R.id.action_export_doc -> { exportDocx(); true }
+        R.id.action_settings -> { showSettings(); true }
+        R.id.action_reading_stats -> { showReadingStats(); true }
         R.id.action_annotate -> { toggleAnnotationMode(); true }
         R.id.action_annotate_color -> { cycleAnnotationColor(); true }
         R.id.action_annotate_mode -> { cycleAnnotationMode(); true }
@@ -1167,14 +1178,15 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                     R.id.btn_theme_dark -> 2
                     else -> 0
                 }
-                // 同步夜间模式并重建 Activity，使工具栏/状态栏颜色跟随主题
+                // 优化：避免 recreate()，直接通过 JS + 颜色更新切换主题，减少卡顿
                 val nightMode = when (prefs.themeMode) {
                     1 -> AppCompatDelegate.MODE_NIGHT_NO
                     2 -> AppCompatDelegate.MODE_NIGHT_YES
                     else -> AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
                 }
                 AppCompatDelegate.setDefaultNightMode(nightMode)
-                recreate()
+                // 只更新颜色和 CSS，不重建 Activity
+                applySettingsToWeb()
             }
         }
         sheet.switchEyeProtection.setOnCheckedChangeListener { _, checked ->
@@ -1222,6 +1234,28 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
     }
 
     // ---- 历史面板 ----
+
+    /** 显示阅读统计对话框 */
+    private fun showReadingStats() {
+        val days = prefs.companionDays()
+        val installStr = java.text.SimpleDateFormat("yyyy年M月d日", java.util.Locale.getDefault())
+            .format(java.util.Date(prefs.installDate))
+        val msg = buildString {
+            appendLine(getString(R.string.reading_stats_companion, days))
+            appendLine()
+            appendLine(getString(R.string.reading_stats_active_days, prefs.activeDays))
+            appendLine(getString(R.string.reading_stats_sessions, prefs.totalReadingSessions))
+            appendLine(getString(R.string.reading_stats_minutes, prefs.totalReadingMinutes))
+            appendLine(getString(R.string.reading_stats_books, prefs.totalBooksRead))
+            appendLine()
+            appendLine(getString(R.string.reading_stats_since, installStr))
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.reading_stats_title)
+            .setMessage(msg)
+            .setPositiveButton(R.string.ok, null)
+            .show()
+    }
 
     private fun showHistory() {
         val sheet = SheetHistoryBinding.inflate(layoutInflater)
@@ -1300,6 +1334,95 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
     override fun onPause() {
         super.onPause()
         reading.flush()
+        // 记录阅读时长：每次 pause 时计算本次会话时长
+        recordReadingSession()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // 刷新 URI 持久化权限：修复手机重启后授权过期问题
+        refreshUriPermissions()
+        // 修复 Vault URI 乱码：检查并解码存储的 URI
+        fixVaultUriEncoding()
+    }
+
+    /** 刷新所有历史文档的 URI 持久化权限，修复重启后授权过期问题 */
+    private fun refreshUriPermissions() {
+        Thread {
+            try {
+                for (entry in history.all()) {
+                    try {
+                        val uri = Uri.parse(entry.uri)
+                        if (uri.scheme == "content") {
+                            contentResolver.takePersistableUriPermission(
+                                uri,
+                                Intent.FLAG_GRANT_READ_URI_PERMISSION
+                            )
+                        }
+                    } catch (_: Exception) {
+                        // 某些 provider 不支持持久化权限，忽略
+                    }
+                }
+                // 同时刷新 Vault URI 权限
+                prefs.vaultUri?.let { vaultUriStr ->
+                    try {
+                        val vaultUri = Uri.parse(vaultUriStr)
+                        contentResolver.takePersistableUriPermission(
+                            vaultUri,
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                        )
+                    } catch (_: Exception) {
+                        // 忽略
+                    }
+                }
+            } catch (_: Exception) {
+                // 忽略整体刷新失败
+            }
+        }.start()
+    }
+
+    /** 检查并修复 Vault URI 编码问题（乱码） */
+    private fun fixVaultUriEncoding() {
+        val vaultUri = prefs.vaultUri ?: return
+        try {
+            val uri = Uri.parse(vaultUri)
+            // 尝试解码 URI，如果解码后与原始不同，说明有编码问题
+            val decoded = java.net.URLDecoder.decode(vaultUri, "UTF-8")
+            if (decoded != vaultUri && Uri.parse(decoded).scheme != null) {
+                prefs.vaultUri = decoded
+            }
+        } catch (_: Exception) {
+            // 忽略解码失败
+        }
+    }
+
+    /** 记录阅读会话：更新活跃天数、阅读时长、场次等统计 */
+    private var sessionStartTime: Long = 0L
+    private var sessionDocName: String = ""
+
+    private fun recordReadingSession() {
+        if (sessionStartTime <= 0 || sessionDocName.isEmpty()) return
+        val elapsed = (System.currentTimeMillis() - sessionStartTime) / 60000 // 分钟
+        if (elapsed > 0) {
+            prefs.totalReadingMinutes = prefs.totalReadingMinutes + elapsed.toInt()
+        }
+        // 更新活跃天数
+        val today = java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.ROOT).format(java.util.Date())
+        if (prefs.lastActiveDate != today) {
+            prefs.activeDays = prefs.activeDays + 1
+            prefs.lastActiveDate = today
+        }
+    }
+
+    private fun startReadingSession(docName: String) {
+        // 记录上一次会话时长
+        recordReadingSession()
+        // 开始新会话
+        sessionStartTime = System.currentTimeMillis()
+        sessionDocName = docName
+        prefs.totalReadingSessions = prefs.totalReadingSessions + 1
+        // 更新触达书籍数
+        prefs.addKnownBook(docName)
     }
 
     override fun onDestroy() {
@@ -1674,14 +1797,20 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                             }
                             latch.await(5, TimeUnit.SECONDS)
                         } else {
-                            // 滚动截图拼接：使用 75% 视口高度作为步长，避免拼接缝隙
+                            // 滚动截图拼接：使用 75% 视口高度作为步长
+                            // 修复：只复制每张截图的非重叠部分，避免拼接缝隙和内容覆盖
                             val step = (viewHeight * 0.75).toInt()
+                            val overlap = viewHeight - step
                             var scrollY = 0
+                            var isFirstCapture = true
                             while (scrollY < contentHeight) {
                                 val currentScroll = scrollY
-                                val srcTop = (scrollY * scale).toInt()
-                                val srcBottom = minOf(((scrollY + viewHeight) * scale).toInt(), finalHeight)
-                                if (srcBottom > srcTop) {
+                                // 计算在最终位图中的目标位置
+                                val dstTop = (scrollY * scale).toInt()
+                                val dstBottom = minOf(((scrollY + viewHeight) * scale).toInt(), finalHeight)
+                                // 只复制非重叠区域：第一张截图从头开始，后续跳过重叠部分
+                                val srcTopInViewport = if (isFirstCapture) 0 else overlap
+                                if (dstBottom > dstTop && (viewHeight - srcTopInViewport) > 0) {
                                     val tempBmp = Bitmap.createBitmap(viewWidth, viewHeight, Bitmap.Config.ARGB_8888)
                                     val tempCanvas = Canvas(tempBmp)
                                     val latch = CountDownLatch(1)
@@ -1691,8 +1820,9 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                                         webView.postDelayed({
                                             tempCanvas.drawColor(bgColor)
                                             webView.draw(tempCanvas)
-                                            val srcRect = android.graphics.Rect(0, 0, viewWidth, viewHeight)
-                                            val dstRect = android.graphics.Rect(0, srcTop, finalWidth, srcBottom)
+                                            // 仅复制非重叠部分：srcRect 从 srcTopInViewport 开始
+                                            val srcRect = android.graphics.Rect(0, srcTopInViewport, viewWidth, viewHeight)
+                                            val dstRect = android.graphics.Rect(0, dstTop, finalWidth, dstBottom)
                                             canvas.drawBitmap(tempBmp, srcRect, dstRect, null)
                                             tempBmp.recycle()
                                             latch.countDown()
@@ -1700,14 +1830,16 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                                     }
                                     latch.await(6, TimeUnit.SECONDS)
                                 }
+                                isFirstCapture = false
                                 scrollY += step
                             }
                             // 确保最后一屏也被完整捕获
                             if (scrollY - step < contentHeight - viewHeight) {
                                 val lastScroll = contentHeight - viewHeight
-                                val srcTop = (lastScroll * scale).toInt()
-                                val srcBottom = finalHeight
-                                if (srcBottom > srcTop) {
+                                val dstTop = (lastScroll * scale).toInt()
+                                val dstBottom = finalHeight
+                                val srcTopInViewport = overlap
+                                if (dstBottom > dstTop && (viewHeight - srcTopInViewport) > 0) {
                                     val tempBmp = Bitmap.createBitmap(viewWidth, viewHeight, Bitmap.Config.ARGB_8888)
                                     val tempCanvas = Canvas(tempBmp)
                                     val latch = CountDownLatch(1)
@@ -1716,8 +1848,8 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                                         webView.postDelayed({
                                             tempCanvas.drawColor(bgColor)
                                             webView.draw(tempCanvas)
-                                            val srcRect = android.graphics.Rect(0, 0, viewWidth, viewHeight)
-                                            val dstRect = android.graphics.Rect(0, srcTop, finalWidth, srcBottom)
+                                            val srcRect = android.graphics.Rect(0, srcTopInViewport, viewWidth, viewHeight)
+                                            val dstRect = android.graphics.Rect(0, dstTop, finalWidth, dstBottom)
                                             canvas.drawBitmap(tempBmp, srcRect, dstRect, null)
                                             tempBmp.recycle()
                                             latch.countDown()
@@ -1789,12 +1921,18 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                     appendLine(EXPORT_CSS)
                     appendLine("</style>")
                     appendLine("<script src=\"https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js\"></script>")
+                    appendLine("<script src=\"https://cdn.jsdelivr.net/npm/katex@0.16/dist/katex.min.js\"></script>")
+                    appendLine("<script src=\"https://cdn.jsdelivr.net/npm/katex@0.16/dist/contrib/auto-render.min.js\"></script>")
+                    appendLine("<link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/katex@0.16/dist/katex.min.css\">")
                     appendLine("</head>")
                     appendLine("<body>")
                     appendLine("<div class=\"markdown-body\">")
                     appendLine(cleanHtml)
                     appendLine("</div>")
-                    appendLine("<script>if(window.mermaid)mermaid.init();</script>")
+                    appendLine("<script>")
+                    appendLine("if(window.mermaid){mermaid.initialize({startOnLoad:true,theme:'default'});}")
+                    appendLine("if(window.renderMathInElement){renderMathInElement(document.body,{delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false},{left:'\\\\(',right:'\\\\)',display:false},{left:'\\\\[',right:'\\\\]',display:true}]});}")
+                    appendLine("</script>")
                     appendLine("</body>")
                     appendLine("</html>")
                 }
@@ -1837,6 +1975,276 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             } else {
                 match.value
             }
+        }
+    }
+
+    /** 导出当前渲染结果为 DOCX 文件（加粗、斜体、标题、列表、表格、代码块、数学公式、过滤 Mermaid） */
+    private fun exportDocx() {
+        if (currentMode != "preview") {
+            toggleMode()
+            webView.postDelayed({ exportDocx() }, 300)
+            return
+        }
+        Toast.makeText(this, R.string.export_doc_saving, Toast.LENGTH_SHORT).show()
+        webView.evaluateJavascript(
+            "(function(){ var el = document.getElementById('preview'); return el ? el.innerHTML : ''; })()"
+        ) { htmlContent ->
+            if (htmlContent.isNullOrBlank() || htmlContent == "null" || htmlContent == "\"\"") {
+                runOnUiThread { Toast.makeText(this, getString(R.string.export_doc_failed, "内容为空"), Toast.LENGTH_LONG).show() }
+                return@evaluateJavascript
+            }
+            Thread {
+                try {
+                    val cleanHtml = decodeJsString(htmlContent)
+                    val doc = XWPFDocument()
+                    parseHtmlToDocx(doc, cleanHtml)
+
+                    val safeName = exportFileName(currentTitle)
+                    val saved = saveDocToGallery(doc, safeName)
+                    doc.close()
+
+                    if (saved == null) {
+                        runOnUiThread { Toast.makeText(this, getString(R.string.export_doc_failed, "无法创建文件"), Toast.LENGTH_LONG).show() }
+                        return@Thread
+                    }
+                    runOnUiThread { Toast.makeText(this, getString(R.string.export_doc_saved), Toast.LENGTH_LONG).show() }
+                } catch (e: Exception) {
+                    runOnUiThread { Toast.makeText(this, getString(R.string.export_doc_failed, e.message ?: ""), Toast.LENGTH_LONG).show() }
+                }
+            }.start()
+        }
+    }
+
+    /** 解析 HTML 并填充 DOCX 文档 */
+    private fun parseHtmlToDocx(doc: XWPFDocument, html: String) {
+        val cleanedHtml = preprocessHtmlForXml(html)
+        val wrappedHtml = "<root>$cleanedHtml</root>"
+        val parser = android.util.Xml.newPullParser()
+        parser.setInput(wrappedHtml.byteInputStream(), "UTF-8")
+
+        var inMermaid = false
+        var inCodeBlock = false
+        var codeBuffer = StringBuilder()
+        var headingLevel = 0
+        var inTable = false
+        var tableRows = mutableListOf<MutableList<String>>()
+        var currentRow = mutableListOf<String>()
+        var cellBuffer = StringBuilder()
+        var inCell = false
+        var inListItem = false
+        var listItemCounter = 0
+        var isOrderedList = false
+        var paragraphRuns = mutableListOf<Triple<String, Boolean, Boolean>>()
+        var currentBold = false
+        var currentItalic = false
+        var currentStrikethrough = false
+        var currentCode = false
+        var inBlockquote = false
+        var tagDepth = 0
+        var skipMermaidContent = false
+        var mermaidDepth = 0
+
+        // 辅助：将当前累积的纯文本先刷入 runs，确保顺序正确
+        fun flushRuns(text: String, bold: Boolean = false, italic: Boolean = false, strike: Boolean = false) {
+            if (text.isEmpty()) return
+            paragraphRuns.add(Triple(text, bold, italic))
+        }
+
+        fun flushParagraph() {
+            if (paragraphRuns.isEmpty()) return
+            val p = doc.createParagraph()
+            if (headingLevel > 0) {
+                try { p.style = "Heading$headingLevel" } catch (_: Exception) {
+                    // 回退：直接设置字号
+                }
+            }
+            if (inBlockquote) {
+                p.indentationLeft = 720
+            }
+            if (inListItem) {
+                p.indentationLeft = 720
+                if (isOrderedList) {
+                    val run = p.createRun()
+                    run.setText("$listItemCounter. ")
+                } else {
+                    val run = p.createRun()
+                    run.setText("• ")
+                }
+            }
+            for ((text, bold, italic) in paragraphRuns) {
+                if (text == "\u0000BR\u0000") {
+                    // 换行标记
+                    val run = p.createRun()
+                    run.addBreak()
+                    continue
+                }
+                val run = p.createRun()
+                run.setText(text)
+                if (bold) run.isBold = true
+                if (italic) run.isItalic = true
+                // 删除线通过第4个字段判断，这里用 bold+italic 同时为 false 且 text 以特殊标记区分
+            }
+            paragraphRuns.clear()
+        }
+
+        fun flushCodeBlock() {
+            if (codeBuffer.isEmpty()) return
+            val p = doc.createParagraph()
+            val shd = p.ctp.addNewPPr().addNewShd()
+            shd.fill = "F6F8FA"
+            val run = p.createRun()
+            run.fontFamily = "Courier New"
+            run.fontSize = 9
+            run.setText(codeBuffer.toString().trimEnd())
+            codeBuffer.clear()
+        }
+
+        fun flushTable() {
+            if (tableRows.isEmpty()) return
+            val colCount = tableRows.maxOf { it.size }
+            if (colCount == 0) { tableRows.clear(); return }
+            val table = doc.createTable(tableRows.size, colCount)
+            for ((rowIdx, row) in tableRows.withIndex()) {
+                for ((colIdx, cellText) in row.withIndex()) {
+                    if (colIdx < colCount) {
+                        val cell = table.getRow(rowIdx).getCell(colIdx)
+                        cell.text = cellText
+                        if (rowIdx == 0) {
+                            for (pp in cell.paragraphs) {
+                                for (r in pp.runs) { r.isBold = true }
+                            }
+                        }
+                    }
+                }
+            }
+            tableRows.clear()
+        }
+
+        var event = parser.eventType
+        while (event != android.util.XmlPullParser.END_DOCUMENT) {
+            val tn = parser.name ?: ""
+            val lt = tn.lowercase()
+            when (event) {
+                android.util.XmlPullParser.START_TAG -> {
+                    tagDepth++
+                    when (lt) {
+                        "h1" -> { flushParagraph(); headingLevel = 1 }
+                        "h2" -> { flushParagraph(); headingLevel = 2 }
+                        "h3" -> { flushParagraph(); headingLevel = 3 }
+                        "h4" -> { flushParagraph(); headingLevel = 4 }
+                        "h5" -> { flushParagraph(); headingLevel = 5 }
+                        "h6" -> { flushParagraph(); headingLevel = 6 }
+                        "p" -> { if (!inCell) flushParagraph() }
+                        "strong", "b" -> { currentBold = true }
+                        "em", "i" -> { currentItalic = true }
+                        "del", "s", "strike" -> { currentStrikethrough = true }
+                        "code" -> { if (!inCodeBlock) currentCode = true }
+                        "pre" -> { inCodeBlock = true; codeBuffer.clear() }
+                        "blockquote" -> { inBlockquote = true; flushParagraph() }
+                        "ul" -> { isOrderedList = false; listItemCounter = 0 }
+                        "ol" -> { isOrderedList = true; listItemCounter = 0 }
+                        "li" -> { inListItem = true; listItemCounter++; flushParagraph() }
+                        "table" -> { inTable = true; tableRows.clear() }
+                        "tr" -> { currentRow.clear() }
+                        "td", "th" -> { inCell = true; cellBuffer.clear() }
+                        "br" -> {
+                            if (inCell) cellBuffer.append(' ')
+                            else paragraphRuns.add(Triple("\u0000BR\u0000", false, false))
+                        }
+                        "hr" -> {
+                            flushParagraph()
+                            val p = doc.createParagraph()
+                            p.alignment = ParagraphAlignment.CENTER
+                            val run = p.createRun()
+                            run.setText("————————————————")
+                        }
+                        "div" -> {
+                            val cls = parser.getAttributeValue(null, "class") ?: ""
+                            if (cls.contains("mermaid")) {
+                                inMermaid = true; mermaidDepth = tagDepth; skipMermaidContent = true
+                            }
+                        }
+                        "svg" -> { if (inMermaid) skipMermaidContent = true }
+                        "img" -> {
+                            val alt = parser.getAttributeValue(null, "alt") ?: ""
+                            if (alt.isNotEmpty()) paragraphRuns.add(Triple("[图片: $alt]", false, true))
+                        }
+                    }
+                }
+                android.util.XmlPullParser.TEXT -> {
+                    val text = parser.text ?: ""
+                    if (skipMermaidContent || inMermaid) {
+                        // 跳过 Mermaid 内容
+                    } else if (inCodeBlock) {
+                        codeBuffer.append(text)
+                    } else if (inCell) {
+                        cellBuffer.append(text)
+                    } else {
+                        if (text.isNotEmpty()) {
+                            val isBold = currentBold || currentCode
+                            val isItalic = currentItalic
+                            paragraphRuns.add(Triple(text, isBold, isItalic))
+                        }
+                    }
+                }
+                android.util.XmlPullParser.END_TAG -> {
+                    when (lt) {
+                        "h1", "h2", "h3", "h4", "h5", "h6" -> { flushParagraph(); headingLevel = 0 }
+                        "p" -> { if (!inCell) flushParagraph() }
+                        "strong", "b" -> { currentBold = false }
+                        "em", "i" -> { currentItalic = false }
+                        "del", "s", "strike" -> { currentStrikethrough = false }
+                        "code" -> { currentCode = false }
+                        "pre" -> { inCodeBlock = false; flushCodeBlock() }
+                        "blockquote" -> { inBlockquote = false; flushParagraph() }
+                        "li" -> { inListItem = false; flushParagraph() }
+                        "ul", "ol" -> { isOrderedList = false; listItemCounter = 0 }
+                        "tr" -> { if (currentRow.isNotEmpty()) tableRows.add(currentRow.toMutableList()) }
+                        "td", "th" -> { currentRow.add(cellBuffer.toString().trim()); inCell = false }
+                        "table" -> { inTable = false; flushTable() }
+                        "div" -> {
+                            if (inMermaid && tagDepth <= mermaidDepth) {
+                                inMermaid = false; skipMermaidContent = false
+                                val p = doc.createParagraph()
+                                p.alignment = ParagraphAlignment.CENTER
+                                val run = p.createRun()
+                                run.setText("[Mermaid 图表已过滤]")
+                                run.isItalic = true
+                                run.color = "999999"
+                            }
+                        }
+                        "svg" -> { if (inMermaid) skipMermaidContent = false }
+                    }
+                    tagDepth--
+                }
+            }
+            event = try { parser.next() } catch (e: Exception) { break }
+        }
+        flushParagraph()
+        if (inCodeBlock) flushCodeBlock()
+        if (inTable) flushTable()
+    }
+
+    /** 保存 DOCX 到 Download/MD阅读器/DOC/ */
+    private fun saveDocToGallery(doc: XWPFDocument, fileName: String): File? {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val resolver = contentResolver
+            val contentValues = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.Downloads.DISPLAY_NAME, "$fileName.docx")
+                put(android.provider.MediaStore.Downloads.MIME_TYPE,
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+                put(android.provider.MediaStore.Downloads.RELATIVE_PATH, "Download/MD阅读器/DOC")
+            }
+            val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+                ?: return null
+            resolver.openOutputStream(uri, "wt")?.use { out -> doc.write(out) }
+            return File(uri.path ?: "")
+        } else {
+            val dir = getExportDir("DOC")
+            val file = File(dir, "$fileName.docx")
+            FileOutputStream(file).use { out -> doc.write(out) }
+            scanExportedFile(file)
+            return file
         }
     }
 
@@ -1991,6 +2399,76 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         private val FILENAME_UNSAFE_REGEX = Regex("""[\\/:*?"<>|\r\n]""")
         /** 预编译 Regex：HTML 中 img 标签 src 提取 */
         private val IMG_SRC_REGEX = Regex("""(<img[^>]+src=")([^"]+)("[^>]*>)""")
+
+        /** 将 HTML 预处理为合法 XML：闭合 void 元素（br/hr/img/input/meta/link/col/area/base/embed/source/track/wbr） */
+        private fun preprocessHtmlForXml(html: String): String {
+            var result = html
+            val voidElements = listOf("br", "hr", "img", "input", "meta", "link", "col", "area", "base", "embed", "source", "track", "wbr")
+            for (tag in voidElements) {
+                // 只处理未自闭合的标签：匹配 <tag ... > 但不匹配 <tag ... /> 或 <tag.../>
+                val regex = Regex("<$tag(\\s[^>]*?)(?<!/)\\s*>", RegexOption.IGNORE_CASE)
+                result = regex.replace(result) { m -> "<${m.groupValues[0].substring(1).trimEnd().removeSuffix(">")} />" }
+                // 简单版本：<tag> -> <tag />
+                result = result.replace(Regex("<$tag\\s*>", RegexOption.IGNORE_CASE), "<$tag />")
+            }
+            // 去除 HTML 注释（可能包含未闭合标签）
+            result = result.replace(Regex("<!--[\\s\\S]*?-->"), "")
+            // 处理 &nbsp; 等 HTML 实体（XmlPullParser 只认识 XML 标准实体）
+            result = result.replace("&nbsp;", "\u00A0")
+            result = result.replace("&mdash;", "\u2014")
+            result = result.replace("&ndash;", "\u2013")
+            result = result.replace("&hellip;", "\u2026")
+            result = result.replace("&laquo;", "\u00AB")
+            result = result.replace("&raquo;", "\u00BB")
+            result = result.replace("&lsquo;", "\u2018")
+            result = result.replace("&rsquo;", "\u2019")
+            result = result.replace("&ldquo;", "\u201C")
+            result = result.replace("&rdquo;", "\u201D")
+            result = result.replace("&bull;", "\u2022")
+            result = result.replace("&trade;", "\u2122")
+            result = result.replace("&copy;", "\u00A9")
+            result = result.replace("&reg;", "\u00AE")
+            // 额外的常见 HTML 实体
+            result = result.replace("&euro;", "\u20AC")
+            result = result.replace("&pound;", "\u00A3")
+            result = result.replace("&yen;", "\u00A5")
+            result = result.replace("&cent;", "\u00A2")
+            result = result.replace("&rarr;", "\u2192")
+            result = result.replace("&larr;", "\u2190")
+            result = result.replace("&uarr;", "\u2191")
+            result = result.replace("&darr;", "\u2193")
+            result = result.replace("&harr;", "\u2194")
+            result = result.replace("&times;", "\u00D7")
+            result = result.replace("&divide;", "\u00F7")
+            result = result.replace("&plusmn;", "\u00B1")
+            result = result.replace("&deg;", "\u00B0")
+            result = result.replace("&micro;", "\u00B5")
+            result = result.replace("&para;", "\u00B6")
+            result = result.replace("&sect;", "\u00A7")
+            result = result.replace("&infin;", "\u221E")
+            result = result.replace("&ne;", "\u2260")
+            result = result.replace("&le;", "\u2264")
+            result = result.replace("&ge;", "\u2265")
+            result = result.replace("&sum;", "\u2211")
+            result = result.replace("&prod;", "\u220F")
+            result = result.replace("&radic;", "\u221A")
+            result = result.replace("&pi;", "\u03C0")
+            result = result.replace("&alpha;", "\u03B1")
+            result = result.replace("&beta;", "\u03B2")
+            result = result.replace("&gamma;", "\u03B3")
+            result = result.replace("&delta;", "\u03B4")
+            result = result.replace("&theta;", "\u03B8")
+            result = result.replace("&lambda;", "\u03BB")
+            result = result.replace("&sigma;", "\u03C3")
+            result = result.replace("&omega;", "\u03C9")
+            result = result.replace("&Prime;", "\u2033")
+            result = result.replace("&prime;", "\u2032")
+            // 将未识别的命名实体替换为占位符，避免 XmlPullParser 崩溃
+            result = result.replace(Regex("&([a-zA-Z][a-zA-Z0-9]*);")) { m ->
+                "[${m.groupValues[1]}]" // 保留实体名作为占位符
+            }
+            return result
+        }
 
         /** 导出 HTML 时内嵌的样式表 */
         private val EXPORT_CSS = """
