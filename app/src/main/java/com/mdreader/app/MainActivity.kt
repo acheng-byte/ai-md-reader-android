@@ -1714,9 +1714,11 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
 
     override fun showCharCount(stats: String) {
         runOnUiThread {
+            val fileName = currentTitle.ifEmpty { getString(R.string.app_name) }
+            val message = "$fileName\n\n$stats"
             AlertDialog.Builder(this)
                 .setTitle(R.string.char_count_title)
-                .setMessage(stats)
+                .setMessage(message)
                 .setPositiveButton(R.string.ok, null)
                 .show()
         }
