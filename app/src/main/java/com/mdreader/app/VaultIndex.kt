@@ -9,15 +9,17 @@ import org.json.JSONObject
 import java.io.File
 
 /**
- * 库文件索引：持久化缓存，避免每次打开都重新扫描。
+ * 库文件索引：持久化缓存 + 增量扫描。
  *
- * 扫描结果存到内部存储 filesDir/vault_index.json，下次启动直接加载。
- * 提供文件名→DocumentFile 的快速查找（大小写不敏感、URL 解码兼容）。
+ * 扫描结果存到内部存储 filesDir/vault_index.json。
+ * 下次启动直接加载（瞬间就绪）。
+ * 扫描过程中每 50 个文件保存一次，中断后下次从断点继续。
  */
 object VaultIndex {
 
     private const val TAG = "VaultIndex"
     private const val CACHE_FILE = "vault_index.json"
+    private const val SAVE_INTERVAL = 50  // 每 N 个文件保存一次
 
     data class Entry(
         val name: String,
@@ -25,11 +27,13 @@ object VaultIndex {
         val uri: String
     )
 
-    private val entries = HashMap<String, Entry>()       // lowercase name → first entry
-    private val allEntries = ArrayList<Entry>()           // 全部条目（用于精确匹配）
+    private val entries = HashMap<String, Entry>()
+    private val allEntries = ArrayList<Entry>()
+    private val scannedDirs = HashSet<String>()   // 已扫描的目录相对路径
     private var indexVaultUri: String? = null
     @Volatile private var scanning = false
     @Volatile private var ready = false
+    private var fileCountSinceSave = 0
 
     fun isScanning(): Boolean = scanning
     fun isReady(): Boolean = ready
@@ -40,16 +44,13 @@ object VaultIndex {
         if (!ready) return null
         val lower = fileName.lowercase()
 
-        // 1. 精确匹配（小写键）
         entries[lower]?.let { return it }
 
-        // 2. URL 解码后匹配
         val decoded = try { java.net.URLDecoder.decode(fileName, "UTF-8") } catch (_: Exception) { null }
         if (decoded != null && decoded != fileName) {
             entries[decoded.lowercase()]?.let { return it }
         }
 
-        // 3. 遍历全部条目做大小写不敏感匹配
         for (e in allEntries) {
             if (e.name.equals(fileName, ignoreCase = true)) return e
             if (decoded != null && e.name.equals(decoded, ignoreCase = true)) return e
@@ -63,13 +64,9 @@ object VaultIndex {
         val normalized = relativePath.replace('\\', '/').trimStart('/')
         val fileName = normalized.substringAfterLast('/')
 
-        // 先按文件名快速查找
         val byName = findByName(fileName) ?: return null
-
-        // 如果是简单文件名（无路径），直接返回
         if (!normalized.contains('/')) return byName
 
-        // 有路径前缀，验证路径匹配
         for (e in allEntries) {
             if (e.name.equals(fileName, ignoreCase = true)) {
                 val entryPath = e.path.replace('\\', '/').trimStart('/')
@@ -79,10 +76,10 @@ object VaultIndex {
                 }
             }
         }
-        return byName  // 路径不匹配时返回文件名匹配的结果
+        return byName
     }
 
-    /** 后台扫描库文件夹，结果持久化到内部存储 */
+    /** 后台扫描库文件夹（增量：跳过已扫描目录，定期保存） */
     fun scanInBackground(context: Context, vaultUri: Uri, onDone: (() -> Unit)? = null) {
         if (scanning) return
         Thread {
@@ -92,24 +89,20 @@ object VaultIndex {
                 val encoded = VaultSearch.ensureEncoded(vaultUri)
                 val uriStr = encoded.toString()
                 Logger.i(TAG, "开始索引库文件夹...")
-                val list = ArrayList<Entry>()
-                val map = HashMap<String, Entry>()
+
                 val root = DocumentFile.fromTreeUri(context, encoded)
                 if (root != null) {
-                    scanDir(context, encoded, root, "", list, map)
+                    scanDir(context, encoded, root, "", context)
                 }
-                // 写入内存
+
+                // 扫描完成，标记就绪
                 synchronized(this) {
-                    allEntries.clear()
-                    allEntries.addAll(list)
-                    entries.clear()
-                    entries.putAll(map)
                     indexVaultUri = uriStr
                     ready = true
                 }
-                // 持久化到磁盘
-                saveToDisk(context, list)
-                Logger.i(TAG, "索引完成: ${list.size} 个文件")
+                // 最终保存
+                saveToDisk(context)
+                Logger.i(TAG, "索引完成: ${allEntries.size} 个文件")
             } catch (e: Exception) {
                 Logger.e(TAG, "索引失败: ${e.message}")
             } finally {
@@ -119,7 +112,7 @@ object VaultIndex {
         }.start()
     }
 
-    /** 从磁盘加载缓存索引 */
+    /** 从磁盘加载缓存索引（含增量扫描断点） */
     fun loadFromDisk(context: Context, vaultUri: Uri): Boolean {
         val uriStr = VaultSearch.ensureEncoded(vaultUri).toString()
         val file = File(context.filesDir, CACHE_FILE)
@@ -132,6 +125,7 @@ object VaultIndex {
                 Logger.i(TAG, "库 URI 已变更，忽略旧索引")
                 return false
             }
+
             val arr = obj.getJSONArray("files")
             val list = ArrayList<Entry>()
             val map = HashMap<String, Entry>()
@@ -146,15 +140,28 @@ object VaultIndex {
                 val lower = entry.name.lowercase()
                 if (map[lower] == null) map[lower] = entry
             }
+
+            // 加载已扫描目录（增量断点）
+            val dirsArr = obj.optJSONArray("scannedDirs")
+            val dirs = HashSet<String>()
+            if (dirsArr != null) {
+                for (i in 0 until dirsArr.length()) {
+                    dirs.add(dirsArr.getString(i))
+                }
+            }
+
             synchronized(this) {
                 allEntries.clear()
                 allEntries.addAll(list)
                 entries.clear()
                 entries.putAll(map)
+                scannedDirs.clear()
+                scannedDirs.addAll(dirs)
                 indexVaultUri = uriStr
                 ready = true
             }
-            Logger.i(TAG, "从磁盘加载索引: ${list.size} 个文件")
+            context_filesDir_ref = context.filesDir
+            Logger.i(TAG, "从磁盘加载索引: ${list.size} 个文件, ${dirs.size} 个已扫描目录")
             true
         } catch (e: Exception) {
             Logger.e(TAG, "加载索引失败: ${e.message}")
@@ -167,8 +174,10 @@ object VaultIndex {
         synchronized(this) {
             allEntries.clear()
             entries.clear()
+            scannedDirs.clear()
             indexVaultUri = null
             ready = false
+            fileCountSinceSave = 0
         }
         runCatching { File(context_filesDir_ref, CACHE_FILE).delete() }
         Logger.i(TAG, "索引已清除")
@@ -179,33 +188,51 @@ object VaultIndex {
     private var context_filesDir_ref: File? = null
 
     private fun scanDir(context: Context, treeUri: Uri, dir: DocumentFile, relPath: String,
-                        list: ArrayList<Entry>, map: HashMap<String, Entry>) {
+                        ctx: Context) {
+        // 增量：跳过已扫描的目录
+        if (relPath.isNotEmpty() && scannedDirs.contains(relPath)) return
+
         val children = listDir(context, treeUri, dir)
-        if (children.isEmpty()) return
+        if (children.isEmpty()) {
+            if (relPath.isNotEmpty()) scannedDirs.add(relPath)
+            return
+        }
+
         for (file in children) {
             val name = file.name ?: continue
             if (file.isDirectory) {
                 val childPath = if (relPath.isEmpty()) name else "$relPath/$name"
-                scanDir(context, treeUri, file, childPath, list, map)
+                scanDir(context, treeUri, file, childPath, ctx)
             } else {
                 val entry = Entry(
                     name = name,
                     path = if (relPath.isEmpty()) name else "$relPath/$name",
                     uri = file.uri.toString()
                 )
-                list.add(entry)
-                val lower = name.lowercase()
-                if (map[lower] == null) map[lower] = entry
+                synchronized(this) {
+                    allEntries.add(entry)
+                    val lower = name.lowercase()
+                    if (entries[lower] == null) entries[lower] = entry
+                }
+                fileCountSinceSave++
+                // 定期保存（增量断点）
+                if (fileCountSinceSave >= SAVE_INTERVAL) {
+                    fileCountSinceSave = 0
+                    saveToDisk(ctx)
+                }
             }
+        }
+
+        // 目录扫描完毕，记录断点
+        if (relPath.isNotEmpty()) {
+            scannedDirs.add(relPath)
         }
     }
 
     private fun listDir(context: Context, treeUri: Uri, dir: DocumentFile): List<DocumentFile> {
-        // 方式1: DocumentFile.listFiles()
         val dfList = runCatching { dir.listFiles() }.getOrNull()
         if (!dfList.isNullOrEmpty()) return dfList.toList()
 
-        // 方式2: DocumentsContract 回退
         val docId = extractDocId(dir.uri)
         if (docId != null && docId.isNotBlank()) {
             val results = runCatching {
@@ -246,21 +273,32 @@ object VaultIndex {
         return null
     }
 
-    private fun saveToDisk(context: Context, list: ArrayList<Entry>) {
+    private fun saveToDisk(context: Context) {
         context_filesDir_ref = context.filesDir
         val file = File(context.filesDir, CACHE_FILE)
-        return try {
+        try {
             val arr = JSONArray()
-            for (e in list) {
+            val currentEntries: List<Entry>
+            val currentDirs: Set<String>
+            synchronized(this) {
+                currentEntries = ArrayList(allEntries)
+                currentDirs = HashSet(scannedDirs)
+            }
+            for (e in currentEntries) {
                 arr.put(JSONObject().apply {
                     put("name", e.name)
                     put("path", e.path)
                     put("uri", e.uri)
                 })
             }
+            val dirsArr = JSONArray()
+            for (d in currentDirs) {
+                dirsArr.put(d)
+            }
             val obj = JSONObject().apply {
                 put("vaultUri", indexVaultUri ?: "")
                 put("files", arr)
+                put("scannedDirs", dirsArr)
             }
             file.writeText(obj.toString())
         } catch (e: Exception) {

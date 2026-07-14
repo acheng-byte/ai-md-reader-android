@@ -165,7 +165,8 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         favorites = Favorites(this)
         reading = ReadingProgress(this)
         annotations = Annotations(this)
-        // 启动时检查 Vault 状态 + 加载文件索引（后台，不阻塞 UI）
+        // 启动时仅检查 Vault 根目录有效性（后台，不阻塞 UI）
+        // 文件索引加载移到文档打开后延迟 3 秒执行，确保文档先渲染
         val vaultUriStr = prefs.vaultUri
         if (vaultUriStr != null) {
             Thread {
@@ -174,10 +175,6 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                     val root = androidx.documentfile.provider.DocumentFile.fromTreeUri(this, encoded)
                     if (root == null) {
                         Logger.e("MainActivity", "Vault 根目录无效 — 请重新选择文件夹")
-                    }
-                    // 加载持久化索引（磁盘缓存命中则瞬间就绪，否则后台扫描）
-                    if (!VaultIndex.loadFromDisk(this, encoded)) {
-                        VaultIndex.scanInBackground(this, encoded)
                     }
                 } catch (_: Exception) {}
             }.start()
@@ -225,6 +222,22 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         }
         webView.setBackgroundColor(bgColor())
         webView.loadUrl(VIEWER_URL)
+
+        // 文档加载后延迟 3 秒再启动库索引（确保文档先渲染，不抢 I/O）
+        val vaultUriForIndex = prefs.vaultUri
+        if (vaultUriForIndex != null) {
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                Thread {
+                    try {
+                        val encoded = VaultSearch.ensureEncoded(Uri.parse(vaultUriForIndex))
+                        // 先尝试从磁盘加载缓存（瞬间），失败则后台扫描
+                        if (!VaultIndex.loadFromDisk(this, encoded)) {
+                            VaultIndex.scanInBackground(this, encoded)
+                        }
+                    } catch (_: Exception) {}
+                }.start()
+            }, 3000)
+        }
 
         // Back press: 图片预览关闭 / 源码模式放弃确认 / 预览模式退出确认
         backCallback = object : OnBackPressedCallback(true) {
