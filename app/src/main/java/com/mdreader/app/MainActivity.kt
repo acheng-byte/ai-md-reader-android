@@ -1443,30 +1443,54 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         dialog.show()
     }
 
-    /** 日志查看弹窗：倒序显示，默认仅警告/错误，支持切换全部 */
+    /** 日志查看弹窗：倒序显示，默认仅警告/错误，支持切换全部。使用 RecyclerView 高效渲染 5000+ 条 */
     private fun showLogViewer() {
         var showAll = false
-        val scrollView = android.widget.ScrollView(this).apply { setPadding(32, 16, 32, 8) }
-        val textView = android.widget.TextView(this).apply {
-            textSize = 10f
-            setPadding(0, 0, 0, 16)
-            setTextIsSelectable(true)
-            typeface = android.graphics.Typeface.MONOSPACE
-        }
-        scrollView.addView(textView)
+        val logEntries = mutableListOf<String>()
+        logEntries.addAll(Logger.getSummaryEntries())
 
-        fun refreshText() {
-            val text = if (showAll) Logger.getAllText() else Logger.getSummaryText()
-            textView.text = text.ifEmpty { "暂无日志" }
+        val rvAdapter = object : androidx.recyclerview.widget.RecyclerView.Adapter<androidx.recyclerview.widget.RecyclerView.ViewHolder>() {
+            override fun onCreateViewHolder(parent: android.view.ViewGroup, viewType: Int): androidx.recyclerview.widget.RecyclerView.ViewHolder {
+                val tv = android.widget.TextView(parent.context).apply {
+                    textSize = 10f
+                    typeface = android.graphics.Typeface.MONOSPACE
+                    setPadding(0, 4, 0, 4)
+                    setTextIsSelectable(true)
+                }
+                return object : androidx.recyclerview.widget.RecyclerView.ViewHolder(tv) {}
+            }
+            override fun onBindViewHolder(holder: androidx.recyclerview.widget.RecyclerView.ViewHolder, position: Int) {
+                (holder.itemView as android.widget.TextView).text = logEntries.getOrElse(position) { "" }
+            }
+            override fun getItemCount(): Int = logEntries.size
         }
-        refreshText()
+
+        val ctx = this@MainActivity
+        val recyclerView = androidx.recyclerview.widget.RecyclerView(ctx).apply {
+            layoutManager = LinearLayoutManager(ctx)
+            setPadding(32, 16, 32, 8)
+            isVerticalScrollBarEnabled = true
+            adapter = rvAdapter
+        }
+
+        fun refreshEntries() {
+            logEntries.clear()
+            logEntries.addAll(if (showAll) Logger.getAllEntries() else Logger.getSummaryEntries())
+            rvAdapter.notifyDataSetChanged()
+            if (logEntries.isEmpty()) {
+                // 空状态提示
+                logEntries.add("暂无日志")
+                rvAdapter.notifyDataSetChanged()
+            }
+        }
+        refreshEntries()
 
         val errCount = Logger.errorCount()
         val titleSuffix = if (errCount > 0) " (${Logger.size()} 条, $errCount 个错误)" else " (${Logger.size()} 条)"
 
         val dialog = androidx.appcompat.app.AlertDialog.Builder(this)
             .setTitle("运行日志$titleSuffix")
-            .setView(scrollView)
+            .setView(recyclerView)
             .setPositiveButton("复制全部") { _: android.content.DialogInterface, _: Int ->
                 val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
                 clipboard.setPrimaryClip(android.content.ClipData.newPlainText("MDReader Log", Logger.getAllText()))
@@ -1474,7 +1498,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             }
             .setNegativeButton("清空") { _: android.content.DialogInterface, _: Int ->
                 Logger.clear()
-                refreshText()
+                refreshEntries()
                 Toast.makeText(this, "日志已清空", Toast.LENGTH_SHORT).show()
             }
             .setNeutralButton("全部", null) // null listener 防止自动关闭
@@ -1485,8 +1509,8 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             btn.setOnClickListener {
                 showAll = !showAll
                 btn.text = if (showAll) "仅错误" else "全部"
-                refreshText()
-                scrollView.fullScroll(android.view.View.FOCUS_UP)
+                refreshEntries()
+                recyclerView.scrollToPosition(0)
             }
         }
 

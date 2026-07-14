@@ -5,12 +5,12 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * 轻量日志系统：环状缓冲区，保留最近 5000 条。
+ * 轻量日志系统：环状缓冲区，保留最近 10000 条。
  * 用于诊断 Vault 文件查找等问题。
  */
 object Logger {
 
-    private const val MAX_ENTRIES = 5000
+    private const val MAX_ENTRIES = 10000
     private val entries = ArrayDeque<String>(MAX_ENTRIES)
     private val timeFormat = SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault())
 
@@ -62,6 +62,19 @@ object Logger {
     @Synchronized
     fun getAllText(): String {
         return entries.asReversed().joinToString("\n")
+    }
+
+    /** 获取所有日志条目列表（倒序，最新在前），用于 RecyclerView 显示。 */
+    @Synchronized
+    fun getAllEntries(): List<String> {
+        return entries.asReversed().toList()
+    }
+
+    /** 获取摘要条目列表（倒序，仅 W/E），用于 RecyclerView 显示。 */
+    @Synchronized
+    fun getSummaryEntries(): List<String> {
+        return entries.asReversed()
+            .filter { it.contains("/W/") || it.contains("/E/") }
     }
 
     /** 获取条目数 */
