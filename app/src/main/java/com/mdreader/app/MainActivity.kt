@@ -316,7 +316,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
 
                     // 先查 Vault（用户文件优先）
                     val vaultUriStr = prefs.vaultUri
-                    if (vaultUriStr != null && relativePath.isNotEmpty()) {
+                    if (vaultUriStr != null && VaultIndex.isReady() && relativePath.isNotEmpty()) {
                         val vaultUri = VaultSearch.ensureEncoded(Uri.parse(vaultUriStr))
                         val curDocUri = runCatching { currentDocumentUri }.getOrNull()
                         val found = runCatching {
@@ -405,7 +405,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             val mime = guessMime(filename)
 
             val vaultUriStr = prefs.vaultUri
-            if (vaultUriStr != null) {
+            if (vaultUriStr != null && VaultIndex.isReady()) {
                 val vaultUri = VaultSearch.ensureEncoded(Uri.parse(vaultUriStr))
 
                 // 用缓存快速查找（全库文件名匹配 + 路径导航）

@@ -274,9 +274,11 @@ object VaultSearch {
     // ---- 资源文件查找 ----
 
     fun findAssetInVault(context: Context, vaultUri: Uri, relativePath: String): DocumentFile? {
-        val encoded = ensureEncoded(vaultUri)
         val cleanPath = relativePath.replace('\\', '/').trimStart('/')
         if (cleanPath.isEmpty()) return null
+
+        // 索引未就绪 → 直接返回，绝不做 SAF 调用阻塞 WebView IO 线程（否则白屏）
+        if (!VaultIndex.isReady()) return null
 
         // 1. 优先查持久化索引（HashMap 瞬间命中，无 SAF 调用）
         val indexEntry = VaultIndex.findByPath(cleanPath)
@@ -287,7 +289,8 @@ object VaultSearch {
             }
         }
 
-        // 2. 索引未就绪或未命中 → 定向路径导航（大小写不敏感）
+        // 2. 索引已就绪但未命中 → 定向路径导航（大小写不敏感，单步 listDir）
+        val encoded = ensureEncoded(vaultUri)
         val root = DocumentFile.fromTreeUri(context, encoded) ?: return null
         val parts = cleanPath.split('/').filter { it.isNotEmpty() }
 
@@ -303,7 +306,7 @@ object VaultSearch {
         }
         current?.takeIf { it.isFile }?.let { return it }
 
-        // 3. 路径导航未命中 → 对简单文件名做递归搜索（最后手段）
+        // 3. 路径导航未命中 → 对简单文件名做递归搜索（最后手段，索引已就绪时才会执行）
         if (!cleanPath.contains('/')) {
             return findInDir(context, encoded, root, cleanPath)
         }
@@ -311,6 +314,8 @@ object VaultSearch {
     }
 
     fun resolveRelativeAsset(context: Context, vaultUri: Uri, currentDocUri: Uri?, relativePath: String): DocumentFile? {
+        // 索引未就绪 → 不做 SAF 调用，避免阻塞 WebView IO 线程
+        if (!VaultIndex.isReady()) return null
         val encoded = ensureEncoded(vaultUri)
         val root = DocumentFile.fromTreeUri(context, encoded) ?: return null
         if (currentDocUri != null) {

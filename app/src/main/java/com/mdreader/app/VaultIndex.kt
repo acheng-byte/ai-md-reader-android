@@ -86,8 +86,8 @@ object VaultIndex {
             android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_LOWEST)
             scanning = true
             try {
+                val uriStr = vaultUri.toString()
                 val encoded = VaultSearch.ensureEncoded(vaultUri)
-                val uriStr = encoded.toString()
                 Logger.i(TAG, "开始索引库文件夹...")
 
                 val root = DocumentFile.fromTreeUri(context, encoded)
@@ -114,7 +114,7 @@ object VaultIndex {
 
     /** 从磁盘加载缓存索引（含增量扫描断点） */
     fun loadFromDisk(context: Context, vaultUri: Uri): Boolean {
-        val uriStr = VaultSearch.ensureEncoded(vaultUri).toString()
+        val uriStr = vaultUri.toString()
         val file = File(context.filesDir, CACHE_FILE)
         if (!file.exists()) return false
         return try {
@@ -218,6 +218,8 @@ object VaultIndex {
                 // 定期保存（增量断点）
                 if (fileCountSinceSave >= SAVE_INTERVAL) {
                     fileCountSinceSave = 0
+                    val currentCount = allEntries.size
+                    Logger.i(TAG, "增量扫描进度: 已索引 $currentCount 个文件，保存断点...")
                     saveToDisk(ctx)
                 }
             }
