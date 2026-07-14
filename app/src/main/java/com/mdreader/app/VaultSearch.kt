@@ -385,7 +385,7 @@ object VaultSearch {
         if (fileName.isEmpty()) return null
 
         // 只查已有缓存，不触发扫描（避免阻塞 WebView 资源加载）
-        val cache = getCachedFiles(encoded)
+        val cache = getCachedFiles(encoded.toString())
         if (cache != null) {
             for (name in buildNameCandidates(fileName)) {
                 cache[name]?.let { return it }
