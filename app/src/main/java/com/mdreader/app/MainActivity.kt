@@ -253,10 +253,10 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
     }
 
     private fun setupWebView() {
-        // /vault/ 路径专用处理器
-        val vaultPathHandler = VaultPathHandler()
-        // /assets/ 路径走 APK 捆绑资源（viewer.html / app.js / 第三方库等）
-        val assetsPathHandler = WebViewAssetLoader.AssetsPathHandler(this)
+        val assetLoader = WebViewAssetLoader.Builder()
+            .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(this))
+            .addPathHandler("/vault/", VaultPathHandler())
+            .build()
 
         webView.webViewClient = object : WebViewClientCompat() {
             override fun shouldInterceptRequest(
@@ -270,7 +270,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
 
                 // /vault/ 路径 → 直接从 Vault 加载
                 if (path.startsWith("vault/")) {
-                    return vaultPathHandler.handle(path.removePrefix("vault/"))
+                    return assetLoader.shouldInterceptRequest(url)
                 }
 
                 // /assets/ 路径 → 先查 Vault，找不到再回退 APK 捆绑资源
@@ -293,10 +293,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                     }
 
                     // 回退：APK 捆绑资源（viewer.html / app.js / 第三方库等）
-                    val fakeUrl = "https://$ASSET_HOST/assets/$relativePath"
-                    return assetsPathHandler.handle(
-                        Uri.parse(fakeUrl).path?.trimStart('/') ?: relativePath
-                    )
+                    return assetLoader.shouldInterceptRequest(url)
                 }
 
                 return null
@@ -1862,73 +1859,206 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         private val WELCOME_MD = """
 # 欢迎使用 MD 阅读器
 
-一款轻量级本地 Markdown 阅读器，支持多种文档格式与 Obsidian 兼容语法。离线可用，专注阅读。
+这是一个功能丰富的本地 **Markdown 阅读器**，支持多种文档格式与 Obsidian 兼容语法。
 
-## 关于作者
+## 👨‍💻 关于作者
 
 你好，我是 **阿成**，一个酷爱 AI 编程的创作者。
 
-如果你喜欢这款应用，欢迎到仓库点个 Star，你的支持是我最大的动力！
+本项目是我经历一星期的持续迭代打磨而成，从文档解析到阅读体验，每一个细节都力求做到最好。
 
-- 项目仓库：[github.com/acheng-byte/ai-md-reader-android](https://github.com/acheng-byte/ai-md-reader-android)
-- 个人主页：[github.com/acheng-byte](https://github.com/acheng-byte)
+如果你喜欢这款应用，欢迎到我的仓库点个免费的 Star ⭐，你的支持是我最大的动力！
+
+- 📦 **项目仓库**：[github.com/acheng-byte/ai-md-reader-android](https://github.com/acheng-byte/ai-md-reader-android)
+- 👤 **个人主页**：[github.com/acheng-byte](https://github.com/acheng-byte)
 
 ## 快速上手
 
 - 点击 **目录** 唤出大纲，点击标题快速跳转
-- 点击 **搜索** 打开搜索栏，输入关键词搜索当前文档或全库
-- 点击 **源码/预览** 切换呈现方式；预览模式点击标题可折叠/展开
-- **点击屏幕中央** 调出「显示设置」（字号、行距、段距、主题、字体等）
-- 设置 **Vault 文件夹** 后，可使用 `[[wikilink]]` 导航与全库搜索
-- 重新打开同一文档自动回到上次阅读位置（断点续读）
+- 点击 **搜索** 打开搜索栏（再次点击关闭），输入关键词搜索，支持全库搜索切换
+- 点击 **源码 / 预览** 切换呈现方式；预览模式点击标题可折叠/展开
+- **点击屏幕中央** 调出「显示设置」
+- 在设置中选择 **Vault 文件夹** 后，可使用 `[[wikilink]]` 导航与全库搜索
+- 重新打开同一文档时，会自动回到上次阅读位置（断点续读）
+- 启动时自动弹出打开历史，快速继续阅读
 - 点击右上角 **⋮** 菜单：转发分享、收藏、添加桌面快捷方式等
+- 设置中可手动 **检查更新**，下载最新版本
 
-## 支持的功能
+## 支持的 Markdown 语法
 
-**文档格式**：`.md` `.markdown` `.txt`（UTF-8/GBK 自动识别）`.doc`（Word 97-2003）`.pdf`（逐页渲染）
+### 标题
 
-**标准 Markdown**：标题（H1-H6，可折叠）、有序/无序/任务列表、表格、代码块（100+ 语言高亮，一键复制）、引用块、链接、图片、分隔线、粗体/斜体/删除线/行内代码
+# 一级标题
+## 二级标题
+### 三级标题
 
-**Obsidian 兼容语法**：
+支持 H1 ~ H6 六级标题，预览模式下点击标题可 **折叠/展开** 下方内容。
 
-- `[[页面]]` `[[目录/文件|显示名]]` `[[#标题]]` — Wikilink 导航（支持斜杠路径）
-- `![[图片.png]]` — 嵌入图片（单击预览、双指缩放）
-- `![[https://...]]` — 外链图片/视频直接显示
-- `![[视频.mp4]]` `![[音频.mp3]]` — 嵌入视频/音频播放
-- `![[文档.md]]` — 引用文档内联展开
-- `> [!NOTE]` — Callout 标注（20+ 种类型）
-- `==高亮==` `#标签` `%%注释%%` `[^1]` 脚注 — Obsidian 扩展语法
-- YAML Frontmatter — 自动解析为元数据表格（可开关）
-- Mermaid 图表 — 流程图、时序图、饼图等（单击全屏预览）
+### 列表
 
-**阅读体验**：
+无序列表：
 
-- 9 种字体可选（默认/宋体/等宽/黑体/楷体/仿宋/小标宋/隶书/微软雅黑）
-- 字号/行间距/段间距实时调节
-- 护眼模式（暖色背景）、明暗主题（跟随系统/浅色/深色）
-- 表格/图表单击全屏预览、双指缩放
-- 图片全屏预览（双指缩放、单指拖动、双击关闭）
-- 视频全屏播放、音频内嵌播放
-- 阅读标注（手指绘画，多色多模式）
-- 字符统计（总字符/纯文字/行数/代码字符）
+- 苹果
+- 香蕉
+- 橘子
 
-**文件管理**：
+有序列表：
 
-- 从微信/QQ/文件管理器等应用直接打开
-- 收藏夹（复制文档到应用目录，原文件删除后仍可打开）
-- 打开历史（最近 200 条）
-- 文内搜索 / 全库搜索
-- 桌面快捷方式
-- 转发分享
-- 自动检查更新
+1. 第一步
+2. 第二步
+3. 第三步
 
-## 不支持的功能
+任务列表：
 
-- **导出功能**：不支持导出长图片、HTML、DOC（已移除，保持应用轻量）
-- **DOCX 编辑**：仅支持阅读 `.doc` 文件，不支持 `.docx` 格式
-- **在线文档**：纯本地阅读器，不支持在线文档或云同步
-- **数学公式**：不支持 LaTeX 数学公式渲染
-- **富文本编辑**：源码模式可编辑纯文本 Markdown，不提供富文本编辑器
+- [x] 已完成的任务
+- [ ] 未完成的任务
+
+### 表格
+
+| 功能 | 状态 |
+| --- | :---: |
+| Markdown 渲染 | ✅ |
+| 代码高亮 | ✅ |
+
+### 代码块
+
+```kotlin
+fun main() {
+    println("Hello, MD Reader!")
+}
+```
+
+支持 100+ 种编程语言的语法高亮，右上角有 **复制按钮**。支持 `plaintext`/`text` 等纯文本代码块跳过语法高亮。
+
+### 引用块
+
+> 这是一段引用文字
+> 可以多行书写
+
+支持 20+ 种 Callout 类型（NOTE、TIP、WARNING、DANGER、ERROR、SUCCESS、QUESTION、ABSTRACT、BUG、QUOTE、EXAMPLE、TODO、IMPORTANT 等）。
+
+### 链接与图片
+
+[链接文字](https://example.com)
+![图片描述](image.png)
+
+### 分隔线
+
+---
+
+### 行内样式
+
+**粗体** *斜体* ~~删除线~~ `行内代码` ==高亮标记==
+
+## Obsidian 兼容语法
+
+### Wikilinks
+
+[[另一篇笔记]]
+[[目录/子目录/文件|显示名称]]
+[[#某个标题]]
+
+设置 Vault 文件夹后，点击 wikilink 可跳转到对应笔记。
+
+### 嵌入文件
+
+![[图片.png]]
+![[视频.mp4]]
+![[另一篇笔记]]
+
+图片直接显示，视频可播放，其他文档可展开查看内容。
+
+### Callout 标注
+
+> [!NOTE] 提示
+> 这是一条提示信息
+
+> [!WARNING] 注意
+> 这是一条警告信息
+
+> [!TIP] 建议
+> 这是一条建议信息
+
+### ==高亮==
+
+这是 ==高亮== 的文字
+
+### #标签
+
+这是一段带有 #标签 和 #阅读/笔记 的文字
+
+渲染为圆角标签胶囊样式（蓝色），不影响标题层级。
+
+### %%注释%%
+
+这段文字 %%会被隐藏%% 不会显示
+
+### 脚注
+
+这是一段正文[^1]。
+
+[^1]: 这是脚注的内容。
+
+行内渲染为上标链接，文末自动生成脚注列表，支持反向跳回。
+
+### YAML Frontmatter
+
+---
+title: 文档标题
+tags:
+  - 阅读
+  - 笔记
+date: 2024-01-01
+---
+
+自动解析并以表格形式显示在文档顶部，可在设置中开关。
+
+## Mermaid 图表
+
+```mermaid
+graph TD
+    A[开始] --> B{判断}
+    B -->|是| C[执行]
+    B -->|否| D[结束]
+```
+
+支持流程图、时序图、甘特图、饼图、类图等 Mermaid 图表。单击可全屏预览，支持双指缩放。
+
+## 支持的文档格式
+
+| 格式 | 说明 |
+| --- | --- |
+| `.md` / `.markdown` | Markdown 文件 |
+| `.txt` | 纯文本（UTF-8 / GBK 自动识别） |
+| `.docx` | Word 文档（OOXML 格式，含表格渲染） |
+| `.doc` | Word 97-2003 文档（OLE2 格式） |
+| `.pdf` | PDF 文件（逐页渲染为图片，支持缩放翻页） |
+
+## 阅读设置
+
+- **字号**：12px ~ 30px 自由调节
+- **行间距**：1.0 ~ 2.4 倍
+- **段间距**：0 ~ 2.0 倍
+- **主题**：跟随系统 / 浅色 / 深色
+- **护眼模式**：暖色羊皮纸背景，减轻视觉疲劳
+- **字体**：默认 / 宋体 / 等宽 / 黑体 / 楷体 / 仿宋 / 小标宋 / 隶书 / 微软雅黑（九种）
+- **Frontmatter 显示**：可开关元数据表格
+- **引用块样式**：可开关引用块渲染
+- **隐藏文件名标题**：正文中与文件名相同的一级标题自动隐藏
+
+## 特色功能
+
+- **阅读标注**：手指绘画标注，支持 6 种颜色和 4 种模式（自由画笔/荧光笔/圈注/波浪线）
+- **字符统计**：点击标题栏查看总字符、纯文字（去除标点和 Markdown 语法）、总行数、代码字符数
+- **表格预览**：单击表格全屏预览，支持双指缩放和预览内下载
+- **源码直接编辑**：源码模式即可编辑，停止输入 2 秒后自动保存
+- **转发分享**：一键把完整文档经系统分享转发到微信等应用
+- **桌面快捷方式**：将当前文档添加为桌面快捷方式，一键直达
+- **收藏夹**：收藏常用文档，原文件被删除后仍可打开
+- **打开历史**：记录最近 200 条打开文件，支持单条删除
+- **文内搜索**：在当前文档中搜索关键词，高亮显示并逐个定位
+- **全库搜索**：在 Vault 文件夹中搜索所有文档
+- **自动更新**：启动时自动检查 GitHub Release 更新，也可手动检查
 
 ---
 

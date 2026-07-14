@@ -8,11 +8,11 @@
 
 现在越来越多内容从 AI 对话、代码助手、知识库、会议纪要和自动化工作流里直接产出为 Markdown。电脑上阅读很方便，但手机上常常缺一个足够轻、足够直接、能从微信和文件管理器顺手打开 `.md` 的本地阅读器。**MD阅读器**解决的就是这个小而高频的痛点：把 Markdown 文件在手机上安静、清楚、离线地读起来。
 
-## 最新版本 v2.2.6
+## 最新版本 v2.2.7
 
-- **v2.2.6**：修复 Vault 斜杠路径查找、外链图片显示、ERR_INVALID_RESPONSE 崩溃、恢复默认设置；资源加载改为 Vault 优先
+- **v2.2.7**：修复 v2.2.6 资源加载崩溃（恢复 WebViewAssetLoader + Vault 优先查找）、恢复欢迎页面
+- **v2.2.6**：修复 Vault 斜杠路径查找、外链图片显示、ERR_INVALID_RESPONSE 崩溃、恢复默认设置
 - **v2.2.5**：欢迎界面新增作者信息与外链
-- **v2.2.4**：返回键优化（图片预览关闭 + 退出确认）
 
 [下载最新 APK](https://github.com/acheng-byte/ai-md-reader-android/releases/latest) · [查看 GitHub Releases](https://github.com/acheng-byte/ai-md-reader-android/releases)
 
@@ -89,9 +89,9 @@ adb install -r app/build/outputs/apk/release/app-release.apk
 
 | 版本 | 更新重点 |
 | --- | --- |
+| [v2.2.7](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.2.7) | 修复资源加载崩溃、恢复欢迎页面 |
 | [v2.2.6](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.2.6) | Vault 斜杠路径修复、外链图片、崩溃修复、恢复默认、Vault 优先加载 |
 | [v2.2.5](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.2.5) | 欢迎界面新增作者信息与外链 |
-| [v2.2.4](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.2.4) | 返回键优化（图片预览关闭 + 退出确认） |
 
 更多历史版本见 [GitHub Releases](https://github.com/acheng-byte/ai-md-reader-android/releases)。
 
