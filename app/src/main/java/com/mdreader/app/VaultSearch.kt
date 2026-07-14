@@ -277,12 +277,18 @@ object VaultSearch {
         val encoded = ensureEncoded(vaultUri)
         val cleanPath = relativePath.replace('\\', '/').trimStart('/')
         if (cleanPath.isEmpty()) return null
-        val fileName = cleanPath.substringAfterLast('/')
-        if (fileName.isEmpty()) return null
 
-        // 按需递归搜索，不触发全库扫描
+        // 只做定向路径导航，不递归搜索（此方法在 WebView IO 线程调用，必须快速返回）
         val root = DocumentFile.fromTreeUri(context, encoded) ?: return null
-        return findInDir(context, encoded, root, fileName)
+        val parts = cleanPath.split('/').filter { it.isNotEmpty() }
+
+        var current: DocumentFile? = root
+        for (part in parts) {
+            if (current == null) return null
+            val children = listDir(context, encoded, current)
+            current = children.find { it.name == part || it.name == java.net.URLDecoder.decode(part, "UTF-8") }
+        }
+        return current?.takeIf { it.isFile }
     }
 
     fun resolveRelativeAsset(context: Context, vaultUri: Uri, currentDocUri: Uri?, relativePath: String): DocumentFile? {

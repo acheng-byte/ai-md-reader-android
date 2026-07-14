@@ -301,8 +301,11 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                     val vaultUriStr = prefs.vaultUri
                     if (vaultUriStr != null && relativePath.isNotEmpty()) {
                         val vaultUri = VaultSearch.ensureEncoded(Uri.parse(vaultUriStr))
+                        val curDocUri = runCatching { currentDocumentUri }.getOrNull()
                         val found = runCatching {
-                            VaultSearch.findAssetInVault(this@MainActivity, vaultUri, relativePath)
+                            // 优先查当前文档所在目录（快速定向查找）
+                            VaultSearch.resolveRelativeAsset(this@MainActivity, vaultUri, curDocUri, relativePath)
+                                ?: VaultSearch.findAssetInVault(this@MainActivity, vaultUri, relativePath)
                         }.getOrNull()
                         if (found != null) {
                             val mime = guessMime(relativePath)
