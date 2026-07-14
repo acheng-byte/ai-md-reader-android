@@ -75,7 +75,8 @@ android {
         resources.excludes += setOf(
             "META-INF/DEPENDENCIES",
             "META-INF/LICENSE*",
-            "META-INF/NOTICE*"
+            "META-INF/NOTICE*",
+            "META-INF/versions/*/module-info.class"
         )
     }
 }
@@ -90,4 +91,6 @@ dependencies {
     // poi-scratchpad 包含 HWPFDocument，poi 只包含核心模块不含 HWPF
     implementation("org.apache.poi:poi:4.1.2")
     implementation("org.apache.poi:poi-scratchpad:4.1.2")
+    // XWPF — 导出 .docx (OOXML) 格式
+    implementation("org.apache.poi:poi-ooxml:4.1.2")
 }
