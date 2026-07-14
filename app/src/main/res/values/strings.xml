@@ -148,7 +148,7 @@
     <string name="action_add_shortcut">添加到桌面</string>
     <string name="action_reading_stats">阅读统计</string>
     <string name="reading_stats_title">阅读统计</string>
-    <string name="reading_stats_companion">ReadAny 已经陪你读了 %1$d 天</string>
+    <string name="reading_stats_companion">MD阅读器已经陪你读了 %1$d 天</string>
     <string name="reading_stats_active_days">活跃天数：%1$d 天</string>
     <string name="reading_stats_sessions">阅读场次：%1$d 次</string>
     <string name="reading_stats_minutes">累计时长：%1$d 分钟</string>

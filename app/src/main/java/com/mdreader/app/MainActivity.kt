@@ -1987,17 +1987,25 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         }
         Toast.makeText(this, R.string.export_doc_saving, Toast.LENGTH_SHORT).show()
         webView.evaluateJavascript(
-            "(function(){ var el = document.getElementById('preview'); return el ? el.innerHTML : ''; })()"
-        ) { htmlContent ->
-            if (htmlContent.isNullOrBlank() || htmlContent == "null" || htmlContent == "\"\"") {
+            "(function(){ var el = document.getElementById('preview'); return el ? el.innerText : ''; })()"
+        ) { textContent ->
+            if (textContent.isNullOrBlank() || textContent == "null" || textContent == "\"\"") {
                 runOnUiThread { Toast.makeText(this, getString(R.string.export_doc_failed, "内容为空"), Toast.LENGTH_LONG).show() }
                 return@evaluateJavascript
             }
             Thread {
                 try {
-                    val cleanHtml = decodeJsString(htmlContent)
+                    val plainText = decodeJsString(textContent)
                     val doc = XWPFDocument()
-                    parseHtmlToDocx(doc, cleanHtml)
+                    // 按段落分割纯文本，逐段写入 DOCX
+                    val paragraphs = plainText.split("\n\n", "\n")
+                    for (para in paragraphs) {
+                        val trimmed = para.trim()
+                        if (trimmed.isEmpty()) continue
+                        val p = doc.createParagraph()
+                        val run = p.createRun()
+                        run.setText(trimmed)
+                    }
 
                     val safeName = exportFileName(currentTitle)
                     val saved = saveDocToGallery(doc, safeName)
@@ -2008,8 +2016,8 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                         return@Thread
                     }
                     runOnUiThread { Toast.makeText(this, getString(R.string.export_doc_saved), Toast.LENGTH_LONG).show() }
-                } catch (e: Exception) {
-                    runOnUiThread { Toast.makeText(this, getString(R.string.export_doc_failed, e.message ?: ""), Toast.LENGTH_LONG).show() }
+                } catch (e: Throwable) {
+                    runOnUiThread { Toast.makeText(this, getString(R.string.export_doc_failed, e.message ?: "未知错误"), Toast.LENGTH_LONG).show() }
                 }
             }.start()
         }
@@ -2413,7 +2421,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             }
             // 去除 HTML 注释（可能包含未闭合标签）
             result = result.replace(Regex("<!--[\\s\\S]*?-->"), "")
-            // 处理 &nbsp; 等 HTML 实体（XmlPullParser 只认识 XML 标准实体）
+            // 先处理已知的 HTML 实体（XmlPullParser 只认识 XML 标准实体 &amp; &lt; &gt; &quot; &apos;）
             result = result.replace("&nbsp;", "\u00A0")
             result = result.replace("&mdash;", "\u2014")
             result = result.replace("&ndash;", "\u2013")
@@ -2467,6 +2475,9 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             result = result.replace(Regex("&([a-zA-Z][a-zA-Z0-9]*);")) { m ->
                 "[${m.groupValues[1]}]" // 保留实体名作为占位符
             }
+            // 关键修复：转义文本中裸露的 & 字符（不是实体的一部分），防止 XML 解析崩溃
+            // 匹配 & 后面不跟 #（数字实体）或已知 XML 实体名的情况
+            result = result.replace(Regex("&(?!(?:amp|lt|gt|quot|apos|#);)")) { "&amp;" }
             return result
         }
 
