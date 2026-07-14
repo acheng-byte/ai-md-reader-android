@@ -2121,11 +2121,11 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         }
 
         var event = parser.eventType
-        while (event != android.util.XmlPullParser.END_DOCUMENT) {
+        while (event != org.xmlpull.v1.XmlPullParser.END_DOCUMENT) {
             val tn = parser.name ?: ""
             val lt = tn.lowercase()
             when (event) {
-                android.util.XmlPullParser.START_TAG -> {
+                org.xmlpull.v1.XmlPullParser.START_TAG -> {
                     tagDepth++
                     when (lt) {
                         "h1" -> { flushParagraph(); headingLevel = 1 }
@@ -2171,7 +2171,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                         }
                     }
                 }
-                android.util.XmlPullParser.TEXT -> {
+                org.xmlpull.v1.XmlPullParser.TEXT -> {
                     val text = parser.text ?: ""
                     if (skipMermaidContent || inMermaid) {
                         // 跳过 Mermaid 内容
@@ -2187,7 +2187,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                         }
                     }
                 }
-                android.util.XmlPullParser.END_TAG -> {
+                org.xmlpull.v1.XmlPullParser.END_TAG -> {
                     when (lt) {
                         "h1", "h2", "h3", "h4", "h5", "h6" -> { flushParagraph(); headingLevel = 0 }
                         "p" -> { if (!inCell) flushParagraph() }
