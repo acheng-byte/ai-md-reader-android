@@ -1027,6 +1027,13 @@
                 img.style.cursor = 'zoom-in';
                 img.addEventListener('click', function (e) {
                     e.stopPropagation();
+                    // 优化：如果点击位置在屏幕中央区域，不触发图片预览，让设置面板打开
+                    var w = window.innerWidth, h = window.innerHeight;
+                    if (e.clientX > w * 0.3 && e.clientX < w * 0.7 &&
+                        e.clientY > h * 0.33 && e.clientY < h * 0.67) {
+                        try { if (window.Android && window.Android.onCenterTap) window.Android.onCenterTap(); } catch (ex) { }
+                        return;
+                    }
                     var nowTap = Date.now();
                     // 双击：关闭预览
                     if (nowTap - lastTapTime < 350) {
