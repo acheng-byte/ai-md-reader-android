@@ -10,9 +10,9 @@
 
 ## 最新版本 v2.2.11
 
-- **v2.2.11**：重写 URI 编码修复（逐字符编码，保留结构字符），修复 v2.2.10 过度编码问题
-- **v2.2.10**：修复 Vault 子文件夹 URI 编码根因（docId 合并为单段）
-- **v2.2.9**：修复 Vault 中文路径搜索失败、递归列目录断裂修复、日志扩至5000条
+- **v2.2.11**：彻底修复 Vault 文件夹含中文子路径时搜索/跳转全部失败的问题（URI 编码规范化 + docId 完整提取 + 递归列目录修复）
+- **v2.2.10**：运行日志系统扩至 5000 条 + 中文诊断标签
+- **v2.2.9**：Vault 查找三重回退机制（DocumentFile → DocumentsContract → 手动提取）
 
 [下载最新 APK](https://github.com/acheng-byte/ai-md-reader-android/releases/latest) · [查看 GitHub Releases](https://github.com/acheng-byte/ai-md-reader-android/releases)
 
