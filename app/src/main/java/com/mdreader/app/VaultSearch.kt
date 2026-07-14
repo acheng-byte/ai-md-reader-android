@@ -278,7 +278,16 @@ object VaultSearch {
         val cleanPath = relativePath.replace('\\', '/').trimStart('/')
         if (cleanPath.isEmpty()) return null
 
-        // 只做定向路径导航，不递归搜索（此方法在 WebView IO 线程调用，必须快速返回）
+        // 1. 优先查持久化索引（HashMap 瞬间命中，无 SAF 调用）
+        val indexEntry = VaultIndex.findByPath(cleanPath)
+        if (indexEntry != null) {
+            runCatching {
+                val df = DocumentFile.fromSingleUri(context, Uri.parse(indexEntry.uri))
+                if (df?.exists() == true) return df
+            }
+        }
+
+        // 2. 索引未就绪或未命中 → 定向路径导航（大小写不敏感）
         val root = DocumentFile.fromTreeUri(context, encoded) ?: return null
         val parts = cleanPath.split('/').filter { it.isNotEmpty() }
 
@@ -286,9 +295,19 @@ object VaultSearch {
         for (part in parts) {
             if (current == null) return null
             val children = listDir(context, encoded, current)
-            current = children.find { it.name == part || it.name == java.net.URLDecoder.decode(part, "UTF-8") }
+            val decoded = try { java.net.URLDecoder.decode(part, "UTF-8") } catch (_: Exception) { part }
+            current = children.find {
+                it.name?.equals(part, ignoreCase = true) == true ||
+                    it.name?.equals(decoded, ignoreCase = true) == true
+            }
         }
-        return current?.takeIf { it.isFile }
+        current?.takeIf { it.isFile }?.let { return it }
+
+        // 3. 路径导航未命中 → 对简单文件名做递归搜索（最后手段）
+        if (!cleanPath.contains('/')) {
+            return findInDir(context, encoded, root, cleanPath)
+        }
+        return null
     }
 
     fun resolveRelativeAsset(context: Context, vaultUri: Uri, currentDocUri: Uri?, relativePath: String): DocumentFile? {

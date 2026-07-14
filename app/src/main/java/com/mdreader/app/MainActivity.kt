@@ -165,7 +165,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         favorites = Favorites(this)
         reading = ReadingProgress(this)
         annotations = Annotations(this)
-        // 启动时检查 Vault 状态（后台检查，不阻塞 UI）
+        // 启动时检查 Vault 状态 + 加载文件索引（后台，不阻塞 UI）
         val vaultUriStr = prefs.vaultUri
         if (vaultUriStr != null) {
             Thread {
@@ -174,6 +174,10 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                     val root = androidx.documentfile.provider.DocumentFile.fromTreeUri(this, encoded)
                     if (root == null) {
                         Logger.e("MainActivity", "Vault 根目录无效 — 请重新选择文件夹")
+                    }
+                    // 加载持久化索引（磁盘缓存命中则瞬间就绪，否则后台扫描）
+                    if (!VaultIndex.loadFromDisk(this, encoded)) {
+                        VaultIndex.scanInBackground(this, encoded)
                     }
                 } catch (_: Exception) {}
             }.start()
@@ -1274,9 +1278,28 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         sheet.btnClearVault.setOnClickListener {
             prefs.vaultUri = null
             VaultSearch.clearCache()
+            VaultIndex.clear()
             sheet.tvVaultPath.text = getString(R.string.vault_not_set)
             Logger.i("MainActivity", "清空库文件夹")
             Toast.makeText(this, "库文件夹已清空", Toast.LENGTH_SHORT).show()
+        }
+
+        sheet.btnRescanVault.setOnClickListener {
+            val vaultStr = prefs.vaultUri
+            if (vaultStr == null) {
+                Toast.makeText(this, R.string.vault_not_set_toast, Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            Toast.makeText(this, R.string.rescan_started, Toast.LENGTH_SHORT).show()
+            VaultIndex.clear()
+            val encoded = VaultSearch.ensureEncoded(Uri.parse(vaultStr))
+            VaultIndex.scanInBackground(this, encoded) {
+                runOnUiThread {
+                    val count = VaultIndex.entryCount()
+                    Toast.makeText(this, getString(R.string.rescan_done, count), Toast.LENGTH_SHORT).show()
+                }
+            }
+            Logger.i("MainActivity", "手动触发重新扫描库")
         }
 
         sheet.sliderFont.addOnChangeListener { _, _, _ -> debouncedApplySettings(sheet) }

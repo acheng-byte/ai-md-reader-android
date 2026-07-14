@@ -73,9 +73,13 @@
     <string name="vault_not_set">未设置（点击选择）</string>
     <string name="btn_select_vault">选择</string>
     <string name="btn_clear_vault">清空</string>
+    <string name="btn_rescan_vault">重新扫描库</string>
     <string name="vault_set">Vault 文件夹已设置</string>
     <string name="vault_not_set_toast">请先在设置中选择 Vault 文件夹</string>
     <string name="wikilink_not_found">找不到文件：%1$s</string>
+    <string name="rescan_started">开始重新扫描库文件夹…</string>
+    <string name="rescan_done">库索引已更新：%1$d 个文件</string>
+    <string name="rescan_failed">扫描失败：%1$s</string>
 
     <!-- Edit mode -->
     <string name="action_edit">编辑</string>
