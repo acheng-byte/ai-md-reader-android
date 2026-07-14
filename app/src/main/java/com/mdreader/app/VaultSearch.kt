@@ -21,16 +21,20 @@ object VaultSearch {
     }
 
     /** 构建/获取缓存：递归扫描 vault，建立 文件名小写 -> DocumentFile 映射 */
-    private fun buildCache(context: Context, vaultUri: Uri): HashMap<String, DocumentFile> {
+    private fun buildCache(context: Context, vaultUri: Uri): HashMap<String, DocumentFile>? {
         val uriStr = vaultUri.toString()
         if (cacheVaultUri == uriStr && fileCache[uriStr] != null) {
             return fileCache[uriStr]!!
         }
         val map = HashMap<String, DocumentFile>()
         val root = DocumentFile.fromTreeUri(context, vaultUri)
-        if (root != null) {
-            scanDir(root, map)
+        if (root == null || !root.canRead()) {
+            // URI 权限可能已过期，返回 null 通知调用者
+            return null
         }
+        scanDir(root, map)
+        // 如果扫描后缓存仍为空，可能是权限问题
+        if (map.isEmpty()) return null
         fileCache[uriStr] = map
         cacheVaultUri = uriStr
         return map
@@ -115,22 +119,44 @@ object VaultSearch {
     fun findFile(context: Context, vaultUri: Uri, noteName: String): DocumentFile? {
         // Strip heading anchor: [[File#Heading]] → "File"
         val cleanName = noteName.substringBefore('#').trim()
-        // 不管路径前缀，只取文件名，全库搜索（Obsidian 行为）
-        // [[话术类/必学的甜言蜜语(1).md]] → 搜 "必学的甜言蜜语(1).md"
-        val fileName = cleanName.substringAfterLast('/').trim()
-        if (fileName.isEmpty()) return null
+        if (cleanName.isEmpty()) return null
 
         val cache = buildCache(context, vaultUri)
 
-        // 尝试多种名称变体在缓存中匹配
-        val candidates = buildNameCandidates(fileName)
-        for (name in candidates) {
-            cache[name]?.let { return it }
+        if (cache != null) {
+            // 不管路径前缀，只取文件名，全库搜索（Obsidian 行为）
+            val fileName = cleanName.substringAfterLast('/').trim()
+            if (fileName.isNotEmpty()) {
+                val candidates = buildNameCandidates(fileName)
+                for (name in candidates) {
+                    cache[name]?.let { return it }
+                }
+            }
         }
 
-        // 回退到递归扫描（缓存未覆盖的情况）
-        val root = DocumentFile.fromTreeUri(context, vaultUri) ?: return null
-        return findInDir(root, fileName)
+        // 缓存不可用或文件名未找到：尝试按完整路径从 vault 根目录导航
+        val root = DocumentFile.fromTreeUri(context, vaultUri)
+        if (root != null && root.canRead()) {
+            // 尝试完整路径导航（如 "五步陷阱/泡妞资料整理/帖子类/追女孩技巧总结"）
+            val pathResult = findFileInDir(root, cleanName)
+            if (pathResult != null) return pathResult
+
+            // 尝试加 .md 后缀
+            if (!cleanName.endsWith(".md", ignoreCase = true)) {
+                val pathResultMd = findFileInDir(root, "$cleanName.md")
+                if (pathResultMd != null) return pathResultMd
+            }
+
+            // 缓存可用但文件名未匹配：回退到递归扫描
+            if (cache != null) {
+                val fileName = cleanName.substringAfterLast('/').trim()
+                if (fileName.isNotEmpty()) {
+                    return findInDir(root, fileName)
+                }
+            }
+        }
+
+        return null
     }
 
     /**
@@ -193,26 +219,31 @@ object VaultSearch {
         val cleanPath = relativePath.replace('\\', '/').trimStart('/')
         if (cleanPath.isEmpty()) return null
 
-        val fileName = cleanPath.substringAfterLast('/')  // 取最后一段文件名
+        val fileName = cleanPath.substringAfterLast('/')
         if (fileName.isEmpty()) return null
         val cache = buildCache(context, vaultUri)
 
-        // 尝试多种名称变体在缓存中匹配
-        val candidates = buildNameCandidates(fileName)
-        for (name in candidates) {
-            cache[name]?.let { return it }
+        if (cache != null) {
+            val candidates = buildNameCandidates(fileName)
+            for (name in candidates) {
+                cache[name]?.let { return it }
+            }
         }
 
         // 按完整相对路径从根目录导航
-        val root = DocumentFile.fromTreeUri(context, vaultUri) ?: return null
-        val pathFile = findFileInDir(root, cleanPath)
-        if (pathFile != null) return pathFile
+        val root = DocumentFile.fromTreeUri(context, vaultUri)
+        if (root != null && root.canRead()) {
+            val pathFile = findFileInDir(root, cleanPath)
+            if (pathFile != null) return pathFile
+        }
 
-        // 回退：遍历缓存做模糊匹配（去掉扩展名后忽略大小写比较）
-        val nameNoExt = fileName.substringBeforeLast('.')
-        for ((key, file) in cache) {
-            val keyNoExt = key.substringBeforeLast('.')
-            if (keyNoExt.equals(nameNoExt, ignoreCase = true)) return file
+        // 回退：遍历缓存做模糊匹配
+        if (cache != null) {
+            val nameNoExt = fileName.substringBeforeLast('.')
+            for ((key, file) in cache) {
+                val keyNoExt = key.substringBeforeLast('.')
+                if (keyNoExt.equals(nameNoExt, ignoreCase = true)) return file
+            }
         }
 
         return null
