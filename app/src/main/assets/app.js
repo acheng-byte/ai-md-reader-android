@@ -109,7 +109,7 @@
             var out = [];
             token.children.forEach(function (t) {
                 if (t.type !== 'text' || t.content.indexOf('%%') < 0) { out.push(t); return; }
-                var result = t.content.replace(/%%[^%]*%%/g, '');
+                var result = t.content.replace(/%%[\s\S]*?%%/g, '');
                 var nt = new state.Token('text', '', 0);
                 nt.content = result;
                 out.push(nt);
@@ -325,7 +325,7 @@
                 // 默认当图片处理
                 return '![' + ref + '](' + ref + ')';
             }
-            var ext = ref.split('.').pop().toLowerCase();
+            var ext = ref.split('.').pop().toLowerCase().split('?')[0].split('#')[0];
             var imageExts = ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp', 'ico'];
             var videoExts = ['mp4', 'webm', 'ogv', 'mov'];
             var audioExts = ['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac', 'wma'];
@@ -453,13 +453,16 @@
 
     function postprocessCallouts(container, showFm) {
         var metaTypes = { info: 1, metadata: 1, abstract: 1, summary: 1 };
-        container.querySelectorAll('blockquote').forEach(function (bq) {
+        // 逆序遍历：先处理最内层 blockquote，避免外层先处理时破坏内层
+        var bqs = container.querySelectorAll('blockquote');
+        for (var idx = bqs.length - 1; idx >= 0; idx--) {
+            var bq = bqs[idx];
             var first = bq.firstElementChild;
-            if (!first) return;
+            if (!first) continue;
             var text = (first.textContent || '').trim();
-            // 匹配 [!type] 或 [!type] 标题文本
-            var m = text.match(/^\[!([^\]\s]+)\](?:\s+(.*?))?\s*$/);
-            if (!m) return;
+            // 用 [^\n]* 代替 .*? 防止 breaks:true 时吞掉正文
+            var m = text.match(/^\[!([^\]\s]+)\](?:[ \t]+([^\n]*))?\s*$/);
+            if (!m) continue;
             var type = m[1].trim().toLowerCase();
             var title = (m[2] || calloutDefaultTitle(type)).trim();
             first.remove();
@@ -471,7 +474,7 @@
             bq.insertBefore(titleEl, bq.firstChild);
             // metadata 类型 callout 跟随 showFrontmatter 开关
             if (!showFm && metaTypes[type]) bq.style.display = 'none';
-        });
+        }
     }
 
     function calloutDefaultTitle(type) {
@@ -1628,7 +1631,7 @@
             var raw = (h.el.textContent || '').trim();
             a.textContent = raw.replace(/^[#\s]+/, '') || raw || '(无标题)';
             var headingId = h.el.id;
-            a.href = '#';
+            a.href = '#' + headingId;
             a.onclick = function (e) {
                 e.preventDefault();
                 closeToc();
