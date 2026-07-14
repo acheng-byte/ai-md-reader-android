@@ -27,62 +27,38 @@ object VaultSearch {
     /**
      * 修复 vault URI 中非 ASCII 字符（如中文）未编码的问题。
      *
-     * SAF 的 tree URI 格式: content://authority/tree/{docId}/document/{docId}
-     * docId 可以包含 "/"（子文件夹路径），如 "primary:Documents/精华帖子收集箱"
-     * 在 URI 中必须编码为单个段: primary%3ADocuments%2F%E7%B2%BE%E5%8D%8E...
+     * SAF picker 返回的 URI 可能包含未编码的非 ASCII 字符，例如：
+     *   content://.../tree/primary:Documents/精华帖子收集箱
+     * Uri.parse() 不会自动编码这些字符，导致 Content Provider 匹配失败。
      *
-     * 但 Uri.parse() 不会自动编码非 ASCII，且会把 docId 中的 "/" 当作路径分隔符，
-     * 导致 tree docId 被截断为 "primary:Documents"（丢失子文件夹部分）。
+     * 方案：逐字符扫描，只对非 ASCII 字符做 UTF-8 percent-encode。
+     * 所有结构字符（/ : ? = & 等）保持原样不变。
+     * 结果：content://.../tree/primary:Documents/%E7%B2%BE%E5%8D%8E%E5%B8%96%E5%AD%90%E6%94%B6%E9%9B%86%E7%AE%B1
      *
-     * 此方法: 合并所有 tree 后的路径段为完整 docId，用 Uri.Builder 重新编码为单段。
+     * 注意：这里 / 保持为路径分隔符（不编码为 %2F），
+     * 因为 ExternalStorageProvider 的 getTreeDocumentId() 从路径段中提取 docId，
+     * 而 fromTreeUri() 内部能正确处理这种格式。
      */
     fun ensureEncoded(vaultUri: Uri): Uri {
         val raw = vaultUri.toString()
-        // 快速检查：如果没有非 ASCII 字符，且格式正确（tree段只有1个），直接返回
         if (raw.all { it.code < 128 }) return vaultUri
 
         Logger.i(TAG, "【URI编码修复】检测到非ASCII字符，正在规范化: ${raw.take(80)}")
         return try {
-            val authority = vaultUri.authority ?: return vaultUri
-            val path = vaultUri.path ?: return vaultUri
-            val segments = path.split("/").filter { it.isNotEmpty() }
-
-            val treeIdx = segments.indexOf("tree")
-            if (treeIdx < 0 || treeIdx >= segments.size - 1) {
-                Logger.w(TAG, "【URI编码修复】未找到 tree 段，返回原始 URI")
-                return vaultUri
+            val sb = StringBuilder(raw.length + 20)
+            for (ch in raw) {
+                if (ch.code < 128) {
+                    sb.append(ch)
+                } else {
+                    // 将字符编码为 UTF-8 字节，每个字节转为 %XX
+                    val bytes = ch.toString().toByteArray(Charsets.UTF_8)
+                    for (b in bytes) {
+                        sb.append('%')
+                        sb.append(String.format("%02X", b))
+                    }
+                }
             }
-
-            // 收集 tree 后面的所有段，直到 "document" 或末尾
-            // 这些段共同组成完整的 tree docId
-            val docSegments = mutableListOf<String>()
-            var i = treeIdx + 1
-            while (i < segments.size && segments[i] != "document") {
-                docSegments.add(segments[i])
-                i++
-            }
-
-            // 完整 docId = 所有段用 "/" 连接
-            // 例如: ["primary:Documents", "精华帖子收集箱"] → "primary:Documents/精华帖子收集箱"
-            val fullDocId = docSegments.joinToString("/")
-            Logger.d(TAG, "【URI编码修复】合并 docId: $fullDocId (共${docSegments.size}段)")
-
-            // 用 Uri.Builder 重建 URI
-            // appendPath() 会对整个段进行编码，包括 "/" → "%2F"、":" → "%3A"
-            val builder = Uri.Builder()
-                .scheme("content")
-                .authority(authority)
-                .appendPath("tree")
-                .appendPath(fullDocId)
-
-            // 如果原来有 /document/ 部分，也加上
-            if (i < segments.size && segments[i] == "document" && i + 1 < segments.size) {
-                val documentId = segments.subList(i + 1, segments.size).joinToString("/")
-                builder.appendPath("document")
-                builder.appendPath(documentId)
-            }
-
-            val result = builder.build()
+            val result = Uri.parse(sb.toString())
             Logger.i(TAG, "【URI编码修复】结果: ${result.toString().take(100)}")
             result
         } catch (e: Exception) {
