@@ -124,6 +124,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                     binding.webview.visibility = View.VISIBLE
                     invalidateOptionsMenu()
                     renderCurrent()
+                    Logger.i("MainActivity", "另存为: ${FileUtils.displayName(this, uri) ?: currentTitle}")
                     Toast.makeText(this, R.string.edit_saved, Toast.LENGTH_SHORT).show()
                 }
             }
@@ -143,6 +144,8 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                 }
                 prefs.vaultUri = encoded.toString()
                 VaultSearch.clearCache()
+                val vaultName = DocumentFile.fromTreeUri(this, encoded)?.name ?: "未知"
+                Logger.i("MainActivity", "设置库文件夹: $vaultName")
                 Toast.makeText(this, getString(R.string.vault_set), Toast.LENGTH_SHORT).show()
             }
         }
@@ -214,6 +217,16 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         }
         webView.setBackgroundColor(bgColor())
         webView.loadUrl(VIEWER_URL)
+
+        // 后台静默预扫描库文件夹（先文档后图片），不阻塞 UI
+        if (prefs.vaultUri != null) {
+            Thread {
+                try {
+                    val encoded = VaultSearch.ensureEncoded(Uri.parse(prefs.vaultUri!!))
+                    VaultSearch.search(this, encoded, "") // 触发 buildCache
+                } catch (_: Exception) {}
+            }.start()
+        }
 
         // Back press: 图片预览关闭 / 源码模式放弃确认 / 预览模式退出确认
         backCallback = object : OnBackPressedCallback(true) {
@@ -487,10 +500,12 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                     prefs.lastDocUri = identityUri
                     prefs.lastDocName = name
                     history.add(identityUri, name, System.currentTimeMillis())
+                    Logger.i("MainActivity", "打开文档: $name")
                     startReadingSession(name)
                     renderCurrent()
                     invalidateOptionsMenu()
                 }.onFailure { e ->
+                    Logger.e("MainActivity", "打开文档失败: ${e.message}")
                     Toast.makeText(this, getString(R.string.open_failed, e.message ?: ""), Toast.LENGTH_LONG).show()
                 }
             }
@@ -748,6 +763,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             syncSourceContent()
             val saved = trySaveInPlace(currentMarkdown)
             if (saved) {
+                Logger.i("MainActivity", "保存文档: $currentTitle")
                 Toast.makeText(this, R.string.edit_saved, Toast.LENGTH_SHORT).show()
                 // 切换到预览模式
                 binding.editScroll.visibility = View.GONE
@@ -834,6 +850,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                 settingsHandler.postDelayed(r, 500)
             }
             Toast.makeText(this, R.string.annotate_on, Toast.LENGTH_SHORT).show()
+            Logger.i("MainActivity", "标注模式: 开启 (${annotationModeName(annotationMode)})")
         } else {
             overlay.annotationEnabled = false
             overlay.visibility = View.GONE
@@ -842,6 +859,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             currentUri?.let { uri ->
                 val strokesCopy = overlay.exportStrokes()
                 Thread { annotations.save(uri, strokesCopy) }.start()
+                Logger.i("MainActivity", "标注已保存 (${strokesCopy.size} 笔)")
                 Toast.makeText(this, R.string.annotate_saved, Toast.LENGTH_SHORT).show()
             }
             Toast.makeText(this, R.string.annotate_off, Toast.LENGTH_SHORT).show()
@@ -853,6 +871,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         colorIndex = (colorIndex + 1) % annotationColors.size
         annotationColor = annotationColors[colorIndex]
         binding.annotationOverlay.drawColor = annotationColor
+        Logger.i("MainActivity", "标注颜色: $annotationColor")
         invalidateOptionsMenu()
     }
 
@@ -860,6 +879,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         modeIndex = (modeIndex + 1) % annotationModes.size
         annotationMode = annotationModes[modeIndex]
         binding.annotationOverlay.drawMode = annotationMode
+        Logger.i("MainActivity", "标注模式: ${annotationModeName(annotationMode)}")
         invalidateOptionsMenu()
     }
 
@@ -883,6 +903,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             // 切换到源码模式：显示可编辑的 editText
             currentMode = "code"
             prefs.viewMode = currentMode
+            Logger.i("MainActivity", "切换到编辑模式")
             binding.editText.setText(currentMarkdown)
             binding.editText.setTextColor(if (prefs.isDark(this)) Color.WHITE else Color.BLACK)
             binding.editText.setBackgroundColor(bgColor())
@@ -1138,9 +1159,11 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         if (id == null) { Toast.makeText(this, R.string.fav_need_doc, Toast.LENGTH_SHORT).show(); return }
         if (favorites.isFavorite(id)) {
             favorites.remove(id)
+            Logger.i("MainActivity", "取消收藏: $currentTitle")
             Toast.makeText(this, R.string.fav_removed, Toast.LENGTH_SHORT).show()
         } else {
             val ok = favorites.add(id, currentTitle, currentMarkdown.toByteArray(Charsets.UTF_8)) != null
+            if (ok) Logger.i("MainActivity", "添加收藏: $currentTitle")
             Toast.makeText(this, if (ok) R.string.fav_added else R.string.fav_failed, Toast.LENGTH_SHORT).show()
         }
         invalidateOptionsMenu()
@@ -1220,6 +1243,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         sheet.spinnerFontFamily.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: android.view.View?, position: Int, id: Long) {
                 prefs.fontFamily = fontKeys[position]
+                Logger.i("MainActivity", "字体: ${fontKeys[position]}")
                 applySettingsToWeb()
             }
             override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
@@ -1254,6 +1278,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             prefs.vaultUri = null
             VaultSearch.clearCache()
             sheet.tvVaultPath.text = getString(R.string.vault_not_set)
+            Logger.i("MainActivity", "清空库文件夹")
             Toast.makeText(this, "库文件夹已清空", Toast.LENGTH_SHORT).show()
         }
 
@@ -1267,6 +1292,8 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                     R.id.btn_theme_dark -> 2
                     else -> 0
                 }
+                val themeName = when (prefs.themeMode) { 1 -> "浅色"; 2 -> "深色"; else -> "跟随系统" }
+                Logger.i("MainActivity", "主题切换: $themeName")
                 // 优化：避免 recreate()，直接通过 JS + 颜色更新切换主题，减少卡顿
                 val nightMode = when (prefs.themeMode) {
                     1 -> AppCompatDelegate.MODE_NIGHT_NO
@@ -1280,18 +1307,22 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         }
         sheet.switchEyeProtection.setOnCheckedChangeListener { _, checked ->
             prefs.eyeProtection = checked
+            Logger.i("MainActivity", "护眼模式: ${if (checked) "开" else "关"}")
             applySettingsToWeb()
         }
         sheet.switchFrontmatter.setOnCheckedChangeListener { _, checked ->
             prefs.showFrontmatter = checked
+            Logger.i("MainActivity", "显示 Frontmatter: ${if (checked) "开" else "关"}")
             applySettingsToWeb()
         }
         sheet.switchCitations.setOnCheckedChangeListener { _, checked ->
             prefs.showCitations = checked
+            Logger.i("MainActivity", "显示引用块: ${if (checked) "开" else "关"}")
             applySettingsToWeb()
         }
         sheet.switchHideTitle.setOnCheckedChangeListener { _, checked ->
             prefs.hideTitleHeading = checked
+            Logger.i("MainActivity", "隐藏标题: ${if (checked) "开" else "关"}")
             applySettingsToWeb()
         }
 
@@ -1310,6 +1341,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             prefs.showFrontmatter = false
             prefs.showCitations = false
             prefs.hideTitleHeading = true
+            Logger.i("MainActivity", "设置已重置为默认值")
             // 更新 UI
             sheet.sliderFont.value = Prefs.DEFAULT_FONT
             sheet.sliderLine.value = Prefs.DEFAULT_LINE
@@ -1384,6 +1416,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                 onDelete = { entry, position ->
                     // 从持久化存储中删除
                     history.remove(entry.uri)
+                    Logger.i("MainActivity", "删除历史记录: ${entry.name}")
                     // 从列表中移除（adapter.removeAt 内部已同时移除 items 引用中的元素）
                     adapter.removeAt(position)
                     Toast.makeText(this, R.string.history_deleted_confirm, Toast.LENGTH_SHORT).show()
@@ -1404,14 +1437,14 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         }
         sheet.btnClearHistory.setOnClickListener {
             history.clear(); dialog.dismiss()
+            Logger.i("MainActivity", "清空历史记录")
             Toast.makeText(this, R.string.history_cleared, Toast.LENGTH_SHORT).show()
         }
         dialog.show()
     }
 
-    /** 日志查看弹窗：显示最近 500 条日志，支持一键复制 */
+    /** 日志查看弹窗：倒序显示，默认仅警告/错误，支持切换全部 */
     private fun showLogViewer() {
-        // 默认显示摘要（仅警告+错误），最新在前
         var showAll = false
         val scrollView = android.widget.ScrollView(this).apply { setPadding(32, 16, 32, 8) }
         val textView = android.widget.TextView(this).apply {
@@ -1423,8 +1456,8 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         scrollView.addView(textView)
 
         fun refreshText() {
-            textView.text = if (showAll) Logger.getAllText() else Logger.getSummaryText()
-            textView.text = if (textView.text.isEmpty()) "暂无日志" else textView.text
+            val text = if (showAll) Logger.getAllText() else Logger.getSummaryText()
+            textView.text = text.ifEmpty { "暂无日志" }
         }
         refreshText()
 
@@ -1436,8 +1469,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             .setView(scrollView)
             .setPositiveButton("复制全部") { _: android.content.DialogInterface, _: Int ->
                 val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                val allText = Logger.getAllText()
-                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("MDReader Log", allText))
+                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("MDReader Log", Logger.getAllText()))
                 Toast.makeText(this, "已复制 ${Logger.size()} 条日志", Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton("清空") { _: android.content.DialogInterface, _: Int ->
@@ -1445,11 +1477,19 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                 refreshText()
                 Toast.makeText(this, "日志已清空", Toast.LENGTH_SHORT).show()
             }
-            .setNeutralButton(if (showAll) "仅错误" else "全部") { _: android.content.DialogInterface, _: Int ->
-                showAll = !showAll
-                refreshText()
-            }
+            .setNeutralButton("全部", null) // null listener 防止自动关闭
             .create()
+
+        dialog.setOnShowListener {
+            val btn = dialog.getButton(androidx.appcompat.app.AlertDialog.BUTTON_NEUTRAL)
+            btn.setOnClickListener {
+                showAll = !showAll
+                btn.text = if (showAll) "仅错误" else "全部"
+                refreshText()
+                scrollView.fullScroll(android.view.View.FOCUS_UP)
+            }
+        }
+
         dialog.show()
         dialog.window?.setLayout(
             (resources.displayMetrics.widthPixels * 0.92).toInt(),
@@ -1602,7 +1642,10 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
 
     override fun onModeChanged(mode: String) {
         runOnUiThread {
-            if (mode == "preview" || mode == "code") { currentMode = mode; prefs.viewMode = mode; invalidateOptionsMenu() }
+            if (mode == "preview" || mode == "code") {
+                currentMode = mode; prefs.viewMode = mode; invalidateOptionsMenu()
+                Logger.i("MainActivity", "视图模式: ${if (mode == "preview") "预览" else "编辑"}")
+            }
         }
     }
 
@@ -1647,6 +1690,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             runOnUiThread { js("window.appVaultSearchResult && window.appVaultSearchResult('${escapeJs(callbackId)}', '${escapeJs(escaped)}')") }
             return
         }
+        Logger.i("MainActivity", "搜索库: $query")
         Thread {
             val result = VaultSearch.search(this, VaultSearch.ensureEncoded(Uri.parse(vaultUriStr)), query)
             runOnUiThread {

@@ -1152,7 +1152,7 @@
                 img.addEventListener('touchmove', function (e) {
                     var dx = e.touches[0].clientX - touchStartX;
                     var dy = e.touches[0].clientY - touchStartY;
-                    if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
+                    if (Math.abs(dx) > 20 || Math.abs(dy) > 20) {
                         touchMoved = true;
                     }
                 }, { passive: true });

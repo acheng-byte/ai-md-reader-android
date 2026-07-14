@@ -964,9 +964,27 @@ window.appSetTitle = function (title) { _iosTitle = title || ''; };
         for (var i = 0; i < imgs.length; i++) {
             (function (img) {
                 var lastTapTime = 0;
+                var touchStartX = 0, touchStartY = 0;
+                var touchMoved = false;
                 img.style.cursor = 'zoom-in';
+
+                img.addEventListener('touchstart', function (e) {
+                    touchStartX = e.touches[0].clientX;
+                    touchStartY = e.touches[0].clientY;
+                    touchMoved = false;
+                }, { passive: true });
+
+                img.addEventListener('touchmove', function (e) {
+                    var dx = e.touches[0].clientX - touchStartX;
+                    var dy = e.touches[0].clientY - touchStartY;
+                    if (Math.abs(dx) > 20 || Math.abs(dy) > 20) {
+                        touchMoved = true;
+                    }
+                }, { passive: true });
+
                 img.addEventListener('click', function (e) {
                     e.stopPropagation();
+                    if (touchMoved) { touchMoved = false; return; }
                     var nowTap = Date.now();
                     if (nowTap - lastTapTime < 350) {
                         lastTapTime = 0;

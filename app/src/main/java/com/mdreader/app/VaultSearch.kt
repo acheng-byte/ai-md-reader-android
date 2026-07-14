@@ -171,8 +171,11 @@ object VaultSearch {
                 Logger.e(TAG, "库文件夹无效 (fromTreeUri=null) — 请重新选择")
                 return null
             }
-            scanDir(context, vaultUri, root, map)
-            Logger.i(TAG, "库扫描完成: ${map.size} 个文件")
+            // 两阶段扫描：先文本文件（MD/TXT），后其他文件（图片等）
+            scanDirPriority(context, vaultUri, root, map, textOnly = true)
+            val textCount = map.size
+            scanDirPriority(context, vaultUri, root, map, textOnly = false)
+            Logger.i(TAG, "库扫描完成: ${map.size} 个文件（文本 $textCount，其他 ${map.size - textCount}）")
             if (map.isEmpty()) {
                 Logger.e(TAG, "扫描结果为 0 — 权限可能已过期，请重新选择文件夹")
                 return null
@@ -185,14 +188,23 @@ object VaultSearch {
         }
     }
 
-    private fun scanDir(context: Context, treeUri: Uri, dir: DocumentFile, map: HashMap<String, DocumentFile>) {
+    private fun isTextFile(name: String): Boolean {
+        val lower = name.lowercase()
+        return lower.endsWith(".md") || lower.endsWith(".markdown") ||
+               lower.endsWith(".txt") || lower.endsWith(".text")
+    }
+
+    private fun scanDirPriority(context: Context, treeUri: Uri, dir: DocumentFile, map: HashMap<String, DocumentFile>, textOnly: Boolean) {
         val children = listDir(context, treeUri, dir)
         if (children.isEmpty()) return
         for (file in children) {
             when {
-                file.isDirectory -> scanDir(context, treeUri, file, map)
+                file.isDirectory -> scanDirPriority(context, treeUri, file, map, textOnly)
                 file.isFile -> {
                     val name = file.name ?: continue
+                    val isText = isTextFile(name)
+                    // textOnly=true 时只收文本，textOnly=false 时只收非文本（避免重复）
+                    if (textOnly != isText) continue
                     map[name] = file
                     map[name.lowercase()] = file
                     try {
