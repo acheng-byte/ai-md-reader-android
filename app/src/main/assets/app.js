@@ -118,35 +118,47 @@
         });
     });
 
-    /* ---------- #标签 高亮 ---------- */
-    md.core.ruler.push('obsidian_tags', function (state) {
-        state.tokens.forEach(function (token) {
-            if (token.type !== 'inline' || !token.children) return;
-            var out = [];
-            token.children.forEach(function (t) {
-                if (t.type !== 'text') { out.push(t); return; }
-                var text = t.content;
-                var result = text.replace(/(^|[\s一-鿿（【「『])(#[\w一-鿿\-_/]+)/g, function (_, pre, tag) {
-                    return pre + '\x00TAG\x01' + tag + '\x00/TAG\x01';
-                });
-                if (result === text) { out.push(t); return; }
-                var parts = result.split(/(\x00TAG\x01[^\x00]*\x00\/TAG\x01)/);
-                parts.forEach(function (part) {
-                    var m = part.match(/^\x00TAG\x01(.*)\x00\/TAG\x01$/);
-                    if (m) {
-                        var ht = new state.Token('html_inline', '', 0);
-                        ht.content = '<span class="ob-tag">' + escapeHtml(m[1]) + '</span>';
-                        out.push(ht);
-                    } else if (part) {
-                        var nt = new state.Token('text', '', 0);
-                        nt.content = part;
-                        out.push(nt);
-                    }
-                });
+    /* ---------- #标签 高亮（DOM 后处理，避免误伤链接内的 #） ---------- */
+    function highlightTags(container) {
+        var walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
+        var node;
+        var toReplace = [];
+        while (node = walker.nextNode()) {
+            // 跳过链接内部的文本（[[#Heading]] 等 wikilink 渲染结果）
+            var p = node.parentNode;
+            var inLink = false;
+            while (p && p !== container) {
+                if (p.tagName === 'A') { inLink = true; break; }
+                p = p.parentNode;
+            }
+            if (inLink) continue;
+            var text = node.nodeValue;
+            // 只在空白或 CJK 字符后匹配 #标签
+            var result = text.replace(/(^|[\s一-鿿（【「『])(#[\w一-鿿\-_/]+)/g, function (_, pre, tag) {
+                return pre + '\x00TAG\x01' + tag + '\x00/TAG\x01';
             });
-            token.children = out;
+            if (result !== text) {
+                toReplace.push({ node: node, text: result });
+            }
+        }
+        toReplace.forEach(function (item) {
+            var parent = item.node.parentNode;
+            var parts = item.text.split(/(\x00TAG\x01[^\x00]*\x00\/TAG\x01)/);
+            var frag = document.createDocumentFragment();
+            parts.forEach(function (part) {
+                var m = part.match(/^\x00TAG\x01(.*)\x00\/TAG\x01$/);
+                if (m) {
+                    var span = document.createElement('span');
+                    span.className = 'ob-tag';
+                    span.textContent = m[1];
+                    frag.appendChild(span);
+                } else if (part) {
+                    frag.appendChild(document.createTextNode(part));
+                }
+            });
+            parent.replaceChild(frag, item.node);
         });
-    });
+    }
 
     var previewEl = document.getElementById('preview');
     var codeBlockEl = document.getElementById('code').querySelector('code');
@@ -223,6 +235,67 @@
         return String(str)
             .replace(/&/g, '&amp;').replace(/</g, '&lt;')
             .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    /* ---------- 编码链接/图片 URL 中的空格 ---------- */
+    /* markdown-it 不识别 URL 中的空格，需要编码为 %20 */
+    function encodeLinkSpaces(source) {
+        var result = '';
+        var i = 0;
+        var len = source.length;
+        while (i < len) {
+            // 跳过反引号包裹的 inline code：`code` 或 ``code``
+            if (source[i] === '`') {
+                var backtickCount = 0;
+                var j = i;
+                while (j < len && source[j] === '`') { backtickCount++; j++; }
+                // 找配对的闭合反引号
+                var closePos = -1;
+                var k = j;
+                while (k < len) {
+                    if (source[k] === '`') {
+                        var endCount = 0;
+                        var m = k;
+                        while (m < len && source[m] === '`') { endCount++; m++; }
+                        if (endCount === backtickCount) { closePos = m; break; }
+                        k = m;
+                    } else { k++; }
+                }
+                if (closePos > 0) {
+                    result += source.substring(i, closePos);
+                    i = closePos;
+                    continue;
+                }
+                // 没找到配对，原样输出
+                result += source[i];
+                i++;
+                continue;
+            }
+            // 检测 ![alt]( 或 [text]( 模式（不在代码块内）
+            if (source[i] === '(' && i > 0 && source[i - 1] === ']') {
+                var urlStart = i + 1;
+                var depth = 1;
+                var j = urlStart;
+                while (j < len && depth > 0) {
+                    if (source[j] === '(') depth++;
+                    else if (source[j] === ')') depth--;
+                    if (depth > 0) j++;
+                }
+                if (depth === 0) {
+                    var url = source.substring(urlStart, j);
+                    // 跳过已是 URL 的内容
+                    if (!/^(https?:|data:|#|\/\/|%)/.test(url)) {
+                        url = url.replace(/ /g, '%20').replace(/\u3000/g, '%20');
+                    }
+                    result += '(' + url + ')';
+                    i = j + 1;
+                    continue;
+                }
+            }
+            result += source[i];
+            i++;
+        }
+        return result;
     }
 
     /* ---------- Obsidian Wikilink 预处理 ---------- */
@@ -1228,7 +1301,7 @@
         previewEl.innerHTML = '';
 
         var parsed = parseFrontmatter(rawSource);
-        var source = preprocessFootnotes(preprocessInternalLinks(preprocessImages(preprocessWikilinks(parsed.body))));
+        var source = preprocessFootnotes(preprocessInternalLinks(preprocessImages(preprocessWikilinks(encodeLinkSpaces(parsed.body)))));
 
         var showFm = currentSettings.showFrontmatter !== false;
         var cacheKey = source + '||' + showFm;
@@ -1257,6 +1330,7 @@
 
         postprocessCallouts(previewEl, showFm);
         fixMdLinks(previewEl);
+        highlightTags(previewEl);
         addCopyButtons();
         renderMermaid();
         setupTableInteractions();
