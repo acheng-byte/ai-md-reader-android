@@ -44,16 +44,27 @@ object VaultIndex {
         if (!ready) return null
         val lower = fileName.lowercase()
 
+        // 1. 精确匹配（map O(1) 查找）
         entries[lower]?.let { return it }
 
+        // 2. 搜索词解码后再查 map
         val decoded = try { java.net.URLDecoder.decode(fileName, "UTF-8") } catch (_: Exception) { null }
         if (decoded != null && decoded != fileName) {
             entries[decoded.lowercase()]?.let { return it }
         }
 
+        // 3. 线性扫描：同时尝试解码存储的名称
         for (e in allEntries) {
             if (e.name.equals(fileName, ignoreCase = true)) return e
             if (decoded != null && e.name.equals(decoded, ignoreCase = true)) return e
+            // 关键：也尝试解码存储的文件名（SAF 有时返回 URL 编码的名称）
+            try {
+                val decodedStored = java.net.URLDecoder.decode(e.name, "UTF-8")
+                if (decodedStored != e.name) {
+                    if (decodedStored.equals(fileName, ignoreCase = true)) return e
+                    if (decoded != null && decodedStored.equals(decoded, ignoreCase = true)) return e
+                }
+            } catch (_: Exception) {}
         }
         return null
     }

@@ -211,6 +211,7 @@ object VaultSearch {
 
         // 优先使用持久化索引（O(1) 查找，无 SAF 调用）
         if (VaultIndex.isReady()) {
+            Logger.i(TAG, "索引就绪，共 ${VaultIndex.entryCount()} 个条目，开始查找")
             // 带路径的查找（如 话术类/100条郭德纲经典语录）
             if (cleanName.contains('/')) {
                 val pathWithExt = if (cleanName.endsWith(".md", ignoreCase = true) || cleanName.endsWith(".markdown", ignoreCase = true))
@@ -245,6 +246,8 @@ object VaultSearch {
                 }
             }
             Logger.i(TAG, "索引未命中，回退到 SAF 路径导航")
+        } else {
+            Logger.w(TAG, "索引未就绪，直接使用 SAF 路径导航")
         }
 
         val root = DocumentFile.fromTreeUri(context, encoded) ?: return null
