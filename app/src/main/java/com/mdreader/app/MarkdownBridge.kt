@@ -33,8 +33,6 @@ class MarkdownBridge(private val provider: Provider) {
         fun savePngBase64(base64: String, elementType: String)
         /** 显示字符统计对话框 */
         fun showCharCount(stats: String)
-        /** 重置 WebView 缩放回 100% */
-        fun resetWebViewZoom()
     }
 
     @JavascriptInterface fun getMarkdown(): String = provider.markdown()
@@ -76,7 +74,4 @@ class MarkdownBridge(private val provider: Provider) {
 
     @JavascriptInterface
     fun showCharCount(stats: String) = provider.showCharCount(stats)
-
-    @JavascriptInterface
-    fun resetWebViewZoom() = provider.resetWebViewZoom()
 }

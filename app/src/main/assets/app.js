@@ -647,7 +647,6 @@
             });
         } catch (e) { /* KaTeX render error */ }
     }
-
     /* ---------- 渲染缓存 ---------- */
     var renderCache = { source: null, html: null };
 
@@ -1545,50 +1544,6 @@
         if (document.visibilityState === 'hidden') flushSave();
     });
     window.addEventListener('pagehide', flushSave);
-
-    /* ---------- 双击页面任意位置重置 WebView 缩放回 100% ---------- */
-    (function () {
-        var _dtX = 0, _dtY = 0, _dtMoved = false, _dtLastTap = 0;
-        var DT_THRESHOLD = 15;
-        document.addEventListener('touchstart', function (e) {
-            if (e.touches.length === 1) {
-                _dtX = e.touches[0].clientX;
-                _dtY = e.touches[0].clientY;
-                _dtMoved = false;
-            }
-        }, { passive: true });
-        document.addEventListener('touchmove', function (e) {
-            if (e.touches.length === 1) {
-                var dx = Math.abs(e.touches[0].clientX - _dtX);
-                var dy = Math.abs(e.touches[0].clientY - _dtY);
-                if (dx > DT_THRESHOLD || dy > DT_THRESHOLD) _dtMoved = true;
-            }
-        }, { passive: true });
-        document.addEventListener('touchend', function (e) {
-            if (_dtMoved) { _dtMoved = false; return; }
-            // 排除链接和按钮，防止误触
-            var t = e.target;
-            while (t && t !== document.body) {
-                var tag = t.tagName;
-                if (tag === 'A' || tag === 'BUTTON' || tag === 'INPUT') return;
-                if (t.classList && (
-                    t.classList.contains('copy-btn') || t.classList.contains('task-checkbox')
-                )) return;
-                t = t.parentNode;
-            }
-            var now = Date.now();
-            if (now - _dtLastTap < 350) {
-                _dtLastTap = 0;
-                // 通过 Android 桥接重置 WebView 原生缩放
-                try {
-                    var b = bridge();
-                    if (b && b.resetWebViewZoom) b.resetWebViewZoom();
-                } catch (e) { }
-            } else {
-                _dtLastTap = now;
-            }
-        }, { passive: true });
-    })();
 
     render();
 })();

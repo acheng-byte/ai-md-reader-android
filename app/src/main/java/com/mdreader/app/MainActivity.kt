@@ -2094,13 +2094,6 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         }
     }
 
-    override fun resetWebViewZoom() {
-        runOnUiThread {
-            webView.setInitialScale(100)
-            webView.reload()
-        }
-    }
-
     /** 显示字符统计（由标题栏点击触发） */
     fun triggerCharCount() {
         if (!pageReady) return
