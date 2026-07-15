@@ -132,6 +132,11 @@ class Prefs(context: Context) {
         get() = sp.getString(KEY_FONT_FAMILY, "default") ?: "default"
         set(v) { sp.edit().putString(KEY_FONT_FAMILY, v).apply(); invalidateSettingsCache() }
 
+    /** 字体颜色：default / red / green / gray / blue */
+    var fontColor: String
+        get() = sp.getString(KEY_FONT_COLOR, "default") ?: "default"
+        set(v) { sp.edit().putString(KEY_FONT_COLOR, v).apply(); invalidateSettingsCache() }
+
     fun isDark(context: Context): Boolean = when (themeMode) {
         1 -> false
         2 -> true
@@ -158,6 +163,7 @@ class Prefs(context: Context) {
             put("dark", isDark(context))
             put("eyeProtection", eyeProtection)
             put("fontFamily", fontFamily)
+            put("fontColor", fontColor)
             put("showFrontmatter", showFrontmatter)
             put("showCitations", showCitations)
             put("hideTitleHeading", hideTitleHeading)
@@ -199,6 +205,7 @@ class Prefs(context: Context) {
         private const val KEY_HIDE_TITLE_HEADING = "hide_title_heading"
         private const val KEY_EYE_PROTECTION = "eye_protection"
         private const val KEY_FONT_FAMILY = "font_family"
+        private const val KEY_FONT_COLOR = "font_color"
         private const val KEY_LAST_DOC_URI = "last_doc_uri"
         private const val KEY_LAST_DOC_NAME = "last_doc_name"
         private const val KEY_INSTALL_DATE = "install_date"

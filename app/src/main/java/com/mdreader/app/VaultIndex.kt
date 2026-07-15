@@ -153,19 +153,26 @@ object VaultIndex {
                 }
 
                 // 扫描完成，标记就绪
-                synchronized(this) {
-                    indexVaultUri = uriStr
-                    ready = true
+                try {
+                    synchronized(this) {
+                        indexVaultUri = uriStr
+                        ready = true
+                    }
+                    // 最终保存（流式写入，防 OOM）
+                    saveToDisk(context)
+                    val elapsed = System.currentTimeMillis() - startTime
+                    val timeStr = if (elapsed >= 60000) {
+                        "${elapsed / 60000}分${(elapsed % 60000) / 1000}秒"
+                    } else {
+                        "${elapsed / 1000}秒"
+                    }
+                    val runtime = Runtime.getRuntime()
+                    val usedMem = (runtime.totalMemory() - runtime.freeMemory()) / 1024 / 1024
+                    val maxMem = runtime.maxMemory() / 1024 / 1024
+                    Logger.i(TAG, "索引完成: ${allEntries.size} 个文件, ${scannedDirs.size} 个目录, 耗时 $timeStr, 内存 ${usedMem}MB/${maxMem}MB")
+                } catch (e: Throwable) {
+                    Logger.e(TAG, "索引完成阶段异常: ${e.message}")
                 }
-                // 最终保存
-                saveToDisk(context)
-                val elapsed = System.currentTimeMillis() - startTime
-                val timeStr = if (elapsed >= 60000) {
-                    "${elapsed / 60000}分${(elapsed % 60000) / 1000}秒"
-                } else {
-                    "${elapsed / 1000}秒"
-                }
-                Logger.i(TAG, "索引完成: ${allEntries.size} 个文件, ${scannedDirs.size} 个目录, 耗时 $timeStr (${elapsed}ms)")
             } catch (e: Throwable) {
                 Logger.e(TAG, "索引失败: ${e.message}, 当前已索引 ${allEntries.size} 个文件")
             } finally {
@@ -387,30 +394,36 @@ object VaultIndex {
         context_filesDir_ref = context.filesDir
         val file = File(context.filesDir, CACHE_FILE)
         try {
-            val arr = JSONArray()
             val currentEntries: List<Entry>
             val currentDirs: Set<String>
+            val currentUri: String?
             synchronized(this) {
                 currentEntries = ArrayList(allEntries)
                 currentDirs = HashSet(scannedDirs)
+                currentUri = indexVaultUri
             }
-            for (e in currentEntries) {
-                arr.put(JSONObject().apply {
-                    put("name", e.name)
-                    put("path", e.path)
-                    put("uri", e.uri)
-                })
+            // 流式写入 JSON，避免 19000+ 条目时 OOM
+            FileWriter(file).use { writer ->
+                val json = android.util.JsonWriter(writer)
+                json.beginObject()
+                json.name("vaultUri").value(currentUri ?: "")
+                json.name("files").beginArray()
+                for (e in currentEntries) {
+                    json.beginObject()
+                    json.name("name").value(e.name)
+                    json.name("path").value(e.path)
+                    json.name("uri").value(e.uri)
+                    json.endObject()
+                }
+                json.endArray()
+                json.name("scannedDirs").beginArray()
+                for (d in currentDirs) {
+                    json.value(d)
+                }
+                json.endArray()
+                json.endObject()
+                json.flush()
             }
-            val dirsArr = JSONArray()
-            for (d in currentDirs) {
-                dirsArr.put(d)
-            }
-            val obj = JSONObject().apply {
-                put("vaultUri", indexVaultUri ?: "")
-                put("files", arr)
-                put("scannedDirs", dirsArr)
-            }
-            file.writeText(obj.toString())
         } catch (e: Exception) {
             Logger.e(TAG, "保存索引失败: ${e.message}")
         }

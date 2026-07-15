@@ -180,6 +180,20 @@
         android:layout_height="48dp"
         android:background="?attr/colorSurfaceVariant" />
 
+    <!-- 字体颜色 -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:layout_marginBottom="8dp"
+        android:text="@string/label_font_color"
+        android:textAppearance="@style/TextAppearance.Material3.BodyLarge" />
+    <Spinner
+        android:id="@+id/spinner_font_color"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:background="?attr/colorSurfaceVariant" />
+
     <!-- 高级设置分隔线 -->
     <View
         android:layout_width="match_parent"

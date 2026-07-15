@@ -189,6 +189,7 @@ object FileUtils {
         parser.setInput(xml.byteInputStream(), "UTF-8")
 
         var paraBuffer = StringBuilder()
+        var paraFmtBuf = DocFormatBuffer()
         var headingLevel = 0
 
         // 表格状态
@@ -253,24 +254,27 @@ object FileUtils {
                         // ── 文本 ─────────────────────────────────────────────
                         localName == "t" && isWordNs -> {
                             var text = parser.nextText()
-                            // 应用 run 级格式：加粗/斜体文本先去除原文中的 * _ 避免 **** 冲突
-                            if (runBold && runItalic) {
-                                text = "***${text.replace("*", "").replace("_", "")}***"
-                            } else if (runBold) {
-                                text = "**${text.replace("*", "").replace("_", "")}**"
-                            } else if (runItalic) {
-                                text = "*${text.replace("*", "").replace("_", "")}*"
+                            if (inCell) {
+                                // 表格单元格：逐 Run 包裹（单元格通常较短）
+                                if (runBold && runItalic) {
+                                    text = "***${text.replace("*", "").replace("_", "")}***"
+                                } else if (runBold) {
+                                    text = "**${text.replace("*", "").replace("_", "")}**"
+                                } else if (runItalic) {
+                                    text = "*${text.replace("*", "").replace("_", "")}*"
+                                } else {
+                                    text = text.replace("*", "\\*").replace("_", "\\_")
+                                        .replace("~", "\\~").replace("#", "\\#")
+                                }
+                                cellBuffer.append(text)
                             } else {
-                                // 普通文本：转义 markdown 特殊字符，防止原文 * ~ # 干扰渲染
-                                text = text.replace("*", "\\*").replace("_", "\\_")
-                                    .replace("~", "\\~").replace("#", "\\#")
+                                // 段落文本：使用格式追踪缓冲，合并连续相同格式的 Run
+                                paraFmtBuf.append(text, runBold, runItalic)
                             }
-                            if (inCell) cellBuffer.append(text)
-                            else paraBuffer.append(text)
                         }
                         localName == "br" && isWordNs -> {
                             if (inCell) cellBuffer.append(' ')
-                            else paraBuffer.append('\n')
+                            else paraFmtBuf.append("\n", false, false)
                         }
                         // ── 图片（DrawingML）─────────────────────────────────
                         localName == "blip" && ns.contains("drawingml") -> {
@@ -335,7 +339,7 @@ object FileUtils {
                         }
                         // ── 段落结束（表格外）────────────────────────────────
                         localName == "p" && isWordNs && !inTable -> {
-                            val paraText = paraBuffer.toString()
+                            val paraText = paraFmtBuf.flush()
                             if (paraText.isNotBlank()) {
                                 if (headingLevel > 0) {
                                     sb.append("#".repeat(headingLevel)).append(' ')
@@ -387,6 +391,65 @@ object FileUtils {
 
     /* ========== 旧版 .doc（OLE2）—— 使用 Apache POI HWPF ========== */
 
+    /** 格式追踪缓冲区：合并连续相同格式的 CharacterRun，避免逐 Run 包裹产生大量星号 */
+    private class DocFormatBuffer {
+        private val sb = StringBuilder()
+        private var curBold = false
+        private var curItalic = false
+        private var hasContent = false
+        var anyBold = false; private set
+
+        fun append(text: String, bold: Boolean, italic: Boolean) {
+            if (text.isEmpty()) return
+            if (hasContent && (bold != curBold || italic != curItalic)) {
+                closeCurrent()
+            }
+            if (!hasContent || bold != curBold || italic != curItalic) {
+                openMarker(bold, italic)
+            }
+            val cleaned = text.replace(Regex("[\\x00-\\x08\\x0b-\\x1f]"), "")
+            sb.append(escapeForFormat(cleaned, bold, italic))
+            curBold = bold; curItalic = italic; hasContent = true
+            if (bold) anyBold = true
+        }
+
+        fun flush(): String {
+            if (!hasContent) return ""
+            closeCurrent()
+            val result = sb.toString()
+            sb.clear(); curBold = false; curItalic = false; hasContent = false; anyBold = false
+            return result
+        }
+
+        fun isEmpty() = !hasContent
+        fun toRawString() = sb.toString()
+
+        private fun openMarker(bold: Boolean, italic: Boolean) {
+            when {
+                bold && italic -> sb.append("***")
+                bold -> sb.append("**")
+                italic -> sb.append("*")
+            }
+        }
+
+        private fun closeCurrent() {
+            when {
+                curBold && curItalic -> sb.append("***")
+                curBold -> sb.append("**")
+                curItalic -> sb.append("*")
+            }
+        }
+
+        private fun escapeForFormat(text: String, bold: Boolean, italic: Boolean): String {
+            return if (bold || italic) {
+                text.replace("*", "").replace("_", "")
+            } else {
+                text.replace("*", "\\*").replace("_", "\\_")
+                    .replace("~", "\\~").replace("#", "\\#")
+            }
+        }
+    }
+
     private fun extractDocText(filename: String, bytes: ByteArray): String {
         return runCatching {
             val doc = HWPFDocument(bytes.inputStream())
@@ -397,8 +460,7 @@ object FileUtils {
 
             // 逐 CharacterRun 迭代（HWPF Paragraph 无 numRuns/getRun API）
             // 通过 \r 检测段落边界，\u0007 检测表格单元格
-            var paraBuffer = StringBuilder()
-            var paraBold = false
+            var paraFmtBuf = DocFormatBuffer()
             var tableBuffer = StringBuilder()
             var tableHeaderDone = false
             var tableCells = ArrayList<String>()
@@ -446,19 +508,18 @@ object FileUtils {
                     // 段落结束
                     val clean = text.replace("\r", "").replace(Regex("[\\x00-\\x09\\x0b-\\x1f]"), "")
                     if (clean.isNotEmpty()) {
-                        val formatted = when {
-                            bold && italic -> "***${clean.replace("*", "").replace("_", "")}***"
-                            bold -> "**${clean.replace("*", "").replace("_", "")}**"
-                            italic -> "*${clean.replace("*", "").replace("_", "")}*"
-                            else -> clean.replace("*", "\\*").replace("_", "\\_")
-                                .replace("~", "\\~").replace("#", "\\#")
-                        }
                         if (inTable) {
+                            val formatted = when {
+                                bold && italic -> "***${clean.replace("*", "").replace("_", "")}***"
+                                bold -> "**${clean.replace("*", "").replace("_", "")}**"
+                                italic -> "*${clean.replace("*", "").replace("_", "")}*"
+                                else -> clean.replace("*", "\\*").replace("_", "\\_")
+                                    .replace("~", "\\~").replace("#", "\\#")
+                            }
                             cellBuffer.append(formatted)
                             if (bold) cellBold = true
                         } else {
-                            paraBuffer.append(formatted)
-                            if (bold) paraBold = true
+                            paraFmtBuf.append(clean, bold, italic)
                         }
                     }
 
@@ -481,10 +542,10 @@ object FileUtils {
                         cellBuffer = StringBuilder()
                         tableHeaderDone = false
                         hasText = true
-                    } else if (paraBuffer.isNotEmpty()) {
-                        val paraText = paraBuffer.toString().trim()
+                    } else if (!paraFmtBuf.isEmpty()) {
+                        val paraText = paraFmtBuf.flush().trim()
                         if (paraText.isNotEmpty()) {
-                            if (paraBold && looksLikeHeading(paraText)) {
+                            if (paraFmtBuf.anyBold && looksLikeHeading(paraText)) {
                                 val level = headingLevelFromLength(paraText)
                                 sb.append("#".repeat(level)).append(' ')
                                 sb.append(paraText.trim('*')).append("\n\n")
@@ -493,9 +554,8 @@ object FileUtils {
                             }
                             hasText = true
                         }
-                        paraBuffer = StringBuilder()
-                        paraBold = false
                     } else {
+                        paraFmtBuf.flush()
                         // 空段落 → 换行
                         if (hasText) sb.append('\n')
                     }
@@ -503,33 +563,31 @@ object FileUtils {
                     // 非段落结束：检查是否进入表格
                     val clean = text.replace(Regex("[\\x00-\\x09\\x0b-\\x1f]"), "")
                     if (clean.isNotEmpty()) {
-                        val formatted = when {
-                            bold && italic -> "***${clean.replace("*", "").replace("_", "")}***"
-                            bold -> "**${clean.replace("*", "").replace("_", "")}**"
-                            italic -> "*${clean.replace("*", "").replace("_", "")}*"
-                            else -> clean.replace("*", "\\*").replace("_", "\\_")
-                                .replace("~", "\\~").replace("#", "\\#")
-                        }
                         // 检测表格开始：当前累积的段落文本含 \u0007
-                        if (paraBuffer.contains("\u0007")) {
-                            tableBuffer.append(paraBuffer)
-                            paraBuffer = StringBuilder()
-                            paraBold = false
+                        if (paraFmtBuf.toRawString().contains("\u0007")) {
+                            tableBuffer.append(paraFmtBuf.toRawString())
+                            paraFmtBuf.flush()
                         }
                         if (tableBuffer.isNotEmpty()) {
+                            val formatted = when {
+                                bold && italic -> "***${clean.replace("*", "").replace("_", "")}***"
+                                bold -> "**${clean.replace("*", "").replace("_", "")}**"
+                                italic -> "*${clean.replace("*", "").replace("_", "")}*"
+                                else -> clean.replace("*", "\\*").replace("_", "\\_")
+                                    .replace("~", "\\~").replace("#", "\\#")
+                            }
                             cellBuffer.append(formatted)
                             if (bold) cellBold = true
                             tableBuffer.append(text)
                         } else {
-                            paraBuffer.append(formatted)
-                            if (bold) paraBold = true
+                            paraFmtBuf.append(clean, bold, italic)
                         }
                     }
                 }
             }
 
             // 刷新未结束的段落
-            val remaining = paraBuffer.toString().trim()
+            val remaining = paraFmtBuf.flush().trim()
             if (remaining.isNotEmpty()) {
                 sb.append(remaining).append("\n\n")
                 hasText = true

@@ -62,6 +62,8 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
     @Volatile private var currentMode: String = Prefs.DEFAULT_MODE
     private var currentTitle: String = ""
     @Volatile private var currentUri: String? = null
+    /** 编辑→预览切换时的临时滚动比例（覆盖阅读位置记忆） */
+    private var pendingScrollRatio: Double = -1.0
     @Volatile private var currentDocumentUri: Uri? = null
     private var pageReady: Boolean = false
     private var elementSaveCounter: Int = 0
@@ -402,38 +404,41 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
     /** Custom path handler for vault:// scheme via WebViewAssetLoader at /vault/ path. */
     private inner class VaultPathHandler : WebViewAssetLoader.PathHandler {
         override fun handle(path: String): WebResourceResponse? {
-            val filename = try { URLDecoder.decode(path.trimStart('/'), "UTF-8") } catch (e: Exception) { path.trimStart('/') }
-            val mime = guessMime(filename)
+            return try {
+                val filename = try { URLDecoder.decode(path.trimStart('/'), "UTF-8") } catch (e: Exception) { path.trimStart('/') }
+                val mime = guessMime(filename)
 
-            val vaultUriStr = prefs.vaultUri
-            if (vaultUriStr != null && VaultIndex.isReady()) {
-                val vaultUri = VaultSearch.ensureEncoded(Uri.parse(vaultUriStr))
+                val vaultUriStr = prefs.vaultUri
+                if (vaultUriStr != null && VaultIndex.isReady()) {
+                    val vaultUri = VaultSearch.ensureEncoded(Uri.parse(vaultUriStr))
 
-                // 用缓存快速查找（全库文件名匹配 + 路径导航）
-                val file = runCatching {
-                    VaultSearch.findAssetInVault(this@MainActivity, vaultUri, filename)
-                }.getOrNull()
-                if (file != null) {
-                    val stream = contentResolver.openInputStream(file.uri)
-                    if (stream != null) return WebResourceResponse(mime, null, stream)
-                }
-
-                // 回退：从当前文档所在目录加载（支持非 vault 内的本地图片）
-                val docUri = currentDocumentUri
-                if (docUri != null) {
-                    val found = runCatching {
-                        val docFile = DocumentFile.fromSingleUri(this@MainActivity, docUri)
-                        val parent = docFile?.parentFile ?: return@runCatching null
-                        VaultSearch.findFileInDir(this@MainActivity, vaultUri, parent, filename)
+                    val file = runCatching {
+                        VaultSearch.findAssetInVault(this@MainActivity, vaultUri, filename)
                     }.getOrNull()
-                    if (found != null) {
-                        val stream = contentResolver.openInputStream(found.uri)
+                    if (file != null) {
+                        val stream = runCatching { contentResolver.openInputStream(file.uri) }.getOrNull()
                         if (stream != null) return WebResourceResponse(mime, null, stream)
                     }
-                }
-            }
 
-            return null
+                    val docUri = currentDocumentUri
+                    if (docUri != null) {
+                        val found = runCatching {
+                            val docFile = DocumentFile.fromSingleUri(this@MainActivity, docUri)
+                            val parent = docFile?.parentFile ?: return@runCatching null
+                            VaultSearch.findFileInDir(this@MainActivity, vaultUri, parent, filename)
+                        }.getOrNull()
+                        if (found != null) {
+                            val stream = runCatching { contentResolver.openInputStream(found.uri) }.getOrNull()
+                            if (stream != null) return WebResourceResponse(mime, null, stream)
+                        }
+                    }
+                }
+                null
+            } catch (e: Throwable) {
+                // WebView IO 线程绝不能崩溃，任何异常都返回 null
+                Logger.w("VaultPathHandler", "handle异常: ${e.message}")
+                null
+            }
         }
     }
 
@@ -561,19 +566,18 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         }
     }
 
-    /** 防抖 300ms：滑块拖拽期间只更新标签，松手后才批量写 SP + 推送 WebView */
+    /** 滑块拖拽：实时更新标签 + prefs + WebView */
     private fun debouncedApplySettings(sheet: SheetSettingsBinding) {
-        updateLabels(sheet)
-        pendingSettings?.let { settingsHandler.removeCallbacks(it) }
-        val r = Runnable {
-            pendingSettings = null
-            prefs.fontSize = sheet.sliderFont.value
-            prefs.lineHeight = sheet.sliderLine.value
-            prefs.paraGap = sheet.sliderPara.value
-            applySettingsToWeb()
-        }
-        pendingSettings = r
-        settingsHandler.postDelayed(r, 300)
+        // 立即更新标签显示（使用滑块当前值）
+        sheet.valFont.text = getString(R.string.val_font, sheet.sliderFont.value.roundToInt())
+        sheet.valLine.text = String.format(Locale.ROOT, "%.1f", sheet.sliderLine.value)
+        sheet.valPara.text = String.format(Locale.ROOT, "%.1f", sheet.sliderPara.value)
+        // 立即写入 prefs（apply() 异步，不阻塞 UI）
+        prefs.fontSize = sheet.sliderFont.value
+        prefs.lineHeight = sheet.sliderLine.value
+        prefs.paraGap = sheet.sliderPara.value
+        // 立即推送 WebView
+        applySettingsToWeb()
     }
 
     private fun js(code: String) {
@@ -946,6 +950,13 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         } else {
             // 切换到预览模式：保存编辑内容并渲染
             syncSourceContent()
+            // 计算编辑器的滚动位置比例，用于同步到预览模式
+            val editScrollMax = binding.editScroll.computeVerticalScrollRange() - binding.editScroll.height
+            if (editScrollMax > 0) {
+                pendingScrollRatio = binding.editScroll.scrollY.toDouble() / editScrollMax
+            } else {
+                pendingScrollRatio = 0.0
+            }
             binding.editScroll.visibility = View.GONE
             binding.webview.visibility = View.VISIBLE
             currentMode = "preview"
@@ -1264,6 +1275,37 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
         }
 
+        // 字体颜色 Spinner（5 种颜色）
+        val colorKeys = arrayOf("default", "red", "green", "gray", "blue")
+        val colorNames = arrayOf(
+            getString(R.string.font_color_default),
+            getString(R.string.font_color_red),
+            getString(R.string.font_color_green),
+            getString(R.string.font_color_gray),
+            getString(R.string.font_color_blue)
+        )
+        val colorDots = intArrayOf(0xFF333333.toInt(), 0xFFE53935.toInt(), 0xFF43A047.toInt(), 0xFF9E9E9E.toInt(), 0xFF1E88E5.toInt())
+        val colorAdapter = object : android.widget.ArrayAdapter<String>(this, android.R.layout.simple_spinner_dropdown_item, colorNames) {
+            override fun getDropDownView(position: Int, convertView: android.view.View?, parent: android.view.ViewGroup): android.view.View {
+                val v = super.getDropDownView(position, convertView, parent)
+                val tv = v.findViewById<android.widget.TextView>(android.R.id.text1)
+                tv.setCompoundDrawablesWithIntrinsicBounds(0, 0, 0, 0)
+                tv.setTextColor(colorDots[position])
+                return v
+            }
+        }
+        sheet.spinnerFontColor.adapter = colorAdapter
+        val currentColorIdx = colorKeys.indexOf(prefs.fontColor).coerceAtLeast(0)
+        sheet.spinnerFontColor.setSelection(currentColorIdx)
+        sheet.spinnerFontColor.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: android.view.View?, position: Int, id: Long) {
+                prefs.fontColor = colorKeys[position]
+                Logger.i("MainActivity", "字体颜色: ${colorKeys[position]}")
+                applySettingsToWeb()
+            }
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+        }
+
         // Frontmatter and citations toggles
         sheet.switchFrontmatter.isChecked = prefs.showFrontmatter
         sheet.switchCitations.isChecked = prefs.showCitations
@@ -1372,6 +1414,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             prefs.themeMode = Prefs.DEFAULT_THEME
             prefs.eyeProtection = false
             prefs.fontFamily = "default"
+            prefs.fontColor = "default"
             prefs.showFrontmatter = false
             prefs.showCitations = false
             prefs.hideTitleHeading = true
@@ -1383,6 +1426,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             sheet.toggleTheme.check(R.id.btn_theme_system)
             sheet.switchEyeProtection.isChecked = false
             sheet.spinnerFontFamily.setSelection(0)
+            sheet.spinnerFontColor.setSelection(0)
             updateLabels(sheet)
             applySettingsToWeb()
             Toast.makeText(this, R.string.settings_reset_done, Toast.LENGTH_SHORT).show()
@@ -1494,7 +1538,15 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                 return object : androidx.recyclerview.widget.RecyclerView.ViewHolder(tv) {}
             }
             override fun onBindViewHolder(holder: androidx.recyclerview.widget.RecyclerView.ViewHolder, position: Int) {
-                (holder.itemView as android.widget.TextView).text = logEntries.getOrElse(position) { "" }
+                val tv = holder.itemView as android.widget.TextView
+                val entry = logEntries.getOrElse(position) { "" }
+                tv.text = entry
+                // 根据日志级别设置颜色：错误=红色，警告=橙色
+                when {
+                    entry.contains("/E/") -> tv.setTextColor(0xFFE53935.toInt())
+                    entry.contains("/W/") -> tv.setTextColor(0xFFFF9800.toInt())
+                    else -> tv.setTextColor(android.graphics.Color.parseColor("#333333"))
+                }
             }
             override fun getItemCount(): Int = logEntries.size
         }
@@ -1727,7 +1779,15 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
     override fun markdown(): String = currentMarkdown
     override fun settingsJson(): String = prefs.settingsJson(this)
     override fun initialMode(): String = currentMode
-    override fun readingRatio(): Double = currentUri?.let { reading.get(it) } ?: 0.0
+    override fun readingRatio(): Double {
+        // 编辑→预览切换时，使用编辑器滚动位置的比例
+        if (pendingScrollRatio >= 0) {
+            val r = pendingScrollRatio
+            pendingScrollRatio = -1.0
+            return r
+        }
+        return currentUri?.let { reading.get(it) } ?: 0.0
+    }
     override fun saveReadingRatio(ratio: Double) { currentUri?.let { reading.set(it, ratio) } }
     override fun docTitle(): String = currentTitle
 

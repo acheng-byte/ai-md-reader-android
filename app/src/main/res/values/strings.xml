@@ -19,6 +19,12 @@
     <string name="theme_dark">深色</string>
     <string name="label_eye_protection">护眼模式</string>
     <string name="label_font_family">字体</string>
+    <string name="label_font_color">字体颜色</string>
+    <string name="font_color_default">默认</string>
+    <string name="font_color_red">红色</string>
+    <string name="font_color_green">绿色</string>
+    <string name="font_color_gray">灰色</string>
+    <string name="font_color_blue">蓝色</string>
     <string name="font_default">默认</string>
     <string name="font_serif">宋体</string>
     <string name="font_mono">等宽</string>

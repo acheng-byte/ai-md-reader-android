@@ -71,6 +71,8 @@ body {
     word-wrap: break-word;
     overflow-wrap: break-word;
 }
+/* 字体颜色覆盖（用户自定义颜色时生效） */
+body { color: var(--fg-override, var(--fg)); }
 
 /* ============ 模式切换 ============ */
 #preview { display: none; }
@@ -651,8 +653,18 @@ body.dark .markdown-body .callout-title {
 .markdown-body .callout-icon {
     font-style: normal;
     font-size: 1em;
-    min-width: 1.2em;
-    text-align: center;
+    min-width: 1.4em;
+    max-width: 1.4em;
+    height: 1.4em;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+.markdown-body .callout-icon svg {
+    width: 100%;
+    height: 100%;
+    vertical-align: middle;
 }
 .markdown-body .callout > *:not(.callout-title) {
     padding: 8px 14px;
