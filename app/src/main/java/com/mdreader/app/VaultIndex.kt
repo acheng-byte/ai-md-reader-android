@@ -298,7 +298,6 @@ object VaultIndex {
                         // 过滤 Obsidian 系统目录
                         if (name in SKIP_DIRS) {
                             skippedCount++
-                            Logger.i(TAG, "过滤系统目录: $name")
                             continue
                         }
                         val childPath = if (relPath.isEmpty()) name else "$relPath/$name"

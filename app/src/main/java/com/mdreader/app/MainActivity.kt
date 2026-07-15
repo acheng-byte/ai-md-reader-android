@@ -1512,19 +1512,49 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             logEntries.addAll(if (showAll) Logger.getAllEntries() else Logger.getSummaryEntries())
             rvAdapter.notifyDataSetChanged()
             if (logEntries.isEmpty()) {
-                // 空状态提示
                 logEntries.add("暂无日志")
                 rvAdapter.notifyDataSetChanged()
             }
         }
         refreshEntries()
 
+        // 顶部工具栏：刷新按钮
+        lateinit var logDialog: androidx.appcompat.app.AlertDialog
+        val refreshBtn = android.widget.Button(ctx).apply {
+            text = "刷新"
+            textSize = 12f
+            setPadding(16, 4, 16, 4)
+            setOnClickListener {
+                refreshEntries()
+                recyclerView.scrollToPosition(0)
+                // 更新标题显示条数
+                val errCount = Logger.errorCount()
+                val titleSuffix = if (errCount > 0) " (${Logger.size()} 条, $errCount 个错误)" else " (${Logger.size()} 条)"
+                if (::logDialog.isInitialized) logDialog.setTitle("运行日志$titleSuffix")
+            }
+        }
+        val toolbar = android.widget.LinearLayout(ctx).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.END
+            addView(refreshBtn)
+            setPadding(32, 8, 32, 0)
+        }
+        val container = android.widget.LinearLayout(ctx).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            addView(toolbar, android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT))
+            addView(recyclerView, android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT))
+        }
+
         val errCount = Logger.errorCount()
         val titleSuffix = if (errCount > 0) " (${Logger.size()} 条, $errCount 个错误)" else " (${Logger.size()} 条)"
 
         val dialog = androidx.appcompat.app.AlertDialog.Builder(this)
             .setTitle("运行日志$titleSuffix")
-            .setView(recyclerView)
+            .setView(container)
             .setPositiveButton("复制全部") { _: android.content.DialogInterface, _: Int ->
                 val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
                 clipboard.setPrimaryClip(android.content.ClipData.newPlainText("MDReader Log", Logger.getAllText()))
@@ -1538,6 +1568,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             .setNeutralButton("全部", null) // null listener 防止自动关闭
             .create()
 
+        logDialog = dialog
         dialog.setOnShowListener {
             val btn = dialog.getButton(androidx.appcompat.app.AlertDialog.BUTTON_NEUTRAL)
             btn.setOnClickListener {
