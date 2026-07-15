@@ -648,380 +648,6 @@
         } catch (e) { /* KaTeX render error */ }
     }
 
-    /* ---------- 表格/图表预览与下载 ---------- */
-
-    /** 为预览覆盖层注入样式 */
-    (function injectPreviewCss() {
-        var css = [
-            /* 预览覆盖层 — 默认浅色，跟随 body.dark 切换深色 */
-            '.mdreader-preview-overlay{position:fixed;top:0;left:0;right:0;bottom:0;z-index:9999;background:rgba(245,245,247,0.96);display:flex;flex-direction:column;}',
-            '.mdreader-preview-toolbar{display:flex;justify-content:flex-end;align-items:center;padding:8px 12px;gap:10px;background:rgba(0,0,0,0.06);}',
-            '.mdreader-preview-toolbar button{color:#333;border:none;border-radius:6px;padding:8px 16px;font-size:14px;cursor:pointer;}',
-            '.mdreader-preview-dl-btn{background:#0969da;color:#fff;}',
-            '.mdreader-preview-close-btn{background:rgba(0,0,0,0.1);}',
-            '.mdreader-preview-body{flex:1;overflow:hidden;display:flex;align-items:center;justify-content:center;padding:12px;background:#fff;border-radius:8px;margin:8px;box-shadow:0 2px 12px rgba(0,0,0,0.12);}',
-            '.mdreader-preview-body img{max-width:none;height:auto;transform-origin:center center;touch-action:none;}',
-            '.mdreader-preview-body table{border-collapse:collapse;width:auto;min-width:300px;max-width:95vw;margin:0 auto;font-size:14px;}',
-            '.mdreader-preview-body table th,.mdreader-preview-body table td{border:1px solid #ccc;padding:8px 14px;color:#333;}',
-            '.mdreader-preview-body table th{background:#f5f5f5;font-weight:600;}',
-            'body.dark .mdreader-preview-overlay{background:rgba(20,20,22,0.96);}',
-            'body.dark .mdreader-preview-toolbar{background:rgba(255,255,255,0.06);}',
-            'body.dark .mdreader-preview-toolbar button{color:#e6edf3;}',
-            'body.dark .mdreader-preview-close-btn{background:rgba(255,255,255,0.12);}',
-            'body.dark .mdreader-preview-body{background:#1e1e20;box-shadow:0 2px 12px rgba(0,0,0,0.4);}',
-            'body.dark .mdreader-preview-body table th,body.dark .mdreader-preview-body table td{border:1px solid #555;color:#e6edf3;}',
-            'body.dark .mdreader-preview-body table th{background:#2a2a2e;}',
-            /* 确认弹窗 */
-            '.mdreader-confirm-overlay{position:fixed;top:0;left:0;right:0;bottom:0;z-index:10000;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;}',
-            '.mdreader-confirm-box{background:#fff;border-radius:12px;padding:24px;max-width:300px;width:85%;text-align:center;}',
-            '.mdreader-confirm-box p{margin:0 0 18px;font-size:16px;color:#333;}',
-            '.mdreader-confirm-box button{border:none;border-radius:8px;padding:10px 20px;font-size:14px;cursor:pointer;margin:0 6px;}',
-            '.mdreader-confirm-yes{background:#0969da;color:#fff;}',
-            '.mdreader-confirm-no{background:#e5e5e5;color:#333;}'
-        ].join('\n');
-        var style = document.createElement('style');
-        style.textContent = css;
-        document.head.appendChild(style);
-    })();
-
-    var previewOverlay = null;
-    var previewBlobUrl = null; // 跟踪当前 blob URL，防止内存泄漏
-    var _previewLastTapTime = 0; // 双击关闭检测
-
-    /** 创建预览覆盖层 DOM（惰性创建，复用） */
-    function ensurePreviewOverlay() {
-        if (previewOverlay) return previewOverlay;
-        previewOverlay = document.createElement('div');
-        previewOverlay.className = 'mdreader-preview-overlay';
-
-        // 工具栏
-        var toolbar = document.createElement('div');
-        toolbar.className = 'mdreader-preview-toolbar';
-        var dlBtn = document.createElement('button');
-        dlBtn.className = 'mdreader-preview-dl-btn';
-        dlBtn.textContent = '保存表格';
-        dlBtn.onclick = function (e) { e.stopPropagation(); downloadFromPreview(); };
-        var closeBtn = document.createElement('button');
-        closeBtn.className = 'mdreader-preview-close-btn';
-        closeBtn.textContent = '关闭';
-        closeBtn.onclick = function (e) { e.stopPropagation(); closePreviewOverlay(); };
-        toolbar.appendChild(dlBtn);
-        toolbar.appendChild(closeBtn);
-        previewOverlay.appendChild(toolbar);
-
-        // 内容区
-        var body = document.createElement('div');
-        body.className = 'mdreader-preview-body';
-        previewOverlay.appendChild(body);
-
-        // 双击任意位置关闭预览；单击背景也可关闭
-        var _pTouchX = 0, _pTouchY = 0, _pTouchMoved = false;
-        var PREVIEW_MOVE_THRESHOLD = 15;
-
-        previewOverlay.addEventListener('touchstart', function (e) {
-            if (e.touches.length === 1) {
-                _pTouchX = e.touches[0].clientX;
-                _pTouchY = e.touches[0].clientY;
-                _pTouchMoved = false;
-            }
-            e.stopPropagation();
-        }, { passive: true });
-        previewOverlay.addEventListener('touchmove', function (e) {
-            if (e.touches.length === 1) {
-                var dx = Math.abs(e.touches[0].clientX - _pTouchX);
-                var dy = Math.abs(e.touches[0].clientY - _pTouchY);
-                if (dx > PREVIEW_MOVE_THRESHOLD || dy > PREVIEW_MOVE_THRESHOLD) {
-                    _pTouchMoved = true;
-                }
-            }
-            e.preventDefault();
-            e.stopPropagation();
-        }, { passive: false });
-        previewOverlay.addEventListener('touchend', function (e) {
-            if (_pTouchMoved) { _pTouchMoved = false; e.stopPropagation(); return; }
-            var now = Date.now();
-            if (now - _previewLastTapTime < 350) {
-                // 双击：关闭预览
-                _previewLastTapTime = 0;
-                closePreviewOverlay();
-                e.stopPropagation();
-                return;
-            }
-            _previewLastTapTime = now;
-            e.stopPropagation();
-        }, { passive: true });
-
-        // 单击背景关闭（桌面端鼠标点击）
-        previewOverlay.addEventListener('click', function (e) {
-            if (e.target === previewOverlay || e.target === body) closePreviewOverlay();
-        });
-
-        document.body.appendChild(previewOverlay);
-        return previewOverlay;
-    }
-
-    /** 打开表格预览（支持下载） */
-    function openTablePreview(tableEl) {
-        var overlay = ensurePreviewOverlay();
-        var body = overlay.querySelector('.mdreader-preview-body');
-        body.innerHTML = '';
-        body.scrollTop = 0;
-        // 显示保存/下载按钮
-        var dlBtn = overlay.querySelector('.mdreader-preview-dl-btn');
-        if (dlBtn) dlBtn.style.display = '';
-        // 克隆表格（样式由 CSS 控制，跟随主题）
-        var clone = tableEl.cloneNode(true);
-        var wrapper = document.createElement('div');
-        wrapper.style.cssText = 'overflow:auto;max-width:95vw;max-height:85vh;';
-        wrapper.appendChild(clone);
-        body.appendChild(wrapper);
-        overlay.style.display = 'flex';
-    }
-
-    /** 关闭预览覆盖层 */
-    function closePreviewOverlay() {
-        if (previewOverlay) {
-            previewOverlay.style.display = 'none';
-            if (previewBlobUrl) { URL.revokeObjectURL(previewBlobUrl); previewBlobUrl = null; }
-        }
-    }
-
-    // 暴露给 Android 返回键处理
-    window.isPreviewOverlayOpen = function () {
-        return previewOverlay && previewOverlay.style.display !== 'none';
-    };
-    window.closeImagePreview = closePreviewOverlay;
-
-    /** 将表格元素直接渲染为 PNG data URL（纯 JS Canvas 绘制，完全绕过离屏 WebView）。
-     *  解决 Android WebView view.draw(canvas) 输出空白的问题。 */
-    function _captureTableToPng(tableEl) {
-        var dpr = window.devicePixelRatio || 1;
-        var isDark = document.body.classList.contains('dark');
-        var bg = isDark ? '#0d1117' : '#ffffff';
-        var fg = isDark ? '#e6edf3' : '#1f2328';
-        var border = isDark ? '#30363d' : '#d0d7de';
-        var hdrBg = isDark ? '#161b22' : '#f6f8fa';
-        var padX = 14, padY = 10;
-        var fontSize = 15;
-        var font = fontSize + 'px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif';
-
-        var canvas = document.createElement('canvas');
-        var ctx = canvas.getContext('2d');
-        ctx.font = font;
-
-        // 提取表格数据
-        var rows = [];
-        var trs = tableEl.querySelectorAll('tr');
-        for (var i = 0; i < trs.length; i++) {
-            var cells = [];
-            var tds = trs[i].querySelectorAll('th, td');
-            for (var j = 0; j < tds.length; j++) {
-                cells.push({
-                    text: tds[j].textContent.trim(),
-                    isHeader: tds[j].tagName === 'TH'
-                });
-            }
-            if (cells.length > 0) rows.push(cells);
-        }
-        if (rows.length === 0) return null;
-
-        // 计算列数
-        var numCols = 0;
-        for (var i = 0; i < rows.length; i++) {
-            if (rows[i].length > numCols) numCols = rows[i].length;
-        }
-
-        // 测量每列最大文本宽度
-        var colWidths = [];
-        for (var c = 0; c < numCols; c++) colWidths[c] = 0;
-        for (var i = 0; i < rows.length; i++) {
-            for (var j = 0; j < rows[i].length; j++) {
-                var w = ctx.measureText(rows[i][j].text).width;
-                if (w > colWidths[j]) colWidths[j] = w;
-            }
-        }
-        // 每列加 padding
-        for (var c = 0; c < numCols; c++) colWidths[c] += padX * 2;
-
-        var totalW = 0;
-        for (var c = 0; c < numCols; c++) totalW += colWidths[c];
-        totalW += 1; // 右边框
-
-        var rowH = fontSize + padY * 2;
-        var totalH = rows.length * rowH + 1; // 底边框
-
-        // 设置 canvas 物理尺寸（高清）
-        canvas.width = Math.ceil(totalW * dpr);
-        canvas.height = Math.ceil(totalH * dpr);
-        ctx.scale(dpr, dpr);
-
-        // 背景
-        ctx.fillStyle = bg;
-        ctx.fillRect(0, 0, totalW, totalH);
-
-        // 逐行绘制
-        for (var i = 0; i < rows.length; i++) {
-            var y = i * rowH;
-            // 行背景（偶数行斑马纹）
-            if (i > 0 && i % 2 === 0) {
-                ctx.fillStyle = hdrBg;
-                ctx.fillRect(0, y, totalW, rowH);
-            }
-            // 表头背景
-            if (rows[i].length > 0 && rows[i][0].isHeader) {
-                ctx.fillStyle = hdrBg;
-                ctx.fillRect(0, y, totalW, rowH);
-            }
-
-            var x = 0;
-            for (var j = 0; j < rows[i].length; j++) {
-                var cw = colWidths[j] || 60;
-                // 单元格边框
-                ctx.strokeStyle = border;
-                ctx.lineWidth = 1;
-                ctx.strokeRect(x + 0.5, y + 0.5, cw, rowH);
-                // 文字
-                ctx.fillStyle = fg;
-                ctx.font = (rows[i][j].isHeader ? '600 ' : '') + fontSize + 'px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif';
-                ctx.textBaseline = 'middle';
-                ctx.fillText(rows[i][j].text, x + padX, y + rowH / 2, cw - padX * 2);
-                x += cw;
-            }
-        }
-        // 外边框
-        ctx.strokeStyle = border;
-        ctx.lineWidth = 1;
-        ctx.strokeRect(0.5, 0.5, totalW, totalH);
-
-        return canvas.toDataURL('image/png');
-    }
-
-    /** 从预览覆盖层下载当前内容（仅表格） */
-    function downloadFromPreview() {
-        try {
-            var b = bridge();
-            if (!b) return;
-            // 表格：JS Canvas 直接绘制，绕过离屏 WebView draw(canvas) 空白问题
-            var tbody = previewOverlay.querySelector('.mdreader-preview-body');
-            var table = tbody.querySelector('table');
-            if (table) {
-                var dataUrl = _captureTableToPng(table);
-                if (dataUrl && b.savePngBase64) {
-                    b.savePngBase64(dataUrl.replace(/^data:image\/png;base64,/, ''), 'table');
-                }
-            }
-        } catch (e) { /* bridge unavailable */ }
-    }
-
-    /** 显示下载确认弹窗。el 为用户长按的具体表格元素 */
-    function showDownloadConfirm(el) {
-        var msg = '确定保存此图片？';
-        var overlay = document.createElement('div');
-        overlay.className = 'mdreader-confirm-overlay';
-        overlay.innerHTML = '<div class="mdreader-confirm-box">' +
-            '<p>' + msg + '</p>' +
-            '<button class="mdreader-confirm-yes">确定保存</button>' +
-            '<button class="mdreader-confirm-no">取消</button></div>';
-        overlay.querySelector('.mdreader-confirm-no').onclick = function () {
-            document.body.removeChild(overlay);
-        };
-        overlay.querySelector('.mdreader-confirm-yes').onclick = function () {
-            document.body.removeChild(overlay);
-            try {
-                var b = bridge();
-                if (!b) return;
-                // 表格：JS Canvas 直接绘制 PNG
-                if (el) {
-                    var dataUrl = _captureTableToPng(el);
-                    if (dataUrl && b.savePngBase64) {
-                        b.savePngBase64(dataUrl.replace(/^data:image\/png;base64,/, ''), 'table');
-                    }
-                }
-            } catch (e) { /* bridge unavailable */ }
-        };
-        // 点击背景关闭
-        overlay.addEventListener('click', function (e) {
-            if (e.target === overlay) document.body.removeChild(overlay);
-        });
-        document.body.appendChild(overlay);
-    }
-
-    /** 为预览区域内的表格添加单击预览 + 长按下载 */
-    function setupTableInteractions() {
-        var tables = previewEl.querySelectorAll('table');
-        for (var i = 0; i < tables.length; i++) {
-            (function (table) {
-                // 跳过 frontmatter 表格（不交互）
-                if (table.closest && table.closest('.frontmatter')) return;
-                var pressTimer = null;
-                var longPressFired = false;
-                var startX = 0, startY = 0;
-                var lastTapTime = 0;
-                var MOVE_THRESHOLD = 15; // 滑动超过此距离视为滚动，不触发预览
-
-                function getTouchPos(e) {
-                    if (e.touches && e.touches.length > 0) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
-                    if (e.changedTouches && e.changedTouches.length > 0) return { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
-                    return { x: e.clientX || 0, y: e.clientY || 0 };
-                }
-
-                function isMoved(e) {
-                    var pos = getTouchPos(e);
-                    var dx = Math.abs(pos.x - startX);
-                    var dy = Math.abs(pos.y - startY);
-                    return (dx > MOVE_THRESHOLD || dy > MOVE_THRESHOLD);
-                }
-
-                function startPress(e) {
-                    var pos = getTouchPos(e);
-                    startX = pos.x;
-                    startY = pos.y;
-                    longPressFired = false;
-                    pressTimer = setTimeout(function () {
-                        pressTimer = null;
-                        longPressFired = true;
-                        table.style.transition = 'background-color 0.15s';
-                        table.style.backgroundColor = 'rgba(9,105,218,0.1)';
-                        setTimeout(function () { table.style.backgroundColor = ''; }, 300);
-                        showDownloadConfirm(table);
-                    }, 500);
-                }
-                function cancelPress() {
-                    if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
-                }
-
-                table.style.cursor = 'pointer';
-                table.addEventListener('touchstart', startPress, { passive: true });
-                table.addEventListener('touchend', function (e) {
-                    cancelPress();
-                    // 防重复点击
-                    var nowTap = Date.now();
-                    if (nowTap - lastTapTime < 400) return;
-                    // 滑动过程中不触发预览
-                    if (!longPressFired && !isMoved(e)) {
-                        lastTapTime = nowTap;
-                        openTablePreview(table);
-                    }
-                });
-                table.addEventListener('touchmove', function (e) {
-                    if (isMoved(e)) cancelPress();
-                });
-                table.addEventListener('touchcancel', cancelPress);
-                table.addEventListener('mousedown', startPress);
-                table.addEventListener('mouseup', function (e) {
-                    cancelPress();
-                    var nowTap = Date.now();
-                    if (nowTap - lastTapTime < 400) return;
-                    if (!longPressFired && !isMoved(e)) {
-                        lastTapTime = nowTap;
-                        openTablePreview(table);
-                    }
-                });
-                table.addEventListener('mouseleave', cancelPress);
-            })(tables[i]);
-        }
-    }
-
     /* ---------- 渲染缓存 ---------- */
     var renderCache = { source: null, html: null };
 
@@ -1135,7 +761,6 @@
         highlightTags(previewEl);
         addCopyButtons();
         renderMermaid();
-        setupTableInteractions();
         renderFormulas();
         // 自动展开 markdown 嵌入块（类似 Obsidian transclusion）
         autoExpandEmbeds();
@@ -1921,7 +1546,7 @@
     });
     window.addEventListener('pagehide', flushSave);
 
-    /* ---------- 双击页面任意位置重置缩放回正常大小 ---------- */
+    /* ---------- 双击页面任意位置重置 WebView 缩放回 100% ---------- */
     (function () {
         var _dtX = 0, _dtY = 0, _dtMoved = false, _dtLastTap = 0;
         var DT_THRESHOLD = 15;
@@ -1941,33 +1566,24 @@
         }, { passive: true });
         document.addEventListener('touchend', function (e) {
             if (_dtMoved) { _dtMoved = false; return; }
-            // 排除可交互元素
+            // 排除链接和按钮，防止误触
             var t = e.target;
             while (t && t !== document.body) {
                 var tag = t.tagName;
-                if (tag === 'A' || tag === 'BUTTON' || tag === 'INPUT' || tag === 'TABLE' || tag === 'TH' || tag === 'TD') return;
+                if (tag === 'A' || tag === 'BUTTON' || tag === 'INPUT') return;
                 if (t.classList && (
-                    t.classList.contains('md-h') || t.classList.contains('copy-btn') ||
-                    t.classList.contains('task-checkbox') || t.classList.contains('mermaid-container')
+                    t.classList.contains('copy-btn') || t.classList.contains('task-checkbox')
                 )) return;
-                if (t.closest && t.closest('table')) return;
                 t = t.parentNode;
             }
-            // 预览覆盖层打开时不触发
-            if (previewOverlay && previewOverlay.style.display !== 'none') return;
             var now = Date.now();
             if (now - _dtLastTap < 350) {
                 _dtLastTap = 0;
-                // 重置缩放回 100%，保持阅读位置
-                var root = document.documentElement;
-                var curZoom = parseFloat(root.style.zoom) || 1;
-                if (Math.abs(curZoom - 1) > 0.01) {
-                    var ratio = 1 / curZoom;
-                    var sx = window.scrollX * ratio;
-                    var sy = window.scrollY * ratio;
-                    root.style.zoom = '1';
-                    window.scrollTo(sx, sy);
-                }
+                // 通过 Android 桥接重置 WebView 原生缩放
+                try {
+                    var b = bridge();
+                    if (b && b.resetWebViewZoom) b.resetWebViewZoom();
+                } catch (e) { }
             } else {
                 _dtLastTap = now;
             }

@@ -266,24 +266,9 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                         invalidateOptionsMenu()
                     }
                 } else {
-                    // 预览模式：先检查是否有图片预览 overlay 打开
+                    // 预览模式：确认是否退出
                     if (!pageReady) return@handleOnBackPressed
-                    try {
-                        webView.evaluateJavascript("window.isPreviewOverlayOpen && window.isPreviewOverlayOpen()") { result ->
-                            val overlayOpen = result?.trim()?.removeSurrounding("\"") == "true"
-                            if (overlayOpen) {
-                                // 关闭图片预览
-                                try {
-                                    webView.evaluateJavascript("window.closeImagePreview && window.closeImagePreview()", null)
-                                } catch (_: Exception) {}
-                            } else {
-                                // 确认是否退出
-                                confirmExit()
-                            }
-                        }
-                    } catch (_: Exception) {
-                        confirmExit()
-                    }
+                    confirmExit()
                 }
             }
         }
@@ -2106,6 +2091,13 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                 .setMessage(message)
                 .setPositiveButton(R.string.ok, null)
                 .show()
+        }
+    }
+
+    override fun resetWebViewZoom() {
+        runOnUiThread {
+            webView.setInitialScale(100)
+            webView.reload()
         }
     }
 
