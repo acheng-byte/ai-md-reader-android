@@ -81,8 +81,12 @@ object VaultIndex {
 
     /** 后台扫描库文件夹（增量：跳过已扫描目录，定期保存） */
     fun scanInBackground(context: Context, vaultUri: Uri, onDone: (() -> Unit)? = null) {
-        if (scanning) return
+        if (scanning) {
+            Logger.w(TAG, "scanInBackground: 已在扫描中，跳过")
+            return
+        }
         Thread {
+            val startTime = System.currentTimeMillis()
             android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_LOWEST)
             scanning = true
             try {
@@ -90,11 +94,14 @@ object VaultIndex {
                 val encoded = VaultSearch.ensureEncoded(vaultUri)
                 // 关键：扫描前就设置 indexVaultUri，确保中途 saveToDisk 保存正确的 URI
                 synchronized(this) { indexVaultUri = uriStr }
-                Logger.i(TAG, "开始索引库文件夹...")
+                Logger.i(TAG, "开始索引库文件夹... 当前已有 ${allEntries.size} 个文件, ${scannedDirs.size} 个已扫描目录")
 
                 val root = DocumentFile.fromTreeUri(context, encoded)
                 if (root != null) {
-                    scanDir(context, encoded, root, "", context)
+                    Logger.i(TAG, "根目录创建成功，开始迭代扫描...")
+                    scanQueue(context, encoded, root, context)
+                } else {
+                    Logger.e(TAG, "根目录创建失败！URI: ${encoded.toString().take(80)}")
                 }
 
                 // 扫描完成，标记就绪
@@ -104,9 +111,10 @@ object VaultIndex {
                 }
                 // 最终保存
                 saveToDisk(context)
-                Logger.i(TAG, "索引完成: ${allEntries.size} 个文件")
+                val elapsed = System.currentTimeMillis() - startTime
+                Logger.i(TAG, "索引完成: ${allEntries.size} 个文件, ${scannedDirs.size} 个目录, 耗时 ${elapsed}ms")
             } catch (e: Throwable) {
-                Logger.e(TAG, "索引失败: ${e.message}")
+                Logger.e(TAG, "索引失败: ${e.message}, 当前已索引 ${allEntries.size} 个文件")
             } finally {
                 scanning = false
             }
@@ -189,57 +197,77 @@ object VaultIndex {
 
     private var context_filesDir_ref: File? = null
 
-    private fun scanDir(context: Context, treeUri: Uri, dir: DocumentFile, relPath: String,
-                        ctx: Context) {
-        // 增量：跳过已扫描的目录
-        if (relPath.isNotEmpty() && scannedDirs.contains(relPath)) return
+    /** 扫描单个目录（非递归，由 scanQueue 调用） */
+    private data class DirToScan(val dir: DocumentFile, val relPath: String)
 
-        val children = try {
-            listDir(context, treeUri, dir)
-        } catch (e: Exception) {
-            Logger.w(TAG, "列目录失败: $relPath - ${e.message}")
-            emptyList()
-        }
-        if (children.isEmpty()) {
-            if (relPath.isNotEmpty()) scannedDirs.add(relPath)
-            return
-        }
+    private fun scanQueue(context: Context, treeUri: Uri, root: DocumentFile, ctx: Context) {
+        val queue = ArrayDeque<DirToScan>()
+        queue.add(DirToScan(root, ""))
 
-        for (file in children) {
-            try {
-                val name = file.name ?: continue
-                if (file.isDirectory) {
-                    val childPath = if (relPath.isEmpty()) name else "$relPath/$name"
-                    scanDir(context, treeUri, file, childPath, ctx)
-                } else {
-                    val entry = Entry(
-                        name = name,
-                        path = if (relPath.isEmpty()) name else "$relPath/$name",
-                        uri = file.uri.toString()
-                    )
-                    synchronized(this) {
-                        allEntries.add(entry)
-                        val lower = name.lowercase()
-                        if (entries[lower] == null) entries[lower] = entry
-                    }
-                    fileCountSinceSave++
-                    // 定期保存（增量断点）
-                    if (fileCountSinceSave >= SAVE_INTERVAL) {
-                        fileCountSinceSave = 0
-                        val currentCount = allEntries.size
-                        Logger.i(TAG, "增量扫描进度: 已索引 $currentCount 个文件，保存断点...")
-                        saveToDisk(ctx)
-                        Logger.i(TAG, "断点保存完毕，当前已索引 $currentCount 个文件")
-                    }
-                }
-            } catch (e: Exception) {
-                Logger.w(TAG, "扫描文件异常: $relPath - ${e.message}")
+        while (queue.isNotEmpty()) {
+            val (dir, relPath) = queue.removeFirst()
+
+            // 增量：跳过已扫描的目录
+            if (relPath.isNotEmpty() && scannedDirs.contains(relPath)) {
+                continue
             }
-        }
 
-        // 目录扫描完毕，记录断点
-        if (relPath.isNotEmpty()) {
-            scannedDirs.add(relPath)
+            val children = try {
+                listDir(context, treeUri, dir)
+            } catch (e: Exception) {
+                Logger.w(TAG, "列目录失败: $relPath - ${e.message}")
+                emptyList()
+            }
+
+            if (children.isEmpty()) {
+                if (relPath.isNotEmpty()) scannedDirs.add(relPath)
+                continue
+            }
+
+            // 记录子目录数用于诊断
+            val dirCount = children.count { it.isDirectory }
+            val fileCount = children.size - dirCount
+            if (relPath.isEmpty() || dirCount > 0) {
+                Logger.i(TAG, "扫描目录: ${relPath.ifEmpty { "(根)" }} - ${children.size} 项 ($fileCount 文件, $dirCount 子目录)")
+            }
+
+            for (file in children) {
+                try {
+                    val name = file.name ?: continue
+                    if (file.isDirectory) {
+                        val childPath = if (relPath.isEmpty()) name else "$relPath/$name"
+                        // 加入队列而非递归调用
+                        queue.addLast(DirToScan(file, childPath))
+                    } else {
+                        val entry = Entry(
+                            name = name,
+                            path = if (relPath.isEmpty()) name else "$relPath/$name",
+                            uri = file.uri.toString()
+                        )
+                        synchronized(this) {
+                            allEntries.add(entry)
+                            val lower = name.lowercase()
+                            if (entries[lower] == null) entries[lower] = entry
+                        }
+                        fileCountSinceSave++
+                        // 定期保存（增量断点）
+                        if (fileCountSinceSave >= SAVE_INTERVAL) {
+                            fileCountSinceSave = 0
+                            val currentCount = allEntries.size
+                            Logger.i(TAG, "增量扫描进度: 已索引 $currentCount 个文件，保存断点...")
+                            saveToDisk(ctx)
+                            Logger.i(TAG, "断点保存完毕，当前已索引 $currentCount 个文件")
+                        }
+                    }
+                } catch (e: Exception) {
+                    Logger.w(TAG, "扫描文件异常: $relPath - ${e.message}")
+                }
+            }
+
+            // 目录扫描完毕，记录断点
+            if (relPath.isNotEmpty()) {
+                scannedDirs.add(relPath)
+            }
         }
     }
 
