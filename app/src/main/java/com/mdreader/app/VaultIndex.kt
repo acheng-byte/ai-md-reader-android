@@ -197,12 +197,16 @@ object VaultIndex {
 
     private var context_filesDir_ref: File? = null
 
+    /** 需要过滤的 Obsidian 系统目录 */
+    private val SKIP_DIRS = setOf(".obsidian", ".trash")
+
     /** 扫描单个目录（非递归，由 scanQueue 调用） */
     private data class DirToScan(val dir: DocumentFile, val relPath: String)
 
     private fun scanQueue(context: Context, treeUri: Uri, root: DocumentFile, ctx: Context) {
         val queue = ArrayDeque<DirToScan>()
         queue.add(DirToScan(root, ""))
+        var skippedCount = 0
 
         while (queue.isNotEmpty()) {
             val (dir, relPath) = queue.removeFirst()
@@ -235,6 +239,12 @@ object VaultIndex {
                 try {
                     val name = file.name ?: continue
                     if (file.isDirectory) {
+                        // 过滤 Obsidian 系统目录
+                        if (name in SKIP_DIRS) {
+                            skippedCount++
+                            Logger.i(TAG, "过滤系统目录: $name")
+                            continue
+                        }
                         val childPath = if (relPath.isEmpty()) name else "$relPath/$name"
                         // 加入队列而非递归调用
                         queue.addLast(DirToScan(file, childPath))
@@ -268,6 +278,9 @@ object VaultIndex {
             if (relPath.isNotEmpty()) {
                 scannedDirs.add(relPath)
             }
+        }
+        if (skippedCount > 0) {
+            Logger.i(TAG, "共过滤 $skippedCount 个系统目录")
         }
     }
 
