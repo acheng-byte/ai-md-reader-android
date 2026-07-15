@@ -101,10 +101,22 @@ class Prefs(context: Context) {
         return true
     }
 
-    /** 计算陪伴天数 */
+    /** 计算陪伴天数（按北京时间日历天数，与 activeDays 一致） */
     fun companionDays(): Int {
-        val days = (System.currentTimeMillis() - installDate) / (24 * 60 * 60 * 1000L)
-        return days.toInt().coerceAtLeast(1)
+        val tz = java.util.TimeZone.getTimeZone("Asia/Shanghai")
+        val calNow = java.util.Calendar.getInstance(tz)
+        val calInstall = java.util.Calendar.getInstance(tz).apply { timeInMillis = installDate }
+        // 清零时分秒，只比较日期
+        calNow.set(java.util.Calendar.HOUR_OF_DAY, 0)
+        calNow.set(java.util.Calendar.MINUTE, 0)
+        calNow.set(java.util.Calendar.SECOND, 0)
+        calNow.set(java.util.Calendar.MILLISECOND, 0)
+        calInstall.set(java.util.Calendar.HOUR_OF_DAY, 0)
+        calInstall.set(java.util.Calendar.MINUTE, 0)
+        calInstall.set(java.util.Calendar.SECOND, 0)
+        calInstall.set(java.util.Calendar.MILLISECOND, 0)
+        val days = ((calNow.timeInMillis - calInstall.timeInMillis) / (24 * 60 * 60 * 1000L)).toInt() + 1
+        return days.coerceAtLeast(1)
     }
 
     /** 是否自动解析并显示 YAML frontmatter 元数据表格（默认关闭，减少渲染负担） */
