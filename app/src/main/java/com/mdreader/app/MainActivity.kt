@@ -1519,7 +1519,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         refreshEntries()
 
         // 顶部工具栏：刷新按钮
-        lateinit var logDialog: androidx.appcompat.app.AlertDialog
+        val dialogRef = arrayOfNulls<androidx.appcompat.app.AlertDialog>(1)
         val refreshBtn = android.widget.Button(ctx).apply {
             text = "刷新"
             textSize = 12f
@@ -1527,10 +1527,9 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             setOnClickListener {
                 refreshEntries()
                 recyclerView.scrollToPosition(0)
-                // 更新标题显示条数
                 val errCount = Logger.errorCount()
                 val titleSuffix = if (errCount > 0) " (${Logger.size()} 条, $errCount 个错误)" else " (${Logger.size()} 条)"
-                if (::logDialog.isInitialized) logDialog.setTitle("运行日志$titleSuffix")
+                dialogRef[0]?.setTitle("运行日志$titleSuffix")
             }
         }
         val toolbar = android.widget.LinearLayout(ctx).apply {
@@ -1568,7 +1567,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             .setNeutralButton("全部", null) // null listener 防止自动关闭
             .create()
 
-        logDialog = dialog
+        dialogRef[0] = dialog
         dialog.setOnShowListener {
             val btn = dialog.getButton(androidx.appcompat.app.AlertDialog.BUTTON_NEUTRAL)
             btn.setOnClickListener {
