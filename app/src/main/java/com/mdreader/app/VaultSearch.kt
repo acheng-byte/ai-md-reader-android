@@ -301,7 +301,7 @@ object VaultSearch {
             Logger.e(TAG, "SAF回退: root为null, encoded=${encoded.toString().take(80)}")
             return null
         }
-        Logger.i(TAG, "SAF回退: root有效, exists=${root.exists}, isDir=${root.isDirectory}")
+        Logger.i(TAG, "SAF回退: root有效, exists=${root.exists()}, isDir=${root.isDirectory}")
         val rootChildren = listDir(context, encoded, root)
         Logger.i(TAG, "SAF回退: root列出 ${rootChildren.size} 项, 子目录: ${rootChildren.filter { it.isDirectory }.map { it.name }.joinToString(",")}")
 
