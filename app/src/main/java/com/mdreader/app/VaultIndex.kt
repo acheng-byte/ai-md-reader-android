@@ -39,6 +39,41 @@ object VaultIndex {
     fun isReady(): Boolean = ready
     fun entryCount(): Int = synchronized(this) { allEntries.size }
 
+    /** 诊断：返回索引中属于指定目录的文件名样本（同时尝试解码路径匹配） */
+    fun sampleByDir(dirName: String, maxSamples: Int = 5): List<String> {
+        if (!ready) return emptyList()
+        val prefix = "$dirName/"
+        val result = mutableListOf<String>()
+        synchronized(this) {
+            for (e in allEntries) {
+                val p = e.path.replace('\\', '/')
+                val pDecoded = try { java.net.URLDecoder.decode(p, "UTF-8") } catch (_: Exception) { p }
+                if (p.startsWith(prefix) || pDecoded.startsWith(prefix)) {
+                    result.add("${e.name} (path=${e.path})")
+                    if (result.size >= maxSamples) break
+                }
+            }
+        }
+        return result
+    }
+
+    /** 模糊查找：子串匹配（编码/解码双重比较），最后手段 */
+    fun fuzzyFindByName(fileName: String): Entry? {
+        if (!ready) return null
+        val decoded = try { java.net.URLDecoder.decode(fileName, "UTF-8") } catch (_: Exception) { null }
+        val searchTerms = listOfNotNull(fileName, decoded).distinct()
+        synchronized(this) {
+            for (e in allEntries) {
+                val storedDecoded = try { java.net.URLDecoder.decode(e.name, "UTF-8") } catch (_: Exception) { e.name }
+                for (term in searchTerms) {
+                    if (storedDecoded.contains(term, ignoreCase = true)) return e
+                    if (e.name.contains(term, ignoreCase = true)) return e
+                }
+            }
+        }
+        return null
+    }
+
     /** 按文件名查找（大小写不敏感 + URL 解码兼容） */
     fun findByName(fileName: String): Entry? {
         if (!ready) return null

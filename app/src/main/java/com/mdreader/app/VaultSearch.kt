@@ -221,31 +221,77 @@ object VaultSearch {
                     Logger.i(TAG, "索引命中(路径): ${indexEntry.path}")
                     runCatching {
                         val df = DocumentFile.fromSingleUri(context, Uri.parse(indexEntry.uri))
-                        if (df?.exists() == true) return df
+                        if (df?.exists() == true) {
+                            Logger.i(TAG, "文件验证存在，返回: ${df.name}")
+                            return df
+                        } else {
+                            Logger.w(TAG, "索引命中但文件不存在: ${indexEntry.uri}")
+                        }
                     }
+                } else {
+                    Logger.i(TAG, "findByPath 未命中: $pathWithExt")
                 }
             }
-            // 按文件名查找
+            // 按文件名查找（带扩展名）
             val nameWithExt = if (fileName.endsWith(".md", ignoreCase = true) || fileName.endsWith(".markdown", ignoreCase = true))
                 fileName else "$fileName.md"
             val nameEntry = VaultIndex.findByName(nameWithExt)
             if (nameEntry != null) {
-                Logger.i(TAG, "索引命中(文件名): ${nameEntry.path}")
+                Logger.i(TAG, "索引命中(文件名+扩展名): ${nameEntry.path}")
                 runCatching {
                     val df = DocumentFile.fromSingleUri(context, Uri.parse(nameEntry.uri))
-                    if (df?.exists() == true) return df
+                    if (df?.exists() == true) {
+                        Logger.i(TAG, "文件验证存在，返回: ${df.name}")
+                        return df
+                    } else {
+                        Logger.w(TAG, "索引命中但文件不存在: ${nameEntry.uri}")
+                    }
                 }
+            } else {
+                Logger.i(TAG, "findByName 未命中(带扩展名): $nameWithExt")
             }
             // 也尝试不带扩展名
-            val nameEntryNoExt = VaultIndex.findByName(fileName)
+            val baseName = fileName.substringBeforeLast('.')
+            val nameEntryNoExt = VaultIndex.findByName(baseName)
             if (nameEntryNoExt != null && nameEntryNoExt != nameEntry) {
                 Logger.i(TAG, "索引命中(无扩展名): ${nameEntryNoExt.path}")
                 runCatching {
                     val df = DocumentFile.fromSingleUri(context, Uri.parse(nameEntryNoExt.uri))
-                    if (df?.exists() == true) return df
+                    if (df?.exists() == true) {
+                        Logger.i(TAG, "文件验证存在，返回: ${df.name}")
+                        return df
+                    } else {
+                        Logger.w(TAG, "索引命中但文件不存在: ${nameEntryNoExt.uri}")
+                    }
                 }
             }
-            Logger.i(TAG, "索引未命中，回退到 SAF 路径导航")
+            // 诊断：在索引中搜索包含目标目录名的条目，确认索引是否包含该目录的文件
+            if (cleanName.contains('/')) {
+                val dirPart = cleanName.substringBefore('/')
+                val samples = VaultIndex.sampleByDir(dirPart, 5)
+                if (samples.isEmpty()) {
+                    Logger.w(TAG, "索引中完全没有目录 '$dirPart' 的文件！")
+                } else {
+                    Logger.i(TAG, "索引中 '$dirPart' 目录的示例文件: ${samples.joinToString(", ")}")
+                }
+            }
+            // 最后手段：模糊子串匹配
+            val fuzzyEntry = VaultIndex.fuzzyFindByName(baseName)
+            if (fuzzyEntry != null) {
+                Logger.i(TAG, "模糊匹配命中: search=$baseName, found=${fuzzyEntry.name} (path=${fuzzyEntry.path})")
+                runCatching {
+                    val df = DocumentFile.fromSingleUri(context, Uri.parse(fuzzyEntry.uri))
+                    if (df?.exists() == true) {
+                        Logger.i(TAG, "模糊匹配文件存在，返回: ${df.name}")
+                        return df
+                    } else {
+                        Logger.w(TAG, "模糊匹配但文件不存在: ${fuzzyEntry.uri}")
+                    }
+                }
+            } else {
+                Logger.w(TAG, "模糊匹配也失败: $baseName")
+            }
+            Logger.i(TAG, "索引全部未命中，回退到 SAF 路径导航")
         } else {
             Logger.w(TAG, "索引未就绪，直接使用 SAF 路径导航")
         }
