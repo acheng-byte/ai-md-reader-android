@@ -951,9 +951,10 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             // 切换到预览模式：保存编辑内容并渲染
             syncSourceContent()
             // 计算编辑器的滚动位置比例，用于同步到预览模式
-            val editScrollMax = binding.editScroll.computeVerticalScrollRange() - binding.editScroll.height
-            if (editScrollMax > 0) {
-                pendingScrollRatio = binding.editScroll.scrollY.toDouble() / editScrollMax
+            val layout = binding.editText.layout
+            if (layout != null && layout.height > binding.editScroll.height) {
+                val maxScroll = layout.height - binding.editScroll.height
+                pendingScrollRatio = if (maxScroll > 0) binding.editScroll.scrollY.toDouble() / maxScroll else 0.0
             } else {
                 pendingScrollRatio = 0.0
             }

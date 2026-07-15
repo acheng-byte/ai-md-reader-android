@@ -7,6 +7,7 @@ import androidx.documentfile.provider.DocumentFile
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.io.FileWriter
 
 /**
  * 库文件索引：持久化缓存 + 增量扫描。
