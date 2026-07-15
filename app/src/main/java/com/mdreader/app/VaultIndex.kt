@@ -114,8 +114,31 @@ object VaultIndex {
         val byName = findByName(fileName) ?: return null
         if (!normalized.contains('/')) return byName
 
-        // 按路径段匹配，避免 endsWith 误匹配部分目录名
+        // 按路径段匹配：先用 HashMap 找同名文件候选，再检查路径
         val targetSegments = normalized.split('/').map { it.lowercase() }
+        val lowerFileName = fileName.lowercase()
+
+        // 从 HashMap 中获取同名文件候选（O(1)），避免线性扫描
+        val candidates = mutableListOf<Entry>()
+        entries[lowerFileName]?.let { candidates.add(it) }
+        // 也尝试 URL 解码后的文件名
+        try {
+            val decoded = java.net.URLDecoder.decode(fileName, "UTF-8")
+            if (decoded != fileName) {
+                entries[decoded.lowercase()]?.let { candidates.add(it) }
+            }
+        } catch (_: Exception) {}
+
+        // 对候选做路径段匹配
+        for (e in candidates) {
+            val entrySegments = e.path.replace('\\', '/').trimStart('/').split('/').map { it.lowercase() }
+            if (entrySegments.size >= targetSegments.size) {
+                val tail = entrySegments.subList(entrySegments.size - targetSegments.size, entrySegments.size)
+                if (tail == targetSegments) return e
+            }
+        }
+
+        // HashMap 未命中 → 回退线性扫描（处理 URL 编码不一致的情况）
         for (e in allEntries) {
             if (e.name.equals(fileName, ignoreCase = true)) {
                 val entrySegments = e.path.replace('\\', '/').trimStart('/').split('/').map { it.lowercase() }
@@ -263,20 +286,50 @@ object VaultIndex {
 
     /** 需要过滤的 Obsidian 系统目录 */
     private val SKIP_DIRS = setOf(".obsidian", ".trash")
+    private const val MAX_DEPTH = 10         // 最大目录深度
+    private const val MAX_FILES = 10000      // 最大文件数安全阈值
 
     /** 扫描单个目录（非递归，由 scanQueue 调用） */
     private data class DirToScan(val dir: DocumentFile, val relPath: String)
+
+    /** 检测递归目录：如果目录名已在路径中出现过，说明是递归嵌套 */
+    private fun isRecursiveDir(relPath: String, dirName: String): Boolean {
+        if (relPath.isEmpty()) return false
+        val segments = relPath.split('/')
+        // 如果同名目录在路径中已出现 2 次以上，视为递归嵌套
+        val count = segments.count { it.equals(dirName, ignoreCase = true) }
+        return count >= 2
+    }
 
     private fun scanQueue(context: Context, treeUri: Uri, root: DocumentFile, ctx: Context) {
         val queue = ArrayDeque<DirToScan>()
         queue.add(DirToScan(root, ""))
         var skippedCount = 0
+        var depthSkipped = 0
+        var recursiveSkipped = 0
 
         while (queue.isNotEmpty()) {
+            // 安全检查：文件数超过阈值时停止扫描
+            val currentSize = synchronized(this) { allEntries.size }
+            if (currentSize >= MAX_FILES) {
+                Logger.w(TAG, "扫描达到安全阈值 $MAX_FILES 个文件，停止扫描。请检查库文件夹是否包含递归嵌套目录。")
+                break
+            }
+
             val (dir, relPath) = queue.removeFirst()
 
             // 增量：跳过已扫描的目录
             if (relPath.isNotEmpty() && scannedDirs.contains(relPath)) {
+                continue
+            }
+
+            // 深度限制
+            val depth = if (relPath.isEmpty()) 0 else relPath.count { it == '/' } + 1
+            if (depth >= MAX_DEPTH) {
+                depthSkipped++
+                if (depthSkipped <= 5) {
+                    Logger.w(TAG, "跳过过深目录(深度$depth≥$MAX_DEPTH): $relPath")
+                }
                 continue
             }
 
@@ -288,10 +341,6 @@ object VaultIndex {
             }
 
             if (children.isEmpty()) {
-                // 不标记为已扫描！listDir返回空可能是临时失败（权限/时序），
-                // 标记后该目录永远不会被重试，导致其中的文件永远不被索引。
-                // 下次扫描会重新尝试列出该目录。
-                Logger.w(TAG, "目录返回空(将重试): $relPath")
                 continue
             }
 
@@ -309,6 +358,14 @@ object VaultIndex {
                         // 过滤 Obsidian 系统目录
                         if (name in SKIP_DIRS) {
                             skippedCount++
+                            continue
+                        }
+                        // 递归目录检测：如果目录名在路径中已出现，跳过
+                        if (isRecursiveDir(relPath, name)) {
+                            recursiveSkipped++
+                            if (recursiveSkipped <= 10) {
+                                Logger.w(TAG, "跳过递归目录: $relPath/$name")
+                            }
                             continue
                         }
                         val childPath = if (relPath.isEmpty()) name else "$relPath/$name"
@@ -347,6 +404,9 @@ object VaultIndex {
         }
         if (skippedCount > 0) {
             Logger.i(TAG, "共过滤 $skippedCount 个系统目录")
+        }
+        if (depthSkipped > 0 || recursiveSkipped > 0) {
+            Logger.i(TAG, "跳过 $depthSkipped 个过深目录, $recursiveSkipped 个递归目录")
         }
     }
 
