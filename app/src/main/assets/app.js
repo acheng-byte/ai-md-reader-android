@@ -754,7 +754,7 @@
     /** 收集文档中所有媒体元素（按 DOM 顺序） */
     function collectGalleryItems() {
         var items = [];
-        var els = previewEl.querySelectorAll('img, .mermaid-container svg, video, .markdown-body > table');
+        var els = previewEl.querySelectorAll('img, .mermaid-container svg, video');
         for (var i = 0; i < els.length; i++) {
             var el = els[i];
             var tag = el.tagName.toLowerCase();
@@ -766,8 +766,6 @@
                 items.push({ type: 'mermaid', el: el });
             } else if (tag === 'video') {
                 items.push({ type: 'video', el: el });
-            } else if (tag === 'table') {
-                items.push({ type: 'table', el: el });
             }
         }
         return items;
@@ -828,14 +826,6 @@
             video.autoplay = true;
             video.style.cssText = 'max-width:95vw;max-height:85vh;';
             body.appendChild(video);
-        } else if (item.type === 'table') {
-            // 表格预览
-            if (dlBtn) dlBtn.style.display = 'none';
-            var clone = item.el.cloneNode(true);
-            var wrapper = document.createElement('div');
-            wrapper.style.cssText = 'overflow:auto;max-width:95vw;max-height:85vh;';
-            wrapper.appendChild(clone);
-            body.appendChild(wrapper);
         }
     }
 
@@ -949,20 +939,22 @@
         }
     }
 
-    /** 打开表格预览（支持画廊导航） */
+    /** 打开表格预览（支持下载） */
     function openTablePreview(tableEl) {
-        galleryItems = collectGalleryItems();
-        galleryIndex = -1;
-        for (var i = 0; i < galleryItems.length; i++) {
-            if (galleryItems[i].el === tableEl) { galleryIndex = i; break; }
-        }
-        if (galleryIndex >= 0) {
-            navigateGallery(galleryIndex);
-        } else {
-            galleryItems = [{ type: 'table', el: tableEl }];
-            galleryIndex = 0;
-            navigateGallery(0);
-        }
+        var overlay = ensurePreviewOverlay();
+        var body = overlay.querySelector('.mdreader-preview-body');
+        body.innerHTML = '';
+        body.scrollTop = 0;
+        // 显示保存/下载按钮
+        var dlBtn = overlay.querySelector('.mdreader-preview-dl-btn');
+        if (dlBtn) dlBtn.style.display = '';
+        // 克隆表格（样式由 CSS 控制，跟随主题）
+        var clone = tableEl.cloneNode(true);
+        var wrapper = document.createElement('div');
+        wrapper.style.cssText = 'overflow:auto;max-width:95vw;max-height:85vh;';
+        wrapper.appendChild(clone);
+        body.appendChild(wrapper);
+        overlay.style.display = 'flex';
     }
 
     /** 关闭预览覆盖层 */

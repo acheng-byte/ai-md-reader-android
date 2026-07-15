@@ -1698,6 +1698,8 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         Logger.saveToDisk()
         // 记录阅读时长：每次 pause 时计算本次会话时长
         recordReadingSession()
+        // 暂停 WebView 定时器以节省资源
+        try { webView.pauseTimers() } catch (_: Exception) {}
     }
 
     override fun onResume() {
@@ -1706,6 +1708,31 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         refreshUriPermissions()
         // 修复 Vault URI 乱码：检查并解码存储的 URI
         fixVaultUriEncoding()
+        // 修复切屏后白屏：恢复时重新渲染 WebView
+        if (pageReady && currentMarkdown.isNotEmpty()) {
+            webView.postDelayed({
+                try {
+                    webView.resumeTimers()
+                    // 重新应用设置，触发 WebView 刷新
+                    applySettingsToWeb()
+                } catch (_: Exception) {}
+            }, 100)
+        }
+    }
+
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        // 窗口大小变化时（如分屏/小窗切换），强制刷新布局
+        binding.root.requestLayout()
+        // 延迟重新渲染 WebView，等待布局完成
+        if (pageReady) {
+            binding.root.postDelayed({
+                try {
+                    applySettingsToWeb()
+                    js("window.appRestoreScroll && window.appRestoreScroll()")
+                } catch (_: Exception) {}
+            }, 200)
+        }
     }
 
     /** 刷新所有历史文档的 URI 持久化权限，修复重启后授权过期问题 */
