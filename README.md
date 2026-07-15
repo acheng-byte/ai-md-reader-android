@@ -8,11 +8,14 @@
 
 现在越来越多内容从 AI 对话、代码助手、知识库、会议纪要和自动化工作流里直接产出为 Markdown。电脑上阅读很方便，但手机上常常缺一个足够轻、足够直接、能从微信和文件管理器顺手打开 `.md` 的本地阅读器。**MD阅读器**解决的就是这个小而高频的痛点：把 Markdown 文件在手机上安静、清楚、离线地读起来。
 
-## 最新版本 v2.2.15
+## 最新版本 v2.2.40
 
-- **v2.2.15**：修复启动卡顿一分钟（资源加载不再触发全库扫描）、线程安全、NPE、日志性能
-- **v2.2.14**：修复日志刷屏、日志查看器改用 RecyclerView + 滚动条；日志容量扩至 10000 条
-- **v2.2.13**：修复日志「全部」按钮、滑动误触图片预览、状态栏遮挡；新增 20+ 处操作日志
+- **v2.2.40**：修复表格保存PNG文字压缩错位问题
+- **v2.2.39**：加回长按表格保存为PNG功能
+- **v2.2.38**：修复阅读统计陪伴天数时区问题
+- **v2.2.37**：精简阅读体验，移除预览覆盖层
+- **v2.2.36**：Vault 搜索优化 + 索引诊断日志
+- **v2.2.35**：WikiLink 模糊匹配回退 + 索引查找优化
 
 [下载最新 APK](https://github.com/acheng-byte/ai-md-reader-android/releases/latest) · [查看 GitHub Releases](https://github.com/acheng-byte/ai-md-reader-android/releases)
 
@@ -44,9 +47,9 @@
 | 全库搜索 | 在 Vault 文件夹中搜索所有文档（需先设置 Vault） |
 | 转发分享 | 一键把完整文档经系统分享转发到微信等应用 |
 | 桌面快捷方式 | 将当前文档添加为桌面快捷方式，一键直达 |
-| 表格预览 | 单击表格全屏预览，支持双指缩放 |
+| 表格长按保存 | 长按表格弹出确认框，保存为 PNG 图片 |
 | 图片预览 | 单击图片全屏预览，双指缩放、单指拖动、双击关闭 |
-| 视频预览 | 单击视频全屏播放，双击关闭 |
+| 视频播放 | 内嵌视频直接播放，支持全屏控制 |
 | 音频播放 | 支持 mp3/wav/ogg/m4a/aac/flac/wma 格式内嵌播放 |
 | 源码直接编辑 | 源码模式即可编辑，自动保存 |
 | 字符统计 | 点击标题栏查看总字符、纯文字（去除标点和 Markdown 语法）、总行数、代码字符数 |
@@ -72,7 +75,7 @@
 | `%%注释%%` | 注释内容隐藏 |
 | `[^1]` 脚注 | 上标链接 + 文末脚注列表 |
 | YAML Frontmatter | 自动解析为元数据表格 |
-| Mermaid 图表 | 流程图、时序图、饼图等（单击预览） |
+| Mermaid 图表 | 流程图、时序图、饼图等（内联渲染） |
 | 任务列表 `- [ ]` | 可视复选框 |
 
 ## 下载安装
@@ -89,9 +92,11 @@ adb install -r app/build/outputs/apk/release/app-release.apk
 
 | 版本 | 更新重点 |
 | --- | --- |
-| [v2.2.7](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.2.7) | 修复资源加载崩溃、恢复欢迎页面 |
-| [v2.2.6](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.2.6) | Vault 斜杠路径修复、外链图片、崩溃修复、恢复默认、Vault 优先加载 |
-| [v2.2.5](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.2.5) | 欢迎界面新增作者信息与外链 |
+| [v2.2.40](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.2.40) | 修复表格保存PNG文字压缩错位 |
+| [v2.2.39](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.2.39) | 加回长按表格保存为PNG功能 |
+| [v2.2.38](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.2.38) | 修复阅读统计陪伴天数时区问题 |
+| [v2.2.37](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.2.37) | 精简阅读体验，移除预览覆盖层 |
+| [v2.2.15](https://github.com/acheng-byte/ai-md-reader-android/releases/tag/v2.2.15) | 修复启动卡顿一分钟、线程安全、日志性能 |
 
 更多历史版本见 [GitHub Releases](https://github.com/acheng-byte/ai-md-reader-android/releases)。
 
@@ -100,7 +105,7 @@ adb install -r app/build/outputs/apk/release/app-release.apk
 1. 工具栏常显五项：转发、目录、源码 / 预览切换、收藏切换、更多菜单（⋮）。
 2. 从"更多菜单 ⋮ → 打开"用系统文件选择器选择文档文件。
 3. 点击"目录"，从左侧目录快速跳转到标题位置。
-4. 在预览模式下点击标题，可折叠或展开该章节内容；代码块右上角可一键复制。单击表格或 Mermaid 图表可全屏预览，支持双指缩放。
+4. 在预览模式下点击标题，可折叠或展开该章节内容；代码块右上角可一键复制。长按表格可保存为 PNG 图片。
 5. 点击屏幕中央区域，调出"显示设置"（字号、行间距、段间距、主题、护眼模式、字体、Vault 文件夹、检查更新）。
 6. 点击搜索图标，在当前文档中搜索关键词；也可切换为全库搜索。
 7. 点击工具栏星形图标"收藏"当前文档；在"更多菜单 ⋮ → 收藏夹 / 打开历史"中管理。
