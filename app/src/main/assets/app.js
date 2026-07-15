@@ -612,14 +612,11 @@
             container.id = divId;
             pre.parentNode.replaceChild(container, pre);
 
-            // 异步渲染 Mermaid SVG，渲染完成后再绑定事件处理器
-            // 这样确保单击时 SVG 已存在，不会出现"需要双击才能预览"的问题
+            // 异步渲染 Mermaid SVG
             try {
                 window.mermaid.render(divId + '-svg', graphDef).then(function (result) {
                     if (!document.contains(container)) return;
                     container.innerHTML = result.svg;
-                    // SVG 渲染完成后才绑定交互事件
-                    bindMermaidEvents(container);
                 }).catch(function (e) {
                     if (document.contains(container)) {
                         container.textContent = graphDef;
@@ -632,50 +629,6 @@
                     container.classList.add('mermaid-error');
                 }
             }
-        });
-    }
-
-    /** 为 Mermaid 容器绑定单击预览事件（区分点击和滑动） */
-    function bindMermaidEvents(c) {
-        var lastTapTime = 0;
-        var touchStartX = 0, touchStartY = 0;
-        var touchMoved = false;
-        var MERMAID_MOVE_THRESHOLD = 10;
-
-        c.addEventListener('touchstart', function (e) {
-            if (e.touches.length === 1) {
-                touchStartX = e.touches[0].clientX;
-                touchStartY = e.touches[0].clientY;
-                touchMoved = false;
-            }
-        }, { passive: true });
-
-        c.addEventListener('touchmove', function (e) {
-            if (e.touches.length === 1) {
-                var dx = Math.abs(e.touches[0].clientX - touchStartX);
-                var dy = Math.abs(e.touches[0].clientY - touchStartY);
-                if (dx > MERMAID_MOVE_THRESHOLD || dy > MERMAID_MOVE_THRESHOLD) {
-                    touchMoved = true;
-                }
-            }
-        }, { passive: true });
-
-        c.addEventListener('touchend', function (e) {
-            if (touchMoved) { touchMoved = false; return; }
-            var now = Date.now();
-            if (now - lastTapTime < 400) return;
-            lastTapTime = now;
-            var svg = c.querySelector('svg');
-            if (svg) openMermaidPreview(svg);
-        });
-
-        c.addEventListener('click', function (e) {
-            if (touchMoved) { touchMoved = false; return; }
-            var now = Date.now();
-            if (now - lastTapTime < 400) return;
-            lastTapTime = now;
-            var svg = c.querySelector('svg');
-            if (svg) openMermaidPreview(svg);
         });
     }
 
@@ -711,14 +664,6 @@
             '.mdreader-preview-body table{border-collapse:collapse;width:auto;min-width:300px;max-width:95vw;margin:0 auto;font-size:14px;}',
             '.mdreader-preview-body table th,.mdreader-preview-body table td{border:1px solid #ccc;padding:8px 14px;color:#333;}',
             '.mdreader-preview-body table th{background:#f5f5f5;font-weight:600;}',
-            /* 画廊导航栏 */
-            '.mdreader-gallery-bar{display:flex;justify-content:center;align-items:center;gap:16px;padding:4px 12px;background:rgba(0,0,0,0.04);}',
-            '.mdreader-gallery-bar button{background:rgba(0,0,0,0.08);border:none;border-radius:50%;width:36px;height:36px;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#333;}',
-            '.mdreader-gallery-bar button:active{background:rgba(0,0,0,0.18);}',
-            '.mdreader-gallery-counter{font-size:13px;color:#666;min-width:60px;text-align:center;}',
-            'body.dark .mdreader-gallery-bar{background:rgba(255,255,255,0.04);}',
-            'body.dark .mdreader-gallery-bar button{background:rgba(255,255,255,0.1);color:#e6edf3;}',
-            'body.dark .mdreader-gallery-counter{color:#8b949e;}',
             'body.dark .mdreader-preview-overlay{background:rgba(20,20,22,0.96);}',
             'body.dark .mdreader-preview-toolbar{background:rgba(255,255,255,0.06);}',
             'body.dark .mdreader-preview-toolbar button{color:#e6edf3;}',
@@ -741,93 +686,7 @@
 
     var previewOverlay = null;
     var previewBlobUrl = null; // 跟踪当前 blob URL，防止内存泄漏
-    var recentPinch = false; // 捏合手势刚结束时阻止 overlay 关闭
-
-    /* ---------- 媒体画廊（左右滑动切换图片/视频/Mermaid） ---------- */
-    var galleryItems = [];   // [{type:'image'|'mermaid'|'video', el:HTMLElement}]
-    var galleryIndex = -1;
-    var gallerySwipeStartX = 0;
-    var gallerySwipeStartY = 0;
-    var gallerySwipeMoved = false;
-    var GALLERY_SWIPE_THRESHOLD = 60;
-
-    /** 收集文档中所有媒体元素（按 DOM 顺序） */
-    function collectGalleryItems() {
-        var items = [];
-        var els = previewEl.querySelectorAll('img, .mermaid-container svg, video');
-        for (var i = 0; i < els.length; i++) {
-            var el = els[i];
-            var tag = el.tagName.toLowerCase();
-            if (tag === 'img') {
-                // 跳过工具栏图标等小图片（宽高太小的不是内容图片）
-                if (el.naturalWidth && el.naturalWidth < 40 && el.naturalHeight && el.naturalHeight < 40) continue;
-                items.push({ type: 'image', el: el });
-            } else if (tag === 'svg') {
-                items.push({ type: 'mermaid', el: el });
-            } else if (tag === 'video') {
-                items.push({ type: 'video', el: el });
-            }
-        }
-        return items;
-    }
-
-    /** 在画廊中导航到指定索引 */
-    function navigateGallery(newIndex) {
-        if (newIndex < 0 || newIndex >= galleryItems.length) return;
-        galleryIndex = newIndex;
-        var item = galleryItems[newIndex];
-        var overlay = ensurePreviewOverlay();
-        var body = overlay.querySelector('.mdreader-preview-body');
-        var dlBtn = overlay.querySelector('.mdreader-preview-dl-btn');
-        body.innerHTML = '';
-        body.scrollTop = 0;
-        // 更新计数器
-        var counter = overlay.querySelector('.mdreader-gallery-counter');
-        if (counter) {
-            counter.textContent = (newIndex + 1) + ' / ' + galleryItems.length;
-            counter.style.display = galleryItems.length > 1 ? '' : 'none';
-        }
-        // 导航按钮显隐
-        var prevBtn = overlay.querySelector('.mdreader-gallery-prev');
-        var nextBtn = overlay.querySelector('.mdreader-gallery-next');
-        var galleryBar = overlay.querySelector('.mdreader-gallery-bar');
-        var hasMultiple = galleryItems.length > 1;
-        if (prevBtn) prevBtn.style.display = hasMultiple ? 'flex' : 'none';
-        if (nextBtn) nextBtn.style.display = hasMultiple ? 'flex' : 'none';
-        if (galleryBar) galleryBar.style.display = hasMultiple ? 'flex' : 'none';
-
-        if (item.type === 'image') {
-            // 只有真正的图片才显示保存按钮
-            if (dlBtn) dlBtn.style.display = '';
-            var clone = new Image();
-            clone.style.cssText = 'max-width:95vw;max-height:85vh;object-fit:contain;';
-            clone.onload = function () { body.appendChild(clone); setupPinchZoom(clone); };
-            clone.src = item.el.src;
-        } else if (item.type === 'mermaid') {
-            if (dlBtn) dlBtn.style.display = 'none';
-            var svgHtml = item.el.outerHTML;
-            var img = new Image();
-            img.onload = function () { body.appendChild(img); setupPinchZoom(img); };
-            img.onerror = function () {
-                var wrapper = document.createElement('div');
-                wrapper.innerHTML = svgHtml;
-                wrapper.style.textAlign = 'center';
-                body.appendChild(wrapper);
-            };
-            if (previewBlobUrl) URL.revokeObjectURL(previewBlobUrl);
-            var blob = new Blob([svgHtml], { type: 'image/svg+xml;charset=utf-8' });
-            previewBlobUrl = URL.createObjectURL(blob);
-            img.src = previewBlobUrl;
-        } else if (item.type === 'video') {
-            if (dlBtn) dlBtn.style.display = 'none';
-            var video = document.createElement('video');
-            video.src = item.el.src;
-            video.controls = true;
-            video.autoplay = true;
-            video.style.cssText = 'max-width:95vw;max-height:85vh;';
-            body.appendChild(video);
-        }
-    }
+    var _previewLastTapTime = 0; // 双击关闭检测
 
     /** 创建预览覆盖层 DOM（惰性创建，复用） */
     function ensurePreviewOverlay() {
@@ -840,7 +699,7 @@
         toolbar.className = 'mdreader-preview-toolbar';
         var dlBtn = document.createElement('button');
         dlBtn.className = 'mdreader-preview-dl-btn';
-        dlBtn.textContent = '保存图片';
+        dlBtn.textContent = '保存表格';
         dlBtn.onclick = function (e) { e.stopPropagation(); downloadFromPreview(); };
         var closeBtn = document.createElement('button');
         closeBtn.className = 'mdreader-preview-close-btn';
@@ -850,93 +709,55 @@
         toolbar.appendChild(closeBtn);
         previewOverlay.appendChild(toolbar);
 
-        // 画廊导航：左/右箭头 + 计数器
-        var galleryBar = document.createElement('div');
-        galleryBar.className = 'mdreader-gallery-bar';
-        var prevBtn = document.createElement('button');
-        prevBtn.className = 'mdreader-gallery-prev';
-        prevBtn.textContent = '\u25C0';
-        prevBtn.style.display = 'none';
-        prevBtn.onclick = function (e) { e.stopPropagation(); navigateGallery(galleryIndex - 1); };
-        var counter = document.createElement('span');
-        counter.className = 'mdreader-gallery-counter';
-        counter.style.display = 'none';
-        var nextBtn = document.createElement('button');
-        nextBtn.className = 'mdreader-gallery-next';
-        nextBtn.textContent = '\u25B6';
-        nextBtn.style.display = 'none';
-        nextBtn.onclick = function (e) { e.stopPropagation(); navigateGallery(galleryIndex + 1); };
-        galleryBar.appendChild(prevBtn);
-        galleryBar.appendChild(counter);
-        galleryBar.appendChild(nextBtn);
-        previewOverlay.appendChild(galleryBar);
-
         // 内容区
         var body = document.createElement('div');
         body.className = 'mdreader-preview-body';
         previewOverlay.appendChild(body);
 
-        // 阻止覆盖层上的所有触摸事件传播到底层，防止底层滚动
-        // 但水平滑动用于画廊导航
-        var gStartX = 0, gStartY = 0, gMoved = false;
+        // 双击任意位置关闭预览；单击背景也可关闭
+        var _pTouchX = 0, _pTouchY = 0, _pTouchMoved = false;
+        var PREVIEW_MOVE_THRESHOLD = 15;
+
         previewOverlay.addEventListener('touchstart', function (e) {
-            if (galleryItems.length > 1) {
-                gStartX = e.touches[0].clientX;
-                gStartY = e.touches[0].clientY;
-                gMoved = false;
+            if (e.touches.length === 1) {
+                _pTouchX = e.touches[0].clientX;
+                _pTouchY = e.touches[0].clientY;
+                _pTouchMoved = false;
             }
             e.stopPropagation();
         }, { passive: true });
         previewOverlay.addEventListener('touchmove', function (e) {
-            if (galleryItems.length > 1 && gStartX) {
-                var dx = e.touches[0].clientX - gStartX;
-                var dy = e.touches[0].clientY - gStartY;
-                if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 10) {
-                    gMoved = true;
+            if (e.touches.length === 1) {
+                var dx = Math.abs(e.touches[0].clientX - _pTouchX);
+                var dy = Math.abs(e.touches[0].clientY - _pTouchY);
+                if (dx > PREVIEW_MOVE_THRESHOLD || dy > PREVIEW_MOVE_THRESHOLD) {
+                    _pTouchMoved = true;
                 }
             }
             e.preventDefault();
             e.stopPropagation();
         }, { passive: false });
         previewOverlay.addEventListener('touchend', function (e) {
-            if (galleryItems.length > 1 && gMoved) {
-                var dx = (e.changedTouches[0] ? e.changedTouches[0].clientX : gStartX) - gStartX;
-                if (dx < -GALLERY_SWIPE_THRESHOLD) navigateGallery(galleryIndex + 1);
-                else if (dx > GALLERY_SWIPE_THRESHOLD) navigateGallery(galleryIndex - 1);
-                gMoved = false;
-                gStartX = 0;
+            if (_pTouchMoved) { _pTouchMoved = false; e.stopPropagation(); return; }
+            var now = Date.now();
+            if (now - _previewLastTapTime < 350) {
+                // 双击：关闭预览
+                _previewLastTapTime = 0;
+                closePreviewOverlay();
                 e.stopPropagation();
                 return;
             }
+            _previewLastTapTime = now;
             e.stopPropagation();
         }, { passive: true });
 
-        // 点击背景关闭（捏合手势刚结束时不关闭）
+        // 单击背景关闭（桌面端鼠标点击）
         previewOverlay.addEventListener('click', function (e) {
-            if (recentPinch) { recentPinch = false; return; }
             if (e.target === previewOverlay || e.target === body) closePreviewOverlay();
         });
 
         document.body.appendChild(previewOverlay);
         return previewOverlay;
-    }
-
-    /** 打开 Mermaid 预览（支持画廊导航） */
-    function openMermaidPreview(svgEl) {
-        galleryItems = collectGalleryItems();
-        galleryIndex = -1;
-        // 找到当前 SVG 在画廊中的位置
-        for (var i = 0; i < galleryItems.length; i++) {
-            if (galleryItems[i].el === svgEl) { galleryIndex = i; break; }
-        }
-        if (galleryIndex >= 0) {
-            navigateGallery(galleryIndex);
-        } else {
-            // 回退：直接显示
-            galleryItems = [{ type: 'mermaid', el: svgEl }];
-            galleryIndex = 0;
-            navigateGallery(0);
-        }
     }
 
     /** 打开表格预览（支持下载） */
@@ -963,9 +784,6 @@
             previewOverlay.style.display = 'none';
             if (previewBlobUrl) { URL.revokeObjectURL(previewBlobUrl); previewBlobUrl = null; }
         }
-        // 重置画廊状态
-        galleryItems = [];
-        galleryIndex = -1;
     }
 
     // 暴露给 Android 返回键处理
@@ -1128,164 +946,6 @@
         document.body.appendChild(overlay);
     }
 
-    /** 为预览图片设置双指缩放 + 单指平移 + 双击放大/还原 */
-    function setupPinchZoom(img) {
-        var scale = 1;
-        var startDist = 0;
-        var startScale = 1;
-        var panX = 0, panY = 0;
-        var startPanX = 0, startPanY = 0;
-        var startTouchX = 0, startTouchY = 0;
-        var isPanning = false;
-        var wasPinching = false;
-        var lastTapTime = 0;
-        var tapTimer = null;
-        // 触摸移动追踪：区分点击和滑动
-        var fingerStartX = 0, fingerStartY = 0;
-        var fingerMoved = false;
-        var MOVE_THRESHOLD = 15; // 超过15px视为滑动，不触发点击
-
-        function getDist(t1, t2) {
-            var dx = t1.clientX - t2.clientX;
-            var dy = t1.clientY - t2.clientY;
-            return Math.sqrt(dx * dx + dy * dy);
-        }
-
-        function applyTransform() {
-            img.style.transform = 'translate(' + panX + 'px,' + panY + 'px) scale(' + scale + ')';
-        }
-
-        function resetZoom() {
-            scale = 1; panX = 0; panY = 0;
-            img.style.transition = 'transform 0.25s ease-out';
-            applyTransform();
-            setTimeout(function () { img.style.transition = ''; }, 260);
-        }
-
-        function zoomIn(cx, cy) {
-            var targetScale = 2;
-            // 以点击位置为中心放大
-            var rect = img.getBoundingClientRect();
-            var imgCX = rect.left + rect.width / 2;
-            var imgCY = rect.top + rect.height / 2;
-            panX = (cx - imgCX) * (1 - targetScale);
-            panY = (cy - imgCY) * (1 - targetScale);
-            scale = targetScale;
-            img.style.transition = 'transform 0.25s ease-out';
-            applyTransform();
-            setTimeout(function () { img.style.transition = ''; }, 260);
-        }
-
-        img.addEventListener('touchstart', function (e) {
-            if (e.touches.length === 2) {
-                e.preventDefault();
-                isPanning = false;
-                wasPinching = true;
-                fingerMoved = false;
-                // 清除可能的单击定时器，避免与双击冲突
-                if (tapTimer) { clearTimeout(tapTimer); tapTimer = null; }
-                startDist = getDist(e.touches[0], e.touches[1]);
-                startScale = scale;
-                startPanX = panX;
-                startPanY = panY;
-            } else if (e.touches.length === 1) {
-                wasPinching = false;
-                fingerMoved = false;
-                fingerStartX = e.touches[0].clientX;
-                fingerStartY = e.touches[0].clientY;
-                if (scale > 1) {
-                    isPanning = true;
-                    startTouchX = e.touches[0].clientX;
-                    startTouchY = e.touches[0].clientY;
-                    startPanX = panX;
-                    startPanY = panY;
-                } else {
-                    isPanning = false;
-                }
-            }
-        }, { passive: false });
-
-        img.addEventListener('touchmove', function (e) {
-            if (e.touches.length === 2) {
-                e.preventDefault();
-                isPanning = false;
-                wasPinching = true;
-                fingerMoved = true;
-                var dist = getDist(e.touches[0], e.touches[1]);
-                scale = Math.max(0.5, Math.min(5, startScale * (dist / startDist)));
-                // 双指缩放时保持中心点
-                var midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
-                var midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-                var rect = img.getBoundingClientRect();
-                var imgCX = rect.left + rect.width / 2;
-                var imgCY = rect.top + rect.height / 2;
-                panX = startPanX + (midX - imgCX) * (1 - scale / startScale);
-                panY = startPanY + (midY - imgCY) * (1 - scale / startScale);
-                applyTransform();
-            } else if (e.touches.length === 1) {
-                // 检测手指是否移动超过阈值
-                var dx = e.touches[0].clientX - fingerStartX;
-                var dy = e.touches[0].clientY - fingerStartY;
-                if (Math.abs(dx) > MOVE_THRESHOLD || Math.abs(dy) > MOVE_THRESHOLD) {
-                    fingerMoved = true;
-                }
-                if (isPanning && scale > 1) {
-                    e.preventDefault();
-                    wasPinching = false;
-                    panX = startPanX + dx;
-                    panY = startPanY + dy;
-                    applyTransform();
-                } else if (!fingerMoved) {
-                    // 手指未移动时阻止默认行为，防止底层页面滚动
-                    e.preventDefault();
-                }
-            }
-        }, { passive: false });
-
-        img.addEventListener('touchend', function (e) {
-            if (e.touches.length === 0) {
-                if (wasPinching) {
-                    recentPinch = true;
-                    setTimeout(function () { recentPinch = false; }, 400);
-                }
-                isPanning = false;
-                wasPinching = false;
-            }
-        });
-
-        // 双击放大/还原（用 touchend 模拟，避免与 click 事件冲突）
-        img.addEventListener('touchend', function (e) {
-            if (e.touches.length !== 0) return;
-            // 如果手指移动过，视为滑动结束，不触发点击逻辑
-            if (fingerMoved) { fingerMoved = false; return; }
-            var now = Date.now();
-            if (now - lastTapTime < 300) {
-                // 双击：切换缩放
-                if (tapTimer) { clearTimeout(tapTimer); tapTimer = null; }
-                if (scale > 1.1) {
-                    resetZoom();
-                } else {
-                    // 使用上次触摸位置作为放大中心
-                    var cx = window.innerWidth / 2;
-                    var cy = window.innerHeight / 2;
-                    if (e.changedTouches && e.changedTouches.length > 0) {
-                        cx = e.changedTouches[0].clientX;
-                        cy = e.changedTouches[0].clientY;
-                    }
-                    zoomIn(cx, cy);
-                }
-                lastTapTime = 0;
-            } else {
-                lastTapTime = now;
-                // 延迟执行单击逻辑，等待可能的双击
-                tapTimer = setTimeout(function () {
-                    tapTimer = null;
-                    // 单击不做任何事（点击背景关闭由 overlay 处理）
-                }, 310);
-            }
-        });
-    }
-
     /** 为预览区域内的表格添加单击预览 + 长按下载 */
     function setupTableInteractions() {
         var tables = previewEl.querySelectorAll('table');
@@ -1359,112 +1019,6 @@
                 });
                 table.addEventListener('mouseleave', cancelPress);
             })(tables[i]);
-        }
-    }
-
-    /** 为内嵌图片添加单击预览 + 双击关闭 + 双指缩放 + 单指拖动 */
-    function setupImageInteractions() {
-        var imgs = previewEl.querySelectorAll('img');
-        for (var i = 0; i < imgs.length; i++) {
-            (function (img) {
-                var lastTapTime = 0;
-                var touchStartX = 0, touchStartY = 0;
-                var touchMoved = false;
-                img.style.cursor = 'zoom-in';
-
-                img.addEventListener('touchstart', function (e) {
-                    touchStartX = e.touches[0].clientX;
-                    touchStartY = e.touches[0].clientY;
-                    touchMoved = false;
-                }, { passive: true });
-
-                img.addEventListener('touchmove', function (e) {
-                    var dx = e.touches[0].clientX - touchStartX;
-                    var dy = e.touches[0].clientY - touchStartY;
-                    if (Math.abs(dx) > 20 || Math.abs(dy) > 20) {
-                        touchMoved = true;
-                    }
-                }, { passive: true });
-
-                img.addEventListener('click', function (e) {
-                    e.stopPropagation();
-                    // 滑动过程中不触发预览（防误触）
-                    if (touchMoved) { touchMoved = false; return; }
-                    // 优化：如果点击位置在屏幕中央区域，不触发图片预览，让设置面板打开
-                    var w = window.innerWidth, h = window.innerHeight;
-                    if (e.clientX > w * 0.3 && e.clientX < w * 0.7 &&
-                        e.clientY > h * 0.33 && e.clientY < h * 0.67) {
-                        try { if (window.Android && window.Android.onCenterTap) window.Android.onCenterTap(); } catch (ex) { }
-                        return;
-                    }
-                    var nowTap = Date.now();
-                    // 双击：关闭预览
-                    if (nowTap - lastTapTime < 350) {
-                        lastTapTime = 0;
-                        closePreviewOverlay();
-                        return;
-                    }
-                    lastTapTime = nowTap;
-                    // 单击：打开预览
-                    openImagePreview(img);
-                });
-            })(imgs[i]);
-        }
-    }
-
-    /** 打开图片预览（支持画廊导航） */
-    function openImagePreview(imgEl) {
-        galleryItems = collectGalleryItems();
-        galleryIndex = -1;
-        // 找到当前图片在画廊中的位置
-        for (var i = 0; i < galleryItems.length; i++) {
-            if (galleryItems[i].el === imgEl) { galleryIndex = i; break; }
-        }
-        if (galleryIndex >= 0) {
-            navigateGallery(galleryIndex);
-        } else {
-            // 回退：只显示当前图片
-            galleryItems = [{ type: 'image', el: imgEl }];
-            galleryIndex = 0;
-            navigateGallery(0);
-        }
-    }
-
-    /** 为内嵌视频添加单击全屏预览 + 双击关闭 */
-    function setupVideoInteractions() {
-        var videos = previewEl.querySelectorAll('video');
-        for (var i = 0; i < videos.length; i++) {
-            (function (video) {
-                var lastTapTime = 0;
-                video.style.cursor = 'pointer';
-                video.addEventListener('click', function (e) {
-                    e.stopPropagation();
-                    var nowTap = Date.now();
-                    if (nowTap - lastTapTime < 350) {
-                        lastTapTime = 0;
-                        closePreviewOverlay();
-                        return;
-                    }
-                    lastTapTime = nowTap;
-                    openVideoPreview(video);
-                });
-            })(videos[i]);
-        }
-    }
-
-    /** 打开视频预览（支持画廊导航） */
-    function openVideoPreview(videoEl) {
-        galleryItems = collectGalleryItems();
-        galleryIndex = -1;
-        for (var i = 0; i < galleryItems.length; i++) {
-            if (galleryItems[i].el === videoEl) { galleryIndex = i; break; }
-        }
-        if (galleryIndex >= 0) {
-            navigateGallery(galleryIndex);
-        } else {
-            galleryItems = [{ type: 'video', el: videoEl }];
-            galleryIndex = 0;
-            navigateGallery(0);
         }
     }
 
@@ -1582,8 +1136,6 @@
         addCopyButtons();
         renderMermaid();
         setupTableInteractions();
-        setupImageInteractions();
-        setupVideoInteractions();
         renderFormulas();
         // 自动展开 markdown 嵌入块（类似 Obsidian transclusion）
         autoExpandEmbeds();
@@ -2212,40 +1764,6 @@
         } catch (e) { /* bridge unavailable */ }
     }
 
-    /* ---------- 中央点击 → 显示设置 ---------- */
-    var lastCenterTapTime = 0;
-    function setupCenterTap() {
-        document.addEventListener('click', function (ev) {
-            if (tocOverlay.classList.contains('open')) return;
-            if (searchOverlay.style.display !== 'none') return;
-            if (typeof previewOverlay !== 'undefined' && previewOverlay && previewOverlay.style.display !== 'none') return;
-            // 防重复点击（300ms 内忽略）
-            var now = Date.now();
-            if (now - lastCenterTapTime < 300) return;
-            var t = ev.target;
-            while (t && t !== document.body) {
-                var tag = t.tagName;
-                // 排除所有可交互元素：链接、按钮、输入框、图片、表格、Mermaid、视频、代码块、嵌入块
-                if (tag === 'A' || tag === 'BUTTON' || tag === 'INPUT' || tag === 'IMG' || tag === 'VIDEO' || tag === 'AUDIO' || tag === 'TABLE' || tag === 'TH' || tag === 'TD' || tag === 'THEAD' || tag === 'TBODY' || tag === 'TR') return;
-                if (t.classList && (
-                    t.classList.contains('md-h') ||
-                    t.classList.contains('embed-header') || t.classList.contains('embed-block') ||
-                    t.classList.contains('mermaid-container') || t.classList.contains('mermaid-block') ||
-                    t.classList.contains('copy-btn') || t.classList.contains('task-checkbox') ||
-                    t.classList.contains('footnote-ref') || t.classList.contains('footnote-backref') ||
-                    t.closest && (t.closest('.mermaid-container') || t.closest('table') || t.closest('pre') || t.closest('img') || t.closest('video') || t.closest('audio') || t.closest('.embed-block') || t.closest('.audio-embed') || t.closest('.video-embed'))
-                )) return;
-                t = t.parentNode;
-            }
-            var w = window.innerWidth, h = window.innerHeight;
-            if (ev.clientX > w * 0.25 && ev.clientX < w * 0.75 &&
-                ev.clientY > h * 0.28 && ev.clientY < h * 0.72) {
-                lastCenterTapTime = now;
-                try { if (window.Android && window.Android.onCenterTap) window.Android.onCenterTap(); } catch (e) { }
-            }
-        }, false);
-    }
-
     /* ---------- 设置 / 模式 ---------- */
     function applySettings(s) {
         if (!s) return;
@@ -2397,11 +1915,64 @@
         }
     } catch (e) { initMermaid(false); }
 
-    setupCenterTap();
     window.addEventListener('scroll', onScroll, { passive: true });
     document.addEventListener('visibilitychange', function () {
         if (document.visibilityState === 'hidden') flushSave();
     });
     window.addEventListener('pagehide', flushSave);
+
+    /* ---------- 双击页面任意位置重置缩放回正常大小 ---------- */
+    (function () {
+        var _dtX = 0, _dtY = 0, _dtMoved = false, _dtLastTap = 0;
+        var DT_THRESHOLD = 15;
+        document.addEventListener('touchstart', function (e) {
+            if (e.touches.length === 1) {
+                _dtX = e.touches[0].clientX;
+                _dtY = e.touches[0].clientY;
+                _dtMoved = false;
+            }
+        }, { passive: true });
+        document.addEventListener('touchmove', function (e) {
+            if (e.touches.length === 1) {
+                var dx = Math.abs(e.touches[0].clientX - _dtX);
+                var dy = Math.abs(e.touches[0].clientY - _dtY);
+                if (dx > DT_THRESHOLD || dy > DT_THRESHOLD) _dtMoved = true;
+            }
+        }, { passive: true });
+        document.addEventListener('touchend', function (e) {
+            if (_dtMoved) { _dtMoved = false; return; }
+            // 排除可交互元素
+            var t = e.target;
+            while (t && t !== document.body) {
+                var tag = t.tagName;
+                if (tag === 'A' || tag === 'BUTTON' || tag === 'INPUT' || tag === 'TABLE' || tag === 'TH' || tag === 'TD') return;
+                if (t.classList && (
+                    t.classList.contains('md-h') || t.classList.contains('copy-btn') ||
+                    t.classList.contains('task-checkbox') || t.classList.contains('mermaid-container')
+                )) return;
+                if (t.closest && t.closest('table')) return;
+                t = t.parentNode;
+            }
+            // 预览覆盖层打开时不触发
+            if (previewOverlay && previewOverlay.style.display !== 'none') return;
+            var now = Date.now();
+            if (now - _dtLastTap < 350) {
+                _dtLastTap = 0;
+                // 重置缩放回 100%，保持阅读位置
+                var root = document.documentElement;
+                var curZoom = parseFloat(root.style.zoom) || 1;
+                if (Math.abs(curZoom - 1) > 0.01) {
+                    var ratio = 1 / curZoom;
+                    var sx = window.scrollX * ratio;
+                    var sy = window.scrollY * ratio;
+                    root.style.zoom = '1';
+                    window.scrollTo(sx, sy);
+                }
+            } else {
+                _dtLastTap = now;
+            }
+        }, { passive: true });
+    })();
+
     render();
 })();
