@@ -67,12 +67,14 @@ object VaultIndex {
         val byName = findByName(fileName) ?: return null
         if (!normalized.contains('/')) return byName
 
+        // 按路径段匹配，避免 endsWith 误匹配部分目录名
+        val targetSegments = normalized.split('/').map { it.lowercase() }
         for (e in allEntries) {
             if (e.name.equals(fileName, ignoreCase = true)) {
-                val entryPath = e.path.replace('\\', '/').trimStart('/')
-                if (entryPath.endsWith(normalized, ignoreCase = true) ||
-                    entryPath.equals(normalized, ignoreCase = true)) {
-                    return e
+                val entrySegments = e.path.replace('\\', '/').trimStart('/').split('/').map { it.lowercase() }
+                if (entrySegments.size >= targetSegments.size) {
+                    val tail = entrySegments.subList(entrySegments.size - targetSegments.size, entrySegments.size)
+                    if (tail == targetSegments) return e
                 }
             }
         }
@@ -112,7 +114,12 @@ object VaultIndex {
                 // 最终保存
                 saveToDisk(context)
                 val elapsed = System.currentTimeMillis() - startTime
-                Logger.i(TAG, "索引完成: ${allEntries.size} 个文件, ${scannedDirs.size} 个目录, 耗时 ${elapsed}ms")
+                val timeStr = if (elapsed >= 60000) {
+                    "${elapsed / 60000}分${(elapsed % 60000) / 1000}秒"
+                } else {
+                    "${elapsed / 1000}秒"
+                }
+                Logger.i(TAG, "索引完成: ${allEntries.size} 个文件, ${scannedDirs.size} 个目录, 耗时 $timeStr (${elapsed}ms)")
             } catch (e: Throwable) {
                 Logger.e(TAG, "索引失败: ${e.message}, 当前已索引 ${allEntries.size} 个文件")
             } finally {

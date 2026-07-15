@@ -204,9 +204,50 @@ object VaultSearch {
         val cleanName = noteName.substringBefore('#').trim()
         if (cleanName.isEmpty()) return null
 
-        val root = DocumentFile.fromTreeUri(context, encoded) ?: return null
         val fileName = cleanName.substringAfterLast('/').trim()
         if (fileName.isEmpty()) return null
+
+        Logger.i(TAG, "查找WikiLink: cleanName=$cleanName, fileName=$fileName")
+
+        // 优先使用持久化索引（O(1) 查找，无 SAF 调用）
+        if (VaultIndex.isReady()) {
+            // 带路径的查找（如 话术类/100条郭德纲经典语录）
+            if (cleanName.contains('/')) {
+                val pathWithExt = if (cleanName.endsWith(".md", ignoreCase = true) || cleanName.endsWith(".markdown", ignoreCase = true))
+                    cleanName else "$cleanName.md"
+                val indexEntry = VaultIndex.findByPath(pathWithExt)
+                if (indexEntry != null) {
+                    Logger.i(TAG, "索引命中(路径): ${indexEntry.path}")
+                    runCatching {
+                        val df = DocumentFile.fromSingleUri(context, Uri.parse(indexEntry.uri))
+                        if (df?.exists() == true) return df
+                    }
+                }
+            }
+            // 按文件名查找
+            val nameWithExt = if (fileName.endsWith(".md", ignoreCase = true) || fileName.endsWith(".markdown", ignoreCase = true))
+                fileName else "$fileName.md"
+            val nameEntry = VaultIndex.findByName(nameWithExt)
+            if (nameEntry != null) {
+                Logger.i(TAG, "索引命中(文件名): ${nameEntry.path}")
+                runCatching {
+                    val df = DocumentFile.fromSingleUri(context, Uri.parse(nameEntry.uri))
+                    if (df?.exists() == true) return df
+                }
+            }
+            // 也尝试不带扩展名
+            val nameEntryNoExt = VaultIndex.findByName(fileName)
+            if (nameEntryNoExt != null && nameEntryNoExt != nameEntry) {
+                Logger.i(TAG, "索引命中(无扩展名): ${nameEntryNoExt.path}")
+                runCatching {
+                    val df = DocumentFile.fromSingleUri(context, Uri.parse(nameEntryNoExt.uri))
+                    if (df?.exists() == true) return df
+                }
+            }
+            Logger.i(TAG, "索引未命中，回退到 SAF 路径导航")
+        }
+
+        val root = DocumentFile.fromTreeUri(context, encoded) ?: return null
 
         if (cleanName.contains('/')) {
             val parts = cleanName.split('/').filter { it.isNotEmpty() }
@@ -226,7 +267,7 @@ object VaultSearch {
                 findInDir(context, encoded, dir, fileName)?.let { return it }
             }
 
-            // 回退：全库搜索文件名
+            // 回退：全库根目录递归搜索文件名
             return findInDir(context, encoded, root, fileName)
         }
 

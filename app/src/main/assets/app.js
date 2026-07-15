@@ -695,6 +695,18 @@
         body.className = 'mdreader-preview-body';
         previewOverlay.appendChild(body);
 
+        // 阻止覆盖层上的所有触摸事件传播到底层，防止底层滚动
+        previewOverlay.addEventListener('touchstart', function (e) {
+            e.stopPropagation();
+        }, { passive: true });
+        previewOverlay.addEventListener('touchmove', function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }, { passive: false });
+        previewOverlay.addEventListener('touchend', function (e) {
+            e.stopPropagation();
+        }, { passive: true });
+
         // 点击背景关闭（捏合手势刚结束时不关闭）
         previewOverlay.addEventListener('click', function (e) {
             if (recentPinch) { recentPinch = false; return; }
@@ -933,6 +945,10 @@
         var wasPinching = false;
         var lastTapTime = 0;
         var tapTimer = null;
+        // 触摸移动追踪：区分点击和滑动
+        var fingerStartX = 0, fingerStartY = 0;
+        var fingerMoved = false;
+        var MOVE_THRESHOLD = 15; // 超过15px视为滑动，不触发点击
 
         function getDist(t1, t2) {
             var dx = t1.clientX - t2.clientX;
@@ -970,21 +986,27 @@
                 e.preventDefault();
                 isPanning = false;
                 wasPinching = true;
+                fingerMoved = false;
                 // 清除可能的单击定时器，避免与双击冲突
                 if (tapTimer) { clearTimeout(tapTimer); tapTimer = null; }
                 startDist = getDist(e.touches[0], e.touches[1]);
                 startScale = scale;
                 startPanX = panX;
                 startPanY = panY;
-            } else if (e.touches.length === 1 && scale > 1) {
-                isPanning = true;
+            } else if (e.touches.length === 1) {
                 wasPinching = false;
-                startTouchX = e.touches[0].clientX;
-                startTouchY = e.touches[0].clientY;
-                startPanX = panX;
-                startPanY = panY;
-            } else {
-                wasPinching = false;
+                fingerMoved = false;
+                fingerStartX = e.touches[0].clientX;
+                fingerStartY = e.touches[0].clientY;
+                if (scale > 1) {
+                    isPanning = true;
+                    startTouchX = e.touches[0].clientX;
+                    startTouchY = e.touches[0].clientY;
+                    startPanX = panX;
+                    startPanY = panY;
+                } else {
+                    isPanning = false;
+                }
             }
         }, { passive: false });
 
@@ -993,6 +1015,7 @@
                 e.preventDefault();
                 isPanning = false;
                 wasPinching = true;
+                fingerMoved = true;
                 var dist = getDist(e.touches[0], e.touches[1]);
                 scale = Math.max(0.5, Math.min(5, startScale * (dist / startDist)));
                 // 双指缩放时保持中心点
@@ -1004,14 +1027,23 @@
                 panX = startPanX + (midX - imgCX) * (1 - scale / startScale);
                 panY = startPanY + (midY - imgCY) * (1 - scale / startScale);
                 applyTransform();
-            } else if (e.touches.length === 1 && isPanning && scale > 1) {
-                e.preventDefault();
-                wasPinching = false;
-                var dx = e.touches[0].clientX - startTouchX;
-                var dy = e.touches[0].clientY - startTouchY;
-                panX = startPanX + dx;
-                panY = startPanY + dy;
-                applyTransform();
+            } else if (e.touches.length === 1) {
+                // 检测手指是否移动超过阈值
+                var dx = e.touches[0].clientX - fingerStartX;
+                var dy = e.touches[0].clientY - fingerStartY;
+                if (Math.abs(dx) > MOVE_THRESHOLD || Math.abs(dy) > MOVE_THRESHOLD) {
+                    fingerMoved = true;
+                }
+                if (isPanning && scale > 1) {
+                    e.preventDefault();
+                    wasPinching = false;
+                    panX = startPanX + dx;
+                    panY = startPanY + dy;
+                    applyTransform();
+                } else if (!fingerMoved) {
+                    // 手指未移动时阻止默认行为，防止底层页面滚动
+                    e.preventDefault();
+                }
             }
         }, { passive: false });
 
@@ -1029,6 +1061,8 @@
         // 双击放大/还原（用 touchend 模拟，避免与 click 事件冲突）
         img.addEventListener('touchend', function (e) {
             if (e.touches.length !== 0) return;
+            // 如果手指移动过，视为滑动结束，不触发点击逻辑
+            if (fingerMoved) { fingerMoved = false; return; }
             var now = Date.now();
             if (now - lastTapTime < 300) {
                 // 双击：切换缩放
