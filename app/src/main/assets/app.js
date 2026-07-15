@@ -5,6 +5,24 @@
 (function () {
     'use strict';
 
+    /* ---------- 表格长按保存确认弹窗样式 ---------- */
+    (function () {
+        var s = document.createElement('style');
+        s.textContent = [
+            '.mdreader-confirm-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.45);z-index:10000;display:flex;align-items:center;justify-content:center}',
+            '.mdreader-confirm-box{background:#fff;border-radius:12px;padding:24px 20px 16px;max-width:300px;width:85%;box-shadow:0 8px 30px rgba(0,0,0,0.25);text-align:center;font-family:sans-serif}',
+            '.mdreader-confirm-msg{font-size:15px;color:#333;margin-bottom:20px;line-height:1.5}',
+            '.mdreader-confirm-btns{display:flex;gap:12px;justify-content:center}',
+            '.mdreader-confirm-yes,.mdreader-confirm-no{border:none;border-radius:8px;padding:10px 28px;font-size:14px;cursor:pointer;font-weight:500}',
+            '.mdreader-confirm-yes{background:#4A90D9;color:#fff}',
+            '.mdreader-confirm-no{background:#e5e5e5;color:#555}',
+            'body.dark .mdreader-confirm-box{background:#2a2a2a}',
+            'body.dark .mdreader-confirm-msg{color:#ddd}',
+            'body.dark .mdreader-confirm-no{background:#444;color:#bbb}'
+        ].join('\n');
+        document.head.appendChild(s);
+    })();
+
     var VAULT_BASE = 'https://appassets.androidplatform.net/vault/';
 
     /* ---------- 任务列表渲染规则 ---------- */
@@ -647,6 +665,152 @@
             });
         } catch (e) { /* KaTeX render error */ }
     }
+    /* ---------- 表格长按保存为 PNG ---------- */
+    /** 用 Canvas 2D 将表格绘制为 PNG data URL（绕过 WebView 无法截取渲染内容的问题） */
+    function _captureTableToPng(tableEl) {
+        var dpr = window.devicePixelRatio || 1;
+        var rect = tableEl.getBoundingClientRect();
+        var W = Math.ceil(rect.width);
+        var H = Math.ceil(rect.height);
+        var canvas = document.createElement('canvas');
+        canvas.width = W * dpr;
+        canvas.height = H * dpr;
+        var ctx = canvas.getContext('2d');
+        ctx.scale(dpr, dpr);
+
+        // 背景
+        var isDark = document.body.classList.contains('dark');
+        ctx.fillStyle = isDark ? '#1e1e1e' : '#ffffff';
+        ctx.fillRect(0, 0, W, H);
+
+        // 递归绘制 DOM 元素
+        function drawEl(el, offX, offY) {
+            var r = el.getBoundingClientRect();
+            var x = r.left - rect.left + offX;
+            var y = r.top - rect.top + offY;
+            var w = r.width;
+            var h = r.height;
+
+            // 绘制背景色
+            var bg = getComputedStyle(el).backgroundColor;
+            if (bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') {
+                ctx.fillStyle = bg;
+                ctx.fillRect(x, y, w, h);
+            }
+
+            // 绘制边框
+            var cs = getComputedStyle(el);
+            var borders = ['Top', 'Right', 'Bottom', 'Left'];
+            var borderColors = { Top: cs.borderTopColor, Right: cs.borderRightColor, Bottom: cs.borderBottomColor, Left: cs.borderLeftColor };
+            var borderWidths = { Top: parseFloat(cs.borderTopWidth), Right: parseFloat(cs.borderRightWidth), Bottom: parseFloat(cs.borderBottomWidth), Left: parseFloat(cs.borderLeftWidth) };
+            borders.forEach(function (side) {
+                var bw = borderWidths[side];
+                if (bw > 0) {
+                    ctx.strokeStyle = borderColors[side] || (isDark ? '#555' : '#ccc');
+                    ctx.lineWidth = bw;
+                    ctx.beginPath();
+                    if (side === 'Top') { ctx.moveTo(x, y + bw / 2); ctx.lineTo(x + w, y + bw / 2); }
+                    else if (side === 'Bottom') { ctx.moveTo(x, y + h - bw / 2); ctx.lineTo(x + w, y + h - bw / 2); }
+                    else if (side === 'Left') { ctx.moveTo(x + bw / 2, y); ctx.lineTo(x + bw / 2, y + h); }
+                    else if (side === 'Right') { ctx.moveTo(x + w - bw / 2, y); ctx.lineTo(x + w - bw / 2, y + h); }
+                    ctx.stroke();
+                }
+            });
+
+            // 绘制文本
+            if (el.childNodes.length > 0) {
+                var text = '';
+                el.childNodes.forEach(function (child) {
+                    if (child.nodeType === 3) text += child.nodeValue;
+                });
+                text = text.trim();
+                if (text) {
+                    var fs = parseFloat(cs.fontSize) || 14;
+                    ctx.font = cs.fontStyle + ' ' + cs.fontWeight + ' ' + fs + 'px ' + cs.fontFamily;
+                    ctx.fillStyle = cs.color || (isDark ? '#ddd' : '#333');
+                    var padL = parseFloat(cs.paddingLeft) || 0;
+                    var padT = parseFloat(cs.paddingTop) || 0;
+                    var textX = x + padL;
+                    var textY = y + padT + fs;
+                    // 简单的文字渲染
+                    ctx.fillText(text, textX, textY, w - padL - (parseFloat(cs.paddingRight) || 0));
+                }
+            }
+
+            // 递归子元素
+            for (var i = 0; i < el.children.length; i++) {
+                drawEl(el.children[i], offX, offY);
+            }
+        }
+
+        drawEl(tableEl, 0, 0);
+        return canvas.toDataURL('image/png');
+    }
+
+    /** 显示保存确认弹窗 */
+    function showDownloadConfirm(tableEl) {
+        var overlay = document.createElement('div');
+        overlay.className = 'mdreader-confirm-overlay';
+        overlay.innerHTML = '<div class="mdreader-confirm-box">' +
+            '<div class="mdreader-confirm-msg">\u4FDD\u5B58\u8868\u683C\u4E3A\u56FE\u7247\uFF1F</div>' +
+            '<div class="mdreader-confirm-btns">' +
+            '<button class="mdreader-confirm-no">\u53D6\u6D88</button>' +
+            '<button class="mdreader-confirm-yes">\u4FDD\u5B58</button>' +
+            '</div></div>';
+
+        overlay.querySelector('.mdreader-confirm-no').onclick = function () {
+            document.body.removeChild(overlay);
+        };
+        overlay.querySelector('.mdreader-confirm-yes').onclick = function () {
+            document.body.removeChild(overlay);
+            try {
+                var dataUrl = _captureTableToPng(tableEl);
+                var base64 = dataUrl.replace(/^data:image\/png;base64,/, '');
+                var b = bridge();
+                if (b && b.savePngBase64) {
+                    b.savePngBase64(base64, 'table');
+                }
+            } catch (e) { /* capture failed */ }
+        };
+        // 点击遮罩关闭
+        overlay.addEventListener('click', function (e) {
+            if (e.target === overlay) document.body.removeChild(overlay);
+        });
+        document.body.appendChild(overlay);
+    }
+
+    /** 设置表格交互：长按 500ms 弹出保存确认 */
+    function setupTableInteractions() {
+        var tables = previewEl.querySelectorAll('table');
+        for (var i = 0; i < tables.length; i++) {
+            (function (table) {
+                var pressTimer = null;
+                var longPressed = false;
+
+                table.addEventListener('touchstart', function (e) {
+                    longPressed = false;
+                    pressTimer = setTimeout(function () {
+                        longPressed = true;
+                        showDownloadConfirm(table);
+                    }, 500);
+                }, { passive: true });
+
+                table.addEventListener('touchend', function (e) {
+                    if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+                    if (longPressed) { e.preventDefault(); }
+                });
+
+                table.addEventListener('touchmove', function () {
+                    if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+                }, { passive: true });
+
+                table.addEventListener('touchcancel', function () {
+                    if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+                });
+            })(tables[i]);
+        }
+    }
+
     /* ---------- 渲染缓存 ---------- */
     var renderCache = { source: null, html: null };
 
@@ -761,6 +925,7 @@
         addCopyButtons();
         renderMermaid();
         renderFormulas();
+        setupTableInteractions();
         // 自动展开 markdown 嵌入块（类似 Obsidian transclusion）
         autoExpandEmbeds();
 
