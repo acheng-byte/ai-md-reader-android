@@ -277,7 +277,10 @@ object VaultIndex {
             }
 
             if (children.isEmpty()) {
-                if (relPath.isNotEmpty()) scannedDirs.add(relPath)
+                // 不标记为已扫描！listDir返回空可能是临时失败（权限/时序），
+                // 标记后该目录永远不会被重试，导致其中的文件永远不被索引。
+                // 下次扫描会重新尝试列出该目录。
+                Logger.w(TAG, "目录返回空(将重试): $relPath")
                 continue
             }
 

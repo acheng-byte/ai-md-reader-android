@@ -343,13 +343,17 @@
                 return '<div class="audio-embed"><audio controls preload="metadata" src="' +
                     escapeHtml(audUrl) + '"></audio><p class="audio-caption">' + escapeHtml(ref) + '</p></div>';
             }
-            // 非图片/视频：生成可展开的引用块
-            return '<div class="embed-block" data-embed-ref="' + escapeHtml(ref) + '">' +
+            // 非图片/视频/音频：生成嵌入引用块
+            // .md 文件或无扩展名的引用 → 自动展开（类似 Obsidian transclusion）
+            var isMd = ext === 'md' || ext === 'markdown' || ref.indexOf('.') < 0;
+            var autoAttr = isMd ? ' data-auto-embed="true"' : '';
+            var contentDisplay = isMd ? 'block' : 'none';
+            return '<div class="embed-block"' + autoAttr + ' data-embed-ref="' + escapeHtml(ref) + '">' +
                 '<div class="embed-header" onclick="window._toggleEmbed(this)">' +
                 '<span class="embed-icon">&#128196;</span>' +
                 '<span class="embed-name">' + escapeHtml(ref) + '</span>' +
                 '<span class="embed-toggle">&#8964;</span></div>' +
-                '<div class="embed-content" style="display:none"></div></div>';
+                '<div class="embed-content" style="display:' + contentDisplay + '"></div></div>';
         });
 
         // [[Page|Display]] → [Display](mdreader://open/Page)
@@ -540,6 +544,17 @@
             }
         }, 0);
     };
+
+    /** 自动展开标记了 data-auto-embed 的嵌入块（markdown transclusion） */
+    function autoExpandEmbeds() {
+        var blocks = previewEl.querySelectorAll('.embed-block[data-auto-embed="true"]');
+        for (var i = 0; i < blocks.length; i++) {
+            var header = blocks[i].querySelector('.embed-header');
+            if (header && window._toggleEmbed) {
+                window._toggleEmbed(header);
+            }
+        }
+    }
 
     /* ---------- Mermaid 渲染 ---------- */
     var mermaidReady = false;
@@ -1396,6 +1411,8 @@
         setupImageInteractions();
         setupVideoInteractions();
         renderFormulas();
+        // 自动展开 markdown 嵌入块（类似 Obsidian transclusion）
+        autoExpandEmbeds();
 
         codeBlockEl.removeAttribute('data-highlighted');
         codeBlockEl.className = 'language-markdown';

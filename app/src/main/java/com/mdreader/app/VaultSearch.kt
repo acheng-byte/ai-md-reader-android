@@ -296,7 +296,14 @@ object VaultSearch {
             Logger.w(TAG, "索引未就绪，直接使用 SAF 路径导航")
         }
 
-        val root = DocumentFile.fromTreeUri(context, encoded) ?: return null
+        val root = DocumentFile.fromTreeUri(context, encoded)
+        if (root == null) {
+            Logger.e(TAG, "SAF回退: root为null, encoded=${encoded.toString().take(80)}")
+            return null
+        }
+        Logger.i(TAG, "SAF回退: root有效, exists=${root.exists}, isDir=${root.isDirectory}")
+        val rootChildren = listDir(context, encoded, root)
+        Logger.i(TAG, "SAF回退: root列出 ${rootChildren.size} 项, 子目录: ${rootChildren.filter { it.isDirectory }.map { it.name }.joinToString(",")}")
 
         if (cleanName.contains('/')) {
             val parts = cleanName.split('/').filter { it.isNotEmpty() }
@@ -306,18 +313,36 @@ object VaultSearch {
             var dir: DocumentFile? = root
             for (part in dirParts) {
                 val children = listDir(context, encoded, dir ?: break)
+                Logger.i(TAG, "SAF路径导航: 在 '${dir?.name ?: "root"}' 中查找目录 '$part', 列出 ${children.size} 项")
                 dir = children.find {
                     it.isDirectory && nameMatches(it.name, part)
                 }
-                if (dir == null) break
+                if (dir == null) {
+                    Logger.w(TAG, "SAF路径导航: 未找到目录 '$part'")
+                    break
+                } else {
+                    Logger.i(TAG, "SAF路径导航: 找到目录 '$part'")
+                }
             }
 
             if (dir != null) {
-                findInDir(context, encoded, dir, fileName)?.let { return it }
+                val targetChildren = listDir(context, encoded, dir)
+                Logger.i(TAG, "SAF目标目录: '${dir.name}' 包含 ${targetChildren.size} 项")
+                findInDir(context, encoded, dir, fileName)?.let {
+                    Logger.i(TAG, "SAF路径导航成功找到: ${it.name}")
+                    return it
+                }
             }
 
             // 回退：全库根目录递归搜索文件名
-            return findInDir(context, encoded, root, fileName)
+            Logger.i(TAG, "SAF全库递归搜索: fileName=$fileName")
+            val found = findInDir(context, encoded, root, fileName)
+            if (found != null) {
+                Logger.i(TAG, "SAF全库递归找到: ${found.name}")
+            } else {
+                Logger.w(TAG, "SAF全库递归也未找到: $fileName")
+            }
+            return found
         }
 
         return findInDir(context, encoded, root, cleanName)
