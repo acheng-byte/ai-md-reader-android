@@ -130,14 +130,17 @@ object VaultIndex {
 
     /** 后台扫描库文件夹（增量：跳过已扫描目录，定期保存） */
     fun scanInBackground(context: Context, vaultUri: Uri, onDone: (() -> Unit)? = null) {
-        if (scanning) {
-            Logger.w(TAG, "scanInBackground: 已在扫描中，跳过")
-            return
+        // 原子性检查并设置 scanning 标志，防止并发扫描
+        synchronized(this) {
+            if (scanning) {
+                Logger.w(TAG, "scanInBackground: 已在扫描中，跳过")
+                return
+            }
+            scanning = true
         }
         Thread {
             val startTime = System.currentTimeMillis()
             android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_LOWEST)
-            scanning = true
             try {
                 val uriStr = vaultUri.toString()
                 val encoded = VaultSearch.ensureEncoded(vaultUri)
@@ -394,6 +397,7 @@ object VaultIndex {
     private fun saveToDisk(context: Context) {
         context_filesDir_ref = context.filesDir
         val file = File(context.filesDir, CACHE_FILE)
+        val tmpFile = File(context.filesDir, CACHE_FILE + ".tmp")
         try {
             val currentEntries: List<Entry>
             val currentDirs: Set<String>
@@ -403,8 +407,8 @@ object VaultIndex {
                 currentDirs = HashSet(scannedDirs)
                 currentUri = indexVaultUri
             }
-            // 流式写入 JSON，避免 19000+ 条目时 OOM
-            FileWriter(file).use { writer ->
+            // 流式写入临时文件，完成后原子重命名（防止中途崩溃导致 JSON 损坏）
+            FileWriter(tmpFile).use { writer ->
                 val json = android.util.JsonWriter(writer)
                 json.beginObject()
                 json.name("vaultUri").value(currentUri ?: "")
@@ -425,8 +429,13 @@ object VaultIndex {
                 json.endObject()
                 json.flush()
             }
+            // 原子替换：删除旧文件，临时文件重命名
+            if (file.exists()) file.delete()
+            tmpFile.renameTo(file)
         } catch (e: Exception) {
             Logger.e(TAG, "保存索引失败: ${e.message}")
+            // 清理临时文件
+            try { if (tmpFile.exists()) tmpFile.delete() } catch (_: Exception) {}
         }
     }
 }

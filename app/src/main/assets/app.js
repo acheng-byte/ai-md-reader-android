@@ -711,6 +711,14 @@
             '.mdreader-preview-body table{border-collapse:collapse;width:auto;min-width:300px;max-width:95vw;margin:0 auto;font-size:14px;}',
             '.mdreader-preview-body table th,.mdreader-preview-body table td{border:1px solid #ccc;padding:8px 14px;color:#333;}',
             '.mdreader-preview-body table th{background:#f5f5f5;font-weight:600;}',
+            /* 画廊导航栏 */
+            '.mdreader-gallery-bar{display:flex;justify-content:center;align-items:center;gap:16px;padding:4px 12px;background:rgba(0,0,0,0.04);}',
+            '.mdreader-gallery-bar button{background:rgba(0,0,0,0.08);border:none;border-radius:50%;width:36px;height:36px;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#333;}',
+            '.mdreader-gallery-bar button:active{background:rgba(0,0,0,0.18);}',
+            '.mdreader-gallery-counter{font-size:13px;color:#666;min-width:60px;text-align:center;}',
+            'body.dark .mdreader-gallery-bar{background:rgba(255,255,255,0.04);}',
+            'body.dark .mdreader-gallery-bar button{background:rgba(255,255,255,0.1);color:#e6edf3;}',
+            'body.dark .mdreader-gallery-counter{color:#8b949e;}',
             'body.dark .mdreader-preview-overlay{background:rgba(20,20,22,0.96);}',
             'body.dark .mdreader-preview-toolbar{background:rgba(255,255,255,0.06);}',
             'body.dark .mdreader-preview-toolbar button{color:#e6edf3;}',
@@ -735,6 +743,91 @@
     var previewBlobUrl = null; // 跟踪当前 blob URL，防止内存泄漏
     var recentPinch = false; // 捏合手势刚结束时阻止 overlay 关闭
 
+    /* ---------- 媒体画廊（左右滑动切换图片/视频/Mermaid） ---------- */
+    var galleryItems = [];   // [{type:'image'|'mermaid'|'video', el:HTMLElement}]
+    var galleryIndex = -1;
+    var gallerySwipeStartX = 0;
+    var gallerySwipeStartY = 0;
+    var gallerySwipeMoved = false;
+    var GALLERY_SWIPE_THRESHOLD = 60;
+
+    /** 收集文档中所有媒体元素（按 DOM 顺序） */
+    function collectGalleryItems() {
+        var items = [];
+        var els = previewEl.querySelectorAll('img, .mermaid-container svg, video');
+        for (var i = 0; i < els.length; i++) {
+            var el = els[i];
+            var tag = el.tagName.toLowerCase();
+            if (tag === 'img') {
+                // 跳过工具栏图标等小图片（宽高太小的不是内容图片）
+                if (el.naturalWidth && el.naturalWidth < 40 && el.naturalHeight && el.naturalHeight < 40) continue;
+                items.push({ type: 'image', el: el });
+            } else if (tag === 'svg') {
+                items.push({ type: 'mermaid', el: el });
+            } else if (tag === 'video') {
+                items.push({ type: 'video', el: el });
+            }
+        }
+        return items;
+    }
+
+    /** 在画廊中导航到指定索引 */
+    function navigateGallery(newIndex) {
+        if (newIndex < 0 || newIndex >= galleryItems.length) return;
+        galleryIndex = newIndex;
+        var item = galleryItems[newIndex];
+        var overlay = ensurePreviewOverlay();
+        var body = overlay.querySelector('.mdreader-preview-body');
+        var dlBtn = overlay.querySelector('.mdreader-preview-dl-btn');
+        body.innerHTML = '';
+        body.scrollTop = 0;
+        // 更新计数器
+        var counter = overlay.querySelector('.mdreader-gallery-counter');
+        if (counter) {
+            counter.textContent = (newIndex + 1) + ' / ' + galleryItems.length;
+            counter.style.display = galleryItems.length > 1 ? '' : 'none';
+        }
+        // 导航按钮显隐
+        var prevBtn = overlay.querySelector('.mdreader-gallery-prev');
+        var nextBtn = overlay.querySelector('.mdreader-gallery-next');
+        var galleryBar = overlay.querySelector('.mdreader-gallery-bar');
+        var hasMultiple = galleryItems.length > 1;
+        if (prevBtn) prevBtn.style.display = hasMultiple ? 'flex' : 'none';
+        if (nextBtn) nextBtn.style.display = hasMultiple ? 'flex' : 'none';
+        if (galleryBar) galleryBar.style.display = hasMultiple ? 'flex' : 'none';
+
+        if (item.type === 'image') {
+            if (dlBtn) dlBtn.style.display = '';
+            var clone = new Image();
+            clone.style.cssText = 'max-width:95vw;max-height:85vh;object-fit:contain;';
+            clone.onload = function () { body.appendChild(clone); setupPinchZoom(clone); };
+            clone.src = item.el.src;
+        } else if (item.type === 'mermaid') {
+            if (dlBtn) dlBtn.style.display = 'none';
+            var svgHtml = item.el.outerHTML;
+            var img = new Image();
+            img.onload = function () { body.appendChild(img); setupPinchZoom(img); };
+            img.onerror = function () {
+                var wrapper = document.createElement('div');
+                wrapper.innerHTML = svgHtml;
+                wrapper.style.textAlign = 'center';
+                body.appendChild(wrapper);
+            };
+            if (previewBlobUrl) URL.revokeObjectURL(previewBlobUrl);
+            var blob = new Blob([svgHtml], { type: 'image/svg+xml;charset=utf-8' });
+            previewBlobUrl = URL.createObjectURL(blob);
+            img.src = previewBlobUrl;
+        } else if (item.type === 'video') {
+            if (dlBtn) dlBtn.style.display = 'none';
+            var video = document.createElement('video');
+            video.src = item.el.src;
+            video.controls = true;
+            video.autoplay = true;
+            video.style.cssText = 'max-width:95vw;max-height:85vh;';
+            body.appendChild(video);
+        }
+    }
+
     /** 创建预览覆盖层 DOM（惰性创建，复用） */
     function ensurePreviewOverlay() {
         if (previewOverlay) return previewOverlay;
@@ -756,20 +849,64 @@
         toolbar.appendChild(closeBtn);
         previewOverlay.appendChild(toolbar);
 
+        // 画廊导航：左/右箭头 + 计数器
+        var galleryBar = document.createElement('div');
+        galleryBar.className = 'mdreader-gallery-bar';
+        var prevBtn = document.createElement('button');
+        prevBtn.className = 'mdreader-gallery-prev';
+        prevBtn.textContent = '\u25C0';
+        prevBtn.style.display = 'none';
+        prevBtn.onclick = function (e) { e.stopPropagation(); navigateGallery(galleryIndex - 1); };
+        var counter = document.createElement('span');
+        counter.className = 'mdreader-gallery-counter';
+        counter.style.display = 'none';
+        var nextBtn = document.createElement('button');
+        nextBtn.className = 'mdreader-gallery-next';
+        nextBtn.textContent = '\u25B6';
+        nextBtn.style.display = 'none';
+        nextBtn.onclick = function (e) { e.stopPropagation(); navigateGallery(galleryIndex + 1); };
+        galleryBar.appendChild(prevBtn);
+        galleryBar.appendChild(counter);
+        galleryBar.appendChild(nextBtn);
+        previewOverlay.appendChild(galleryBar);
+
         // 内容区
         var body = document.createElement('div');
         body.className = 'mdreader-preview-body';
         previewOverlay.appendChild(body);
 
         // 阻止覆盖层上的所有触摸事件传播到底层，防止底层滚动
+        // 但水平滑动用于画廊导航
+        var gStartX = 0, gStartY = 0, gMoved = false;
         previewOverlay.addEventListener('touchstart', function (e) {
+            if (galleryItems.length > 1) {
+                gStartX = e.touches[0].clientX;
+                gStartY = e.touches[0].clientY;
+                gMoved = false;
+            }
             e.stopPropagation();
         }, { passive: true });
         previewOverlay.addEventListener('touchmove', function (e) {
+            if (galleryItems.length > 1 && gStartX) {
+                var dx = e.touches[0].clientX - gStartX;
+                var dy = e.touches[0].clientY - gStartY;
+                if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 10) {
+                    gMoved = true;
+                }
+            }
             e.preventDefault();
             e.stopPropagation();
         }, { passive: false });
         previewOverlay.addEventListener('touchend', function (e) {
+            if (galleryItems.length > 1 && gMoved) {
+                var dx = (e.changedTouches[0] ? e.changedTouches[0].clientX : gStartX) - gStartX;
+                if (dx < -GALLERY_SWIPE_THRESHOLD) navigateGallery(galleryIndex + 1);
+                else if (dx > GALLERY_SWIPE_THRESHOLD) navigateGallery(galleryIndex - 1);
+                gMoved = false;
+                gStartX = 0;
+                e.stopPropagation();
+                return;
+            }
             e.stopPropagation();
         }, { passive: true });
 
@@ -783,34 +920,22 @@
         return previewOverlay;
     }
 
-    /** 打开 Mermaid 预览 */
+    /** 打开 Mermaid 预览（支持画廊导航） */
     function openMermaidPreview(svgEl) {
-        var overlay = ensurePreviewOverlay();
-        var body = overlay.querySelector('.mdreader-preview-body');
-        body.innerHTML = '';
-        body.scrollTop = 0;
-        // 隐藏保存按钮（Mermaid 不支持保存）
-        var dlBtn = overlay.querySelector('.mdreader-preview-dl-btn');
-        if (dlBtn) dlBtn.style.display = 'none';
-        var svgHtml = svgEl.outerHTML;
-        var img = new Image();
-        img.onload = function () {
-            body.appendChild(img);
-            setupPinchZoom(img);
-        };
-        img.onerror = function () {
-            // SVG 加载失败，直接显示 SVG HTML
-            var wrapper = document.createElement('div');
-            wrapper.innerHTML = svgHtml;
-            wrapper.style.textAlign = 'center';
-            body.appendChild(wrapper);
-        };
-        var blob = new Blob([svgHtml], { type: 'image/svg+xml;charset=utf-8' });
-        // 释放旧的 blob URL 防止内存泄漏
-        if (previewBlobUrl) URL.revokeObjectURL(previewBlobUrl);
-        previewBlobUrl = URL.createObjectURL(blob);
-        img.src = previewBlobUrl;
-        overlay.style.display = 'flex';
+        galleryItems = collectGalleryItems();
+        galleryIndex = -1;
+        // 找到当前 SVG 在画廊中的位置
+        for (var i = 0; i < galleryItems.length; i++) {
+            if (galleryItems[i].el === svgEl) { galleryIndex = i; break; }
+        }
+        if (galleryIndex >= 0) {
+            navigateGallery(galleryIndex);
+        } else {
+            // 回退：直接显示
+            galleryItems = [{ type: 'mermaid', el: svgEl }];
+            galleryIndex = 0;
+            navigateGallery(0);
+        }
     }
 
     /** 打开表格预览 */
@@ -837,6 +962,9 @@
             previewOverlay.style.display = 'none';
             if (previewBlobUrl) { URL.revokeObjectURL(previewBlobUrl); previewBlobUrl = null; }
         }
+        // 重置画廊状态
+        galleryItems = [];
+        galleryIndex = -1;
     }
 
     // 暴露给 Android 返回键处理
@@ -1283,24 +1411,22 @@
         }
     }
 
-    /** 打开图片预览 */
+    /** 打开图片预览（支持画廊导航） */
     function openImagePreview(imgEl) {
-        var overlay = ensurePreviewOverlay();
-        var body = overlay.querySelector('.mdreader-preview-body');
-        body.innerHTML = '';
-        body.scrollTop = 0;
-        // 隐藏保存按钮
-        var dlBtn = overlay.querySelector('.mdreader-preview-dl-btn');
-        if (dlBtn) dlBtn.style.display = 'none';
-        // 克隆图片
-        var clone = new Image();
-        clone.style.cssText = 'max-width:95vw;max-height:90vh;object-fit:contain;';
-        clone.onload = function () {
-            body.appendChild(clone);
-            setupPinchZoom(clone);
-        };
-        clone.src = imgEl.src;
-        overlay.style.display = 'flex';
+        galleryItems = collectGalleryItems();
+        galleryIndex = -1;
+        // 找到当前图片在画廊中的位置
+        for (var i = 0; i < galleryItems.length; i++) {
+            if (galleryItems[i].el === imgEl) { galleryIndex = i; break; }
+        }
+        if (galleryIndex >= 0) {
+            navigateGallery(galleryIndex);
+        } else {
+            // 回退：只显示当前图片
+            galleryItems = [{ type: 'image', el: imgEl }];
+            galleryIndex = 0;
+            navigateGallery(0);
+        }
     }
 
     /** 为内嵌视频添加单击全屏预览 + 双击关闭 */
@@ -1325,24 +1451,20 @@
         }
     }
 
-    /** 打开视频预览 */
+    /** 打开视频预览（支持画廊导航） */
     function openVideoPreview(videoEl) {
-        var overlay = ensurePreviewOverlay();
-        var body = overlay.querySelector('.mdreader-preview-body');
-        body.innerHTML = '';
-        body.scrollTop = 0;
-        // 隐藏保存按钮
-        var dlBtn = overlay.querySelector('.mdreader-preview-dl-btn');
-        if (dlBtn) dlBtn.style.display = 'none';
-        // 克隆视频
-        var clone = document.createElement('video');
-        clone.controls = true;
-        clone.preload = 'auto';
-        clone.src = videoEl.src;
-        clone.style.cssText = 'max-width:95vw;max-height:85vh;border-radius:8px;background:#000;';
-        clone.autoplay = true;
-        body.appendChild(clone);
-        overlay.style.display = 'flex';
+        galleryItems = collectGalleryItems();
+        galleryIndex = -1;
+        for (var i = 0; i < galleryItems.length; i++) {
+            if (galleryItems[i].el === videoEl) { galleryIndex = i; break; }
+        }
+        if (galleryIndex >= 0) {
+            navigateGallery(galleryIndex);
+        } else {
+            galleryItems = [{ type: 'video', el: videoEl }];
+            galleryIndex = 0;
+            navigateGallery(0);
+        }
     }
 
     /* ---------- 渲染缓存 ---------- */
@@ -1887,6 +2009,7 @@
     }
 
     /* 异步全库搜索 - 防止UI卡顿 */
+    var vaultSearchInProgress = false;
     function doVaultSearchDebounced(q) {
         if (vaultSearchTimer) clearTimeout(vaultSearchTimer);
         vaultResultsEl.innerHTML = q ? '<div class="vault-searching">搜索中…</div>' : '';
@@ -1894,15 +2017,19 @@
         if (!q) return;
         vaultSearchTimer = setTimeout(function () {
             vaultSearchTimer = null;
+            if (vaultSearchInProgress) return;  // 防止重复搜索
             doVaultSearch(q);
         }, 300);
     }
 
     function doVaultSearch(q) {
+        if (vaultSearchInProgress) return;
+        vaultSearchInProgress = true;
         try {
             var b = bridge();
             if (!b) {
                 vaultResultsEl.innerHTML = '<div class="vault-no-vault">请先在设置中选择 Vault 文件夹</div>';
+                vaultSearchInProgress = false;
                 return;
             }
             // 优先使用异步接口
@@ -1910,6 +2037,7 @@
                 var cbId = 'vs_' + Date.now();
                 window._vaultSearchCallback = function (id, jsonStr) {
                     if (id !== cbId) return;
+                    vaultSearchInProgress = false;
                     renderVaultResults(jsonStr);
                 };
                 b.searchVaultAsync(q, cbId);
@@ -1918,6 +2046,7 @@
             // 降级同步
             if (!b.searchVault) {
                 vaultResultsEl.innerHTML = '<div class="vault-no-vault">请先在设置中选择 Vault 文件夹</div>';
+                vaultSearchInProgress = false;
                 return;
             }
             var json = b.searchVault(q);
@@ -1925,6 +2054,7 @@
         } catch (e) {
             vaultResultsEl.innerHTML = '<div class="vault-no-vault">搜索出错</div>';
         }
+        vaultSearchInProgress = false;
     }
 
     function renderVaultResults(json) {
@@ -2154,19 +2284,21 @@
             root.style.setProperty('--font-family', ff);
         }
         if (s.fontColor != null) {
-            var colorMap = {
-                'default': '',
-                'red': '#D32F2F',
-                'green': '#2E7D32',
-                'gray': '#757575',
-                'blue': '#1565C0'
-            };
-            var c = colorMap[s.fontColor] || '';
-            if (c) {
-                root.style.setProperty('--fg-override', c);
-            } else {
-                root.style.removeProperty('--fg-override');
-            }
+            try {
+                var colorMap = {
+                    'default': '',
+                    'red': '#D32F2F',
+                    'green': '#2E7D32',
+                    'gray': '#757575',
+                    'blue': '#1565C0'
+                };
+                var c = colorMap[s.fontColor] || '';
+                if (c) {
+                    root.style.setProperty('--fg-override', c);
+                } else {
+                    root.style.removeProperty('--fg-override');
+                }
+            } catch (e) { /* 字体颜色设置失败不影响使用 */ }
         }
         if (s.showCitations != null) {
             document.body.classList.toggle('hide-citations', !s.showCitations);

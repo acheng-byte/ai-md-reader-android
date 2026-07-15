@@ -58,11 +58,17 @@ object Logger {
         entries.addLast(line)
         if (level == "E") errorCounter++
 
-        // 异步写入磁盘
-        pendingWrites++
-        if (pendingWrites >= SAVE_INTERVAL) {
+        // 错误级别：立即同步写入磁盘（防止崩溃后丢失关键日志）
+        if (level == "E") {
             pendingWrites = 0
-            Thread { saveToDisk() }.start()
+            saveToDisk()
+        } else {
+            // 普通级别：攒够 SAVE_INTERVAL 条后异步写入
+            pendingWrites++
+            if (pendingWrites >= SAVE_INTERVAL) {
+                pendingWrites = 0
+                Thread { saveToDisk() }.start()
+            }
         }
 
         // 同时输出到 Logcat
@@ -142,7 +148,7 @@ object Logger {
         }
     }
 
-    /** 保存日志到磁盘 */
+    /** 保存日志到磁盘（同步） */
     @Synchronized
     fun saveToDisk() {
         try {
@@ -155,5 +161,10 @@ object Logger {
         } catch (e: Exception) {
             android.util.Log.e("Logger", "保存日志失败: ${e.message}")
         }
+    }
+
+    /** 公开方法：在可能崩溃的操作前调用，确保日志已持久化 */
+    fun flushSync() {
+        saveToDisk()
     }
 }

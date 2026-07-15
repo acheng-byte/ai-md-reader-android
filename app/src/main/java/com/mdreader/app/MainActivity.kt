@@ -65,7 +65,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
     /** 编辑→预览切换时的临时滚动比例（覆盖阅读位置记忆） */
     private var pendingScrollRatio: Double = -1.0
     @Volatile private var currentDocumentUri: Uri? = null
-    private var pageReady: Boolean = false
+    @Volatile private var pageReady: Boolean = false
     private var elementSaveCounter: Int = 0
 
     // Edit mode state
@@ -146,8 +146,16 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                 }
                 prefs.vaultUri = encoded.toString()
                 VaultSearch.clearCache()
+                // 切换库文件夹时触发全量扫描
+                VaultIndex.clear()
+                VaultIndex.scanInBackground(this, encoded) {
+                    safeRunOnUiThread {
+                        val count = VaultIndex.entryCount()
+                        Logger.i("MainActivity", "库文件夹扫描完成: $count 个文件")
+                    }
+                }
                 val vaultName = DocumentFile.fromTreeUri(this, encoded)?.name ?: "未知"
-                Logger.i("MainActivity", "设置库文件夹: $vaultName")
+                Logger.i("MainActivity", "设置库文件夹: $vaultName，开始扫描...")
                 Toast.makeText(this, getString(R.string.vault_set), Toast.LENGTH_SHORT).show()
             }
         }
@@ -226,17 +234,16 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         webView.setBackgroundColor(bgColor())
         webView.loadUrl(VIEWER_URL)
 
-        // 文档加载后延迟 3 秒再启动库索引（确保文档先渲染，不抢 I/O）
+        // 文档加载后延迟 3 秒再加载库索引（仅从磁盘加载缓存，不触发扫描）
+        // 扫描仅在切换库文件夹或点击"重新扫描库"时触发
         val vaultUriForIndex = prefs.vaultUri
         if (vaultUriForIndex != null) {
             android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                 Thread {
                     try {
                         val encoded = VaultSearch.ensureEncoded(Uri.parse(vaultUriForIndex))
-                        // 先尝试从磁盘加载缓存（瞬间），然后触发后台扫描
-                        // scanInBackground 会跳过已扫描目录，继续未完成部分
                         VaultIndex.loadFromDisk(this, encoded)
-                        VaultIndex.scanInBackground(this, encoded)
+                        Logger.i("MainActivity", "库索引已从缓存加载: ${VaultIndex.entryCount()} 个文件")
                     } catch (_: Exception) {}
                 }.start()
             }, 3000)
@@ -507,9 +514,9 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                 val text = FileUtils.readText(this, readUri)
                 name to text
             }
-            runOnUiThread {
+            safeRunOnUiThread {
                 // Stale load — a newer one is already running
-                if (gen != loadGeneration.get()) return@runOnUiThread
+                if (gen != loadGeneration.get()) return@safeRunOnUiThread
                 result.onSuccess { (name, text) ->
                     currentMarkdown = text
                     currentTitle = name
@@ -581,7 +588,25 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
     }
 
     private fun js(code: String) {
-        if (pageReady) webView.evaluateJavascript(code, null)
+        if (!pageReady) return
+        try {
+            webView.evaluateJavascript(code) { result ->
+                // 检查 JS 端是否返回了错误
+                if (result != null && result.startsWith("\"error")) {
+                    Logger.w("MainActivity", "JS 执行异常: $result")
+                }
+            }
+        } catch (e: Exception) {
+            Logger.w("MainActivity", "js() 异常: ${e.message}")
+        }
+    }
+
+    /** 安全的 runOnUiThread：Activity 已销毁时不执行，防止 BadTokenException */
+    private fun safeRunOnUiThread(action: () -> Unit) {
+        if (isDestroyed || isFinishing) return
+        runOnUiThread {
+            if (!isDestroyed && !isFinishing) action()
+        }
     }
 
     private fun bgColor(): Int {
@@ -613,7 +638,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                     packageManager.getPackageInfo(packageName, 0).versionName
                 }.getOrNull() ?: return@Thread
                 if (UpdateChecker.isNewer(info.tagName, currentVersion)) {
-                    runOnUiThread { showUpdateDialog(info) }
+                    safeRunOnUiThread { showUpdateDialog(info) }
                 }
             } catch (_: Exception) { /* silent for auto-check */ }
         }.start()
@@ -626,7 +651,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             try {
                 val info = UpdateChecker.checkLatest()
                 if (info == null) {
-                    runOnUiThread {
+                    safeRunOnUiThread {
                         Toast.makeText(this, getString(R.string.update_check_failed, "网络请求失败"), Toast.LENGTH_LONG).show()
                     }
                     return@Thread
@@ -635,14 +660,14 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                     packageManager.getPackageInfo(packageName, 0).versionName
                 }.getOrNull() ?: "0.0.0"
                 if (UpdateChecker.isNewer(info.tagName, currentVersion)) {
-                    runOnUiThread { showUpdateDialog(info) }
+                    safeRunOnUiThread { showUpdateDialog(info) }
                 } else {
-                    runOnUiThread {
+                    safeRunOnUiThread {
                         Toast.makeText(this, getString(R.string.update_latest, currentVersion), Toast.LENGTH_LONG).show()
                     }
                 }
             } catch (e: Exception) {
-                runOnUiThread {
+                safeRunOnUiThread {
                     Toast.makeText(this, getString(R.string.update_check_failed, e.message ?: "未知错误"), Toast.LENGTH_LONG).show()
                 }
             }
@@ -1298,8 +1323,10 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         sheet.spinnerFontColor.adapter = colorAdapter
         val currentColorIdx = colorKeys.indexOf(prefs.fontColor).coerceAtLeast(0)
         sheet.spinnerFontColor.setSelection(currentColorIdx)
+        var skipFontColorInit = true  // 跳过初始化时的回调
         sheet.spinnerFontColor.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: android.view.View?, position: Int, id: Long) {
+                if (skipFontColorInit) { skipFontColorInit = false; return }
                 prefs.fontColor = colorKeys[position]
                 Logger.i("MainActivity", "字体颜色: ${colorKeys[position]}")
                 applySettingsToWeb()
@@ -1351,7 +1378,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
             VaultIndex.clear()
             val encoded = VaultSearch.ensureEncoded(Uri.parse(vaultStr))
             VaultIndex.scanInBackground(this, encoded) {
-                runOnUiThread {
+                safeRunOnUiThread {
                     val count = VaultIndex.entryCount()
                     Toast.makeText(this, getString(R.string.rescan_done, count), Toast.LENGTH_SHORT).show()
                 }
@@ -1522,11 +1549,11 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
         dialog.show()
     }
 
-    /** 日志查看弹窗：倒序显示，默认仅警告/错误，支持切换全部。使用 RecyclerView 高效渲染 5000+ 条 */
+    /** 日志查看弹窗：倒序显示，默认显示全部日志，支持切换仅错误。使用 RecyclerView 高效渲染 5000+ 条 */
     private fun showLogViewer() {
-        var showAll = false
+        var showAll = true  // 默认显示全部日志
         val logEntries = mutableListOf<String>()
-        logEntries.addAll(Logger.getSummaryEntries())
+        logEntries.addAll(Logger.getAllEntries())
 
         val rvAdapter = object : androidx.recyclerview.widget.RecyclerView.Adapter<androidx.recyclerview.widget.RecyclerView.ViewHolder>() {
             override fun onCreateViewHolder(parent: android.view.ViewGroup, viewType: Int): androidx.recyclerview.widget.RecyclerView.ViewHolder {
@@ -1617,7 +1644,7 @@ class MainActivity : AppCompatActivity(), MarkdownBridge.Provider {
                 refreshEntries()
                 Toast.makeText(this, "日志已清空", Toast.LENGTH_SHORT).show()
             }
-            .setNeutralButton("全部", null) // null listener 防止自动关闭
+            .setNeutralButton("仅错误", null) // null listener 防止自动关闭
             .create()
 
         dialogRef[0] = dialog
